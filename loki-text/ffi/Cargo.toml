@@ -1,0 +1,24 @@
+[package]
+name = "loki-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C ABI over the WordCraft engine for the Loki Text Kotlin Multiplatform front end"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+wordcraft-mcp = { path = "../../crates/mcp" }
+wordcraft-engine = { path = "../../crates/engine" }
+wordcraft-doc = { path = "../../crates/doc" }
+wordcraft-render = { path = "../../crates/render" }
+serde_json = "1"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unreachable = "deny"
