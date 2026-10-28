@@ -20,7 +20,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.input.pointer.pointerInput
+import app.loki.text.engine.SelectionGeometry
 import androidx.compose.ui.unit.dp
 import app.loki.text.engine.Engine
 import app.loki.text.engine.EngineException
@@ -34,6 +45,28 @@ import kotlinx.serialization.json.put
 expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap
 
 private const val MAX_PAGES = 50
+
+/** Pixels per point the pages are rendered at; the displayed factor can be smaller. */
+private const val PAGE_SCALE = 1.5f
+
+/** Moves the caret to a pixel position on a rendered page; the engine takes points. */
+private fun Engine.setCaret(page: Int, o: Offset, pxPerPt: Float, extend: Boolean) {
+    execute("caret.set", buildJsonObject {
+        put("page", page)
+        put("x", o.x / pxPerPt)
+        put("y", o.y / pxPerPt)
+        if (extend) put("extend", true)
+    })
+}
+
+private fun DrawScope.drawSelection(sel: SelectionGeometry, page: Int, scale: Float) {
+    for (r in sel.rects) if (r.page == page) {
+        drawRect(Color(0x553390FF), Offset(r.x * scale, r.y * scale), Size(r.w * scale, r.h * scale))
+    }
+    sel.caret?.takeIf { it.page == page }?.let { c ->
+        drawRect(Color.Black, Offset(c.x * scale, c.y * scale), Size(maxOf(c.w * scale, 1.5f), c.h * scale))
+    }
+}
 
 /**
  * Asks the user for a file path: an existing file to open, or (when [save]) a destination.
@@ -63,6 +96,7 @@ fun App() = MaterialTheme {
     var input by remember { mutableStateOf("") }
     var revision by remember { mutableStateOf(0) }
     var pages by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
+    var selection by remember { mutableStateOf(SelectionGeometry(null, emptyList())) }
     var status by remember { mutableStateOf("") }
 
     // Engine calls block, so they run off the UI thread; one at a time keeps edits ordered.
@@ -77,10 +111,11 @@ fun App() = MaterialTheme {
     }
 
     LaunchedEffect(revision) {
+        selection = withContext(Dispatchers.Default) { runCatching { engine.selection() }.getOrDefault(SelectionGeometry(null, emptyList())) }
         pages = withContext(Dispatchers.Default) {
-            val first = engine.renderPage(0, 1.5f) ?: return@withContext emptyList()
+            val first = engine.renderPage(0, PAGE_SCALE) ?: return@withContext emptyList()
             // Cap the page count so a huge document can't exhaust memory with bitmaps.
-            val rest = (1 until minOf(first.pages, MAX_PAGES)).mapNotNull { engine.renderPage(it, 1.5f) }
+            val rest = (1 until minOf(first.pages, MAX_PAGES)).mapNotNull { engine.renderPage(it, PAGE_SCALE) }
             (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }
         }
     }
@@ -113,7 +148,29 @@ fun App() = MaterialTheme {
         if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error)
         Column(Modifier.verticalScroll(rememberScrollState())) {
             pages.forEachIndexed { i, bitmap ->
-                Image(bitmap, contentDescription = "Page ${i + 1}", modifier = Modifier.padding(bottom = 12.dp))
+                // Image scales the bitmap down to fit the window width, so the points-to-pixels
+                // factor is measured from the displayed size rather than assumed to be PAGE_SCALE.
+                var shown by remember(bitmap) { mutableStateOf(IntSize.Zero) }
+                val pxPerPt = if (shown.width > 0) shown.width * PAGE_SCALE / bitmap.width else PAGE_SCALE
+                Image(
+                    bitmap,
+                    contentDescription = "Page ${i + 1}",
+                    modifier = Modifier.padding(bottom = 12.dp)
+                        .onSizeChanged { shown = it }
+                        .drawWithContent {
+                            drawContent()
+                            drawSelection(selection, i, pxPerPt)
+                        }
+                        .pointerInput(i, pxPerPt) {
+                            detectTapGestures { o -> scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
+                        }
+                        .pointerInput(i, pxPerPt) {
+                            detectDragGestures(
+                                onDragStart = { o -> scope.launch { perform { setCaret(i, o, pxPerPt, false) } } },
+                                onDrag = { change, _ -> scope.launch { perform { setCaret(i, change.position, pxPerPt, true) } } },
+                            )
+                        },
+                )
             }
         }
     }
