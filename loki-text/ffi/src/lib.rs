@@ -92,11 +92,34 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(e) => return err(format!("bad params JSON: {e}")),
         },
     };
+    if method == "loki.selection" {
+        return match catch_unwind(AssertUnwindSafe(|| selection_geometry(&mut session.inner.session))) {
+            Ok(v) => reply(json!({"ok": true, "result": v})),
+            Err(_) => err("internal error (panic caught) reading the selection"),
+        };
+    }
     match catch_unwind(AssertUnwindSafe(|| session.inner.call(method, params))) {
         Ok(Ok(result)) => reply(json!({"ok": true, "result": result})),
         Ok(Err(e)) => err(e),
         Err(_) => err("internal error (panic caught); the document may have been restored"),
     }
+}
+
+/// Where the caret and selection are drawn, in points from each page's top-left: `caret` is
+/// `{page, x, top, height, width}` (null when the focus has no place on a page) and `rects` the
+/// selection's `{page, x, y, w, h}` boxes (empty for a caret). Handled here rather than by the
+/// engine because the engine's replies carry positions, not geometry.
+fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
+    let (anchor, focus, hint) = (sess.sel.anchor.clone(), sess.sel.focus.clone(), sess.page_hint);
+    let collapsed = sess.sel.is_collapsed();
+    let l = sess.layout();
+    let caret = l.caret_on(&focus, hint).map(|c| json!({"page": c.page, "x": c.x, "top": c.top, "height": c.height, "width": c.width}));
+    let rects: Vec<Value> = if collapsed {
+        Vec::new()
+    } else {
+        l.selection_rects(&sess.doc, &anchor, &focus, hint).into_iter().map(|(pg, r)| json!({"page": pg, "x": r.x, "y": r.y, "w": r.w, "h": r.h})).collect()
+    };
+    json!({"caret": caret, "rects": rects, "pages": l.pages.len()})
 }
 
 /// Free a string returned by [`loki_call`]. Null is ignored.
