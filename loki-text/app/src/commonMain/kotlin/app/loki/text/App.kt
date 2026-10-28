@@ -31,6 +31,15 @@ import kotlinx.coroutines.withContext
 /** Turns straight-alpha RGBA into a Compose image; per platform (Skia). */
 expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap
 
+/** Toolbar buttons that run a WordCraft command by id with no parameters. */
+private val COMMAND_BUTTONS = listOf(
+    "Bold" to "format.bold",
+    "Italic" to "format.italic",
+    "Underline" to "format.underline",
+    "Undo" to "edit.undo",
+    "Redo" to "edit.redo",
+)
+
 /**
  * Walking skeleton: a text box feeds `text.insert`, Bold runs `format.bold`, and the page the Rust
  * engine laid out and rasterised is shown below. The real UI (ribbon, pane, caret, selection)
@@ -72,7 +81,9 @@ fun App() = MaterialTheme {
                 input = ""
                 scope.launch { perform { insertText(t) } }
             }, modifier = Modifier.padding(start = 8.dp)) { Text("Insert") }
-            Button(onClick = { scope.launch { perform { execute("format.bold") } } }, modifier = Modifier.padding(start = 8.dp)) { Text("Bold") }
+            for ((label, command) in COMMAND_BUTTONS) {
+                Button(onClick = { scope.launch { perform { execute(command) } } }, modifier = Modifier.padding(start = 8.dp)) { Text(label) }
+            }
         }
         if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error)
         Column(Modifier.verticalScroll(rememberScrollState())) {
