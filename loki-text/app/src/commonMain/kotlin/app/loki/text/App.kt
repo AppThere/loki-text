@@ -27,11 +27,19 @@ import app.loki.text.engine.EngineException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** Turns straight-alpha RGBA into a Compose image; per platform (Skia). */
 expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap
 
 private const val MAX_PAGES = 50
+
+/**
+ * Asks the user for a file path: an existing file to open, or (when [save]) a destination.
+ * Null when cancelled or when the platform has no picker yet. Blocks; call off the UI thread.
+ */
+expect fun pickFile(save: Boolean): String?
 
 /** Toolbar buttons that run a WordCraft command by id with no parameters. */
 private val COMMAND_BUTTONS = listOf(
@@ -89,6 +97,18 @@ fun App() = MaterialTheme {
             for ((label, command) in COMMAND_BUTTONS) {
                 Button(onClick = { scope.launch { perform { execute(command) } } }, modifier = Modifier.padding(start = 8.dp)) { Text(label) }
             }
+            Button(onClick = {
+                scope.launch {
+                    val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
+                    perform { execute("file.open", buildJsonObject { put("path", path) }) }
+                }
+            }, modifier = Modifier.padding(start = 8.dp)) { Text("Open") }
+            Button(onClick = {
+                scope.launch {
+                    val path = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch
+                    perform { execute("file.saveAs", buildJsonObject { put("path", path) }) }
+                }
+            }, modifier = Modifier.padding(start = 8.dp)) { Text("Save As") }
         }
         if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error)
         Column(Modifier.verticalScroll(rememberScrollState())) {

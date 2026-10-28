@@ -19,6 +19,9 @@ actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
     return Bitmap.createBitmap(px, width, height, Bitmap.Config.ARGB_8888).asImageBitmap()
 }
 
+// TODO: Storage Access Framework picker (ActivityResultContracts.OpenDocument / CreateDocument).
+actual fun pickFile(save: Boolean): String? = null
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
