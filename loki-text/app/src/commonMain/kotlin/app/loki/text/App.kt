@@ -27,7 +27,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.ImageBitmap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.pointer.pointerInput
@@ -99,10 +105,12 @@ fun App() = MaterialTheme {
     var selection by remember { mutableStateOf(SelectionGeometry(null, emptyList())) }
     var status by remember { mutableStateOf("") }
 
-    // Engine calls block, so they run off the UI thread; one at a time keeps edits ordered.
+    // Engine calls block, so they run off the UI thread. The native session is not thread-safe,
+    // so every call (edits, geometry, rendering) goes through this lock, in the order issued.
+    val engineLock = remember { Mutex() }
     suspend fun perform(block: Engine.() -> Unit) {
         status = try {
-            withContext(Dispatchers.Default) { engine.block() }
+            engineLock.withLock { withContext(Dispatchers.Default) { engine.block() } }
             revision++
             ""
         } catch (e: EngineException) {
@@ -111,13 +119,19 @@ fun App() = MaterialTheme {
     }
 
     LaunchedEffect(revision) {
-        selection = withContext(Dispatchers.Default) { runCatching { engine.selection() }.getOrDefault(SelectionGeometry(null, emptyList())) }
-        pages = withContext(Dispatchers.Default) {
-            val first = engine.renderPage(0, PAGE_SCALE) ?: return@withContext emptyList()
-            // Cap the page count so a huge document can't exhaust memory with bitmaps.
-            val rest = (1 until minOf(first.pages, MAX_PAGES)).mapNotNull { engine.renderPage(it, PAGE_SCALE) }
-            (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }
+        // Geometry and pixels come from the same engine state and are published together, so the
+        // caret is never drawn over a page image from before the edit.
+        val (sel, bitmaps) = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val sel = runCatching { engine.selection() }.getOrDefault(SelectionGeometry(null, emptyList()))
+                val first = engine.renderPage(0, PAGE_SCALE) ?: return@withContext sel to emptyList()
+                // Cap the page count so a huge document can't exhaust memory with bitmaps.
+                val rest = (1 until minOf(first.pages, MAX_PAGES)).mapNotNull { engine.renderPage(it, PAGE_SCALE) }
+                sel to (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }
+            }
         }
+        selection = sel
+        pages = bitmaps
     }
 
     val scope = rememberCoroutineScope()
@@ -146,11 +160,22 @@ fun App() = MaterialTheme {
             }, modifier = Modifier.padding(start = 8.dp)) { Text("Save As") }
         }
         if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error)
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+        val pageFocus = remember { FocusRequester() }
+        Column(
+            Modifier.verticalScroll(rememberScrollState())
+                .focusRequester(pageFocus)
+                .onPreviewKeyEvent { e ->
+                    val k = keyCommand(e) ?: return@onPreviewKeyEvent false
+                    scope.launch { perform { execute(k.command, k.params) } }
+                    true
+                }
+                .focusable(),
+        ) {
             pages.forEachIndexed { i, bitmap ->
                 // Image scales the bitmap down to fit the window width, so the points-to-pixels
                 // factor is measured from the displayed size rather than assumed to be PAGE_SCALE.
-                var shown by remember(bitmap) { mutableStateOf(IntSize.Zero) }
+                // Kept per page index, not per bitmap, so a new image doesn't reset it for a frame.
+                var shown by remember(i) { mutableStateOf(IntSize.Zero) }
                 val pxPerPt = if (shown.width > 0) shown.width * PAGE_SCALE / bitmap.width else PAGE_SCALE
                 Image(
                     bitmap,
@@ -162,7 +187,7 @@ fun App() = MaterialTheme {
                             drawSelection(selection, i, pxPerPt)
                         }
                         .pointerInput(i, pxPerPt) {
-                            detectTapGestures { o -> scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
+                            detectTapGestures { o -> pageFocus.requestFocus(); scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
                         }
                         .pointerInput(i, pxPerPt) {
                             detectDragGestures(
