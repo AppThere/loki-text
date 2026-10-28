@@ -13,3 +13,6 @@ actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 
 /** Called from the Xcode host app's SwiftUI/UIKit wrapper. */
 fun MainViewController() = ComposeUIViewController { App() }
+
+// TODO: UIDocumentPickerViewController.
+actual fun pickFile(save: Boolean): String? = null
