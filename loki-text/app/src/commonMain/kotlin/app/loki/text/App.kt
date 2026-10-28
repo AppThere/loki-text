@@ -31,6 +31,8 @@ import kotlinx.coroutines.withContext
 /** Turns straight-alpha RGBA into a Compose image; per platform (Skia). */
 expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap
 
+private const val MAX_PAGES = 50
+
 /** Toolbar buttons that run a WordCraft command by id with no parameters. */
 private val COMMAND_BUTTONS = listOf(
     "Bold" to "format.bold",
@@ -52,7 +54,7 @@ fun App() = MaterialTheme {
 
     var input by remember { mutableStateOf("") }
     var revision by remember { mutableStateOf(0) }
-    var page by remember { mutableStateOf<ImageBitmap?>(null) }
+    var pages by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
     var status by remember { mutableStateOf("") }
 
     // Engine calls block, so they run off the UI thread; one at a time keeps edits ordered.
@@ -67,8 +69,11 @@ fun App() = MaterialTheme {
     }
 
     LaunchedEffect(revision) {
-        page = withContext(Dispatchers.Default) {
-            engine.renderPage(0, 1.5f)?.let { rgbaToImageBitmap(it.width, it.height, it.rgba) }
+        pages = withContext(Dispatchers.Default) {
+            val first = engine.renderPage(0, 1.5f) ?: return@withContext emptyList()
+            // Cap the page count so a huge document can't exhaust memory with bitmaps.
+            val rest = (1 until minOf(first.pages, MAX_PAGES)).mapNotNull { engine.renderPage(it, 1.5f) }
+            (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }
         }
     }
 
@@ -87,7 +92,9 @@ fun App() = MaterialTheme {
         }
         if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error)
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            page?.let { Image(it, contentDescription = "Page 1") }
+            pages.forEachIndexed { i, bitmap ->
+                Image(bitmap, contentDescription = "Page ${i + 1}", modifier = Modifier.padding(bottom = 12.dp))
+            }
         }
     }
 }
