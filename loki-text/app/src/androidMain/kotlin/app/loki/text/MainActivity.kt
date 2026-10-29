@@ -22,6 +22,11 @@ actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 // TODO: Storage Access Framework picker (ActivityResultContracts.OpenDocument / CreateDocument).
 actual fun pickFile(save: Boolean): String? = null
 
+// TODO: android.content.ClipboardManager.
+actual fun clipboardText(): String? = null
+
+actual fun setClipboardText(text: String) {}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

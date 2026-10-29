@@ -16,3 +16,8 @@ fun MainViewController() = ComposeUIViewController { App() }
 
 // TODO: UIDocumentPickerViewController.
 actual fun pickFile(save: Boolean): String? = null
+
+// TODO: UIPasteboard.generalPasteboard.
+actual fun clipboardText(): String? = null
+
+actual fun setClipboardText(text: String) {}
