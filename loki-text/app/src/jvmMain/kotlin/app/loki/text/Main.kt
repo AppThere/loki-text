@@ -6,6 +6,9 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import java.awt.FileDialog
+import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.StringSelection
 import java.awt.Frame
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -20,6 +23,14 @@ actual fun pickFile(save: Boolean): String? {
     dialog.isVisible = true
     val name = dialog.file ?: return null
     return java.io.File(dialog.directory ?: "", name).path
+}
+
+actual fun clipboardText(): String? = runCatching {
+    Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
+}.getOrNull()
+
+actual fun setClipboardText(text: String) {
+    runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) }
 }
 
 fun main() = application {

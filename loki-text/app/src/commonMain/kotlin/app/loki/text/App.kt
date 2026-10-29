@@ -44,7 +44,10 @@ import app.loki.text.engine.EngineException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /** Turns straight-alpha RGBA into a Compose image; per platform (Skia). */
@@ -80,6 +83,16 @@ private fun DrawScope.drawSelection(sel: SelectionGeometry, page: Int, scale: Fl
  */
 expect fun pickFile(save: Boolean): String?
 
+/** Clipboards round-trip text with different line endings and trailing newlines; ignore those. */
+private fun sameClipboardText(a: String, b: String) =
+    a.replace("\r\n", "\n").replace('\r', '\n').trimEnd('\n') == b.replace("\r\n", "\n").replace('\r', '\n').trimEnd('\n')
+
+/** The system clipboard's text, or null when it has none (or the platform has no binding yet). */
+expect fun clipboardText(): String?
+
+/** Puts [text] on the system clipboard. */
+expect fun setClipboardText(text: String)
+
 /** Toolbar buttons that run a WordCraft command by id with no parameters. */
 private val COMMAND_BUTTONS = listOf(
     "Bold" to "format.bold",
@@ -87,6 +100,9 @@ private val COMMAND_BUTTONS = listOf(
     "Underline" to "format.underline",
     "Undo" to "edit.undo",
     "Redo" to "edit.redo",
+    "Cut" to "edit.cut",
+    "Copy" to "edit.copy",
+    "Paste" to "edit.paste",
 )
 
 /**
@@ -118,6 +134,34 @@ fun App() = MaterialTheme {
         }
     }
 
+    // Runs a command, bridging the system clipboard: Copy and Cut hand the engine's text to it,
+    // and Paste passes its text in (the engine pastes its own richer copy when the text matches).
+    var lastCopied by remember { mutableStateOf<String?>(null) }
+    suspend fun runCommand(command: String, params: JsonObject = JsonObject(emptyMap())) {
+        var p = params
+        if (command == "edit.paste") {
+            val text = withContext(Dispatchers.Default) { clipboardText() }
+            val ours = lastCopied
+            if (text != null && ours != null && sameClipboardText(text, ours)) {
+                // Still our own copy: no `text`, so the engine pastes its formatted fragment.
+                p = JsonObject(emptyMap())
+            } else if (!text.isNullOrEmpty()) {
+                if (ours != null) println("paste: clipboard text differs from last copy: [$text] vs [$ours]")
+                p = buildJsonObject { put("text", text) }
+            }
+        }
+        perform {
+            val r = execute(command, p)
+            if (command == "edit.copy" || command == "edit.cut") {
+                val text = (r as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull
+                if (!text.isNullOrEmpty()) {
+                    setClipboardText(text)
+                    lastCopied = text
+                }
+            }
+        }
+    }
+
     LaunchedEffect(revision) {
         // Geometry and pixels come from the same engine state and are published together, so the
         // caret is never drawn over a page image from before the edit.
@@ -144,7 +188,7 @@ fun App() = MaterialTheme {
                 scope.launch { perform { insertText(t) } }
             }, modifier = Modifier.padding(start = 8.dp)) { Text("Insert") }
             for ((label, command) in COMMAND_BUTTONS) {
-                Button(onClick = { scope.launch { perform { execute(command) } } }, modifier = Modifier.padding(start = 8.dp)) { Text(label) }
+                Button(onClick = { scope.launch { runCommand(command) } }, modifier = Modifier.padding(start = 8.dp)) { Text(label) }
             }
             Button(onClick = {
                 scope.launch {
@@ -166,7 +210,7 @@ fun App() = MaterialTheme {
                 .focusRequester(pageFocus)
                 .onPreviewKeyEvent { e ->
                     val k = keyCommand(e) ?: return@onPreviewKeyEvent false
-                    scope.launch { perform { execute(k.command, k.params) } }
+                    scope.launch { runCommand(k.command, k.params) }
                     true
                 }
                 .focusable(),
