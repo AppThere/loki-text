@@ -18,6 +18,8 @@ fun MainViewController() = ComposeUIViewController { App() }
 actual fun pickFile(save: Boolean): String? = null
 
 // TODO: UIPasteboard.generalPasteboard.
+actual fun publishFile(path: String) {}
+
 actual fun clipboardText(): String? = null
 
 actual fun setClipboardText(text: String) {}

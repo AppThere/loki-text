@@ -98,6 +98,20 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(_) => err("internal error (panic caught) reading the selection"),
         };
     }
+    if method == "loki.viewport" {
+        // Reflowing views (Web Layout, Read Mode) wrap to the window; the engine keeps these
+        // transient numbers on the session's view and offers no command to set them.
+        let dim = |k: &str| params.get(k).and_then(Value::as_f64).filter(|v| v.is_finite()).map(|v| v.clamp(144.0, 20_000.0) as f32);
+        let v = &mut session.inner.session.view;
+        if let Some(w) = dim("width") {
+            v.web_width = w;
+            v.read_width = w;
+        }
+        if let Some(h) = dim("height") {
+            v.read_height = h;
+        }
+        return reply(json!({"ok": true, "result": null}));
+    }
     match catch_unwind(AssertUnwindSafe(|| session.inner.call(method, params))) {
         Ok(Ok(result)) => reply(json!({"ok": true, "result": result})),
         Ok(Err(e)) => err(e),

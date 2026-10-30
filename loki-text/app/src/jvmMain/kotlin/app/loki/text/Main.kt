@@ -25,6 +25,8 @@ actual fun pickFile(save: Boolean): String? {
     return java.io.File(dialog.directory ?: "", name).path
 }
 
+actual fun publishFile(path: String) {}
+
 actual fun clipboardText(): String? = runCatching {
     Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
 }.getOrNull()
