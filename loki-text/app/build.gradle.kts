@@ -35,6 +35,7 @@ kotlin {
             implementation(compose.ui)
             implementation(libs.coroutines.core)
             implementation(libs.serialization.json)
+            implementation(libs.lucide)
         }
         // JNA binding shared by the two JVM-based targets.
         val jnaMain by creating { dependsOn(commonMain.get()) }
