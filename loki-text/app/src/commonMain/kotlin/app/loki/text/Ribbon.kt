@@ -5,6 +5,20 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.composables.icons.lucide.ChevronLeft
+import com.composables.icons.lucide.ChevronRight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.composables.icons.lucide.Menu
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -227,10 +241,22 @@ private fun CommandMenu(items: List<RibbonItem>, onRun: (String) -> Unit, button
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun Ribbon(tabs: List<RibbonTab>, styles: List<StylePreview>, onApplyStyle: (String) -> Unit, onRun: (String) -> Unit) {
+fun Ribbon(
+    tabs: List<RibbonTab>,
+    styles: List<StylePreview>,
+    onApplyStyle: (String) -> Unit,
+    onRun: (String) -> Unit,
+    sizeClass: SizeClass = SizeClass.Expanded,
+    /** Quick-access buttons; the full ribbon leaves them to the caller, the smaller ones put them in their row. */
+    leading: @Composable () -> Unit = {},
+) {
     if (tabs.isEmpty()) return
     var selected by remember { mutableStateOf(0) }
     val tab = tabs[selected.coerceIn(0, tabs.lastIndex)]
+    if (sizeClass != SizeClass.Expanded) {
+        SimpleRibbon(tabs, tab, { selected = it }, styles, onApplyStyle, onRun, leading)
+        return
+    }
     Column(Modifier.fillMaxWidth()) {
         // The row's own divider stops at the last tab; a divider of our own spans the whole width.
         ScrollableTabRow(selectedTabIndex = tabs.indexOf(tab), edgePadding = 0.dp, divider = {}) {
@@ -239,7 +265,7 @@ fun Ribbon(tabs: List<RibbonTab>, styles: List<StylePreview>, onApplyStyle: (Str
             }
         }
         HorizontalDivider()
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
+        ScrollRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             for (g in tab.groups) {
                 val featured = g.items.filter { hasRibbonIcon(it.id) }
                 val rest = g.items - featured.toSet()
@@ -278,5 +304,141 @@ fun Ribbon(tabs: List<RibbonTab>, styles: List<StylePreview>, onApplyStyle: (Str
             }
         }
         HorizontalDivider()
+    }
+}
+
+/** How much room the window gives the ribbon: a phone, a tablet, a desktop. */
+enum class SizeClass { Compact, Medium, Expanded }
+
+@Composable
+private fun VerticalRule() = VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
+
+/** The Styles gallery as a button that opens a grid of every style. */
+@Composable
+private fun StylesButton(styles: List<StylePreview>, onApplyStyle: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Styles", style = MaterialTheme.typography.labelLarge) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            LazyVerticalGrid(GridCells.Fixed(3), Modifier.width(80.dp * 3 + 8.dp).height(240.dp)) {
+                items(styles) { st -> StyleChip(st) { open = false; onApplyStyle(st.id) } }
+            }
+        }
+    }
+}
+
+/**
+ * The ribbon for small windows: the tabs, and under them one row of icons instead of grouped
+ * panels, showing the selected tab's main commands. The row scrolls, and everything else is in the
+ * all-commands list, so no feature is out of reach.
+ */
+@Composable
+private fun SimpleRibbon(
+    tabs: List<RibbonTab>,
+    tab: RibbonTab,
+    onSelect: (Int) -> Unit,
+    styles: List<StylePreview>,
+    onApplyStyle: (String) -> Unit,
+    onRun: (String) -> Unit,
+    leading: @Composable () -> Unit,
+) {
+    var showAll by remember { mutableStateOf(false) }
+    val shown = tab
+    Column(Modifier.fillMaxWidth()) {
+        ScrollableTabRow(selectedTabIndex = tabs.indexOf(tab), edgePadding = 0.dp, divider = {}) {
+            tabs.forEachIndexed { i, t -> Tab(selected = t === tab, onClick = { onSelect(i) }, text = { Text(t.name, style = MaterialTheme.typography.labelLarge) }) }
+        }
+        HorizontalDivider()
+        ScrollRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
+            leading()
+            VerticalRule()
+            IconButton(onClick = { showAll = true }, modifier = Modifier.size(32.dp)) { Icon(Lucide.Menu, contentDescription = "All commands", modifier = Modifier.size(18.dp)) }
+            if (shown.name == "Home" && styles.isNotEmpty()) StylesButton(styles, onApplyStyle)
+            for (g in shown.groups) {
+                val featured = g.items.filter { hasRibbonIcon(it.id) }
+                if (featured.isEmpty()) continue
+                VerticalRule()
+                for (item in featured) CommandIconButton(item.id, item.label, item.shortcut) { onRun(item.id) }
+            }
+        }
+        HorizontalDivider()
+    }
+    if (showAll) AllCommandsDialog(tabs, tabs.indexOf(tab), onRun) { showAll = false }
+}
+
+/** One line of the all-commands list: a group heading (item null) or a command. */
+private class CommandRow(val heading: String?, val item: RibbonItem?)
+
+/** Every ribbon command, by tab and group, with a search box. */
+@Composable
+private fun AllCommandsDialog(tabs: List<RibbonTab>, initial: Int, onRun: (String) -> Unit, onDismiss: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var tabIx by remember { mutableStateOf(initial.coerceIn(0, tabs.lastIndex)) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f), shape = RoundedCornerShape(12.dp), tonalElevation = 6.dp) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search commands") }, modifier = Modifier.weight(1f).padding(8.dp))
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
+                if (query.isBlank()) {
+                    ScrollableTabRow(selectedTabIndex = tabIx, edgePadding = 0.dp, divider = {}) {
+                        tabs.forEachIndexed { i, t -> Tab(selected = i == tabIx, onClick = { tabIx = i }, text = { Text(t.name, style = MaterialTheme.typography.labelLarge) }) }
+                    }
+                }
+                HorizontalDivider()
+                val rows = remember(query, tabIx, tabs) {
+                    val out = ArrayList<CommandRow>()
+                    val q = query.trim()
+                    for ((ti, t) in tabs.withIndex()) {
+                        if (q.isEmpty() && ti != tabIx) continue
+                        for (g in t.groups) {
+                            val hits = if (q.isEmpty()) g.items else g.items.filter { it.label.contains(q, ignoreCase = true) }
+                            if (hits.isEmpty()) continue
+                            out += CommandRow(if (q.isEmpty()) g.name.ifEmpty { t.name } else "${t.name} › ${g.name.ifEmpty { t.name }}", null)
+                            hits.mapTo(out) { CommandRow(null, it) }
+                        }
+                    }
+                    out
+                }
+                LazyColumn(Modifier.weight(1f)) {
+                    items(rows) { r ->
+                        val item = r.item
+                        if (item == null) {
+                            Text(r.heading.orEmpty(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
+                        } else {
+                            Row(Modifier.fillMaxWidth().clickable { onDismiss(); onRun(item.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(28.dp), contentAlignment = Alignment.CenterStart) { if (hasRibbonIcon(item.id)) RibbonIcon(item.id) }
+                                Text(item.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                if (item.shortcut.isNotEmpty()) Text(displayShortcut(item.shortcut), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A row that scrolls sideways. Touch can drag it; a mouse can't, so arrow buttons appear at an
+ * end that has more to show.
+ */
+@Composable
+private fun ScrollRow(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+    val state = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        if (state.canScrollBackward) {
+            IconButton(onClick = { scope.launch { state.animateScrollBy(-320f) } }, modifier = Modifier.size(28.dp)) {
+                Icon(Lucide.ChevronLeft, contentDescription = "Scroll left", modifier = Modifier.size(18.dp))
+            }
+        }
+        Row(Modifier.weight(1f).horizontalScroll(state), verticalAlignment = Alignment.CenterVertically, content = content)
+        if (state.canScrollForward) {
+            IconButton(onClick = { scope.launch { state.animateScrollBy(320f) } }, modifier = Modifier.size(28.dp)) {
+                Icon(Lucide.ChevronRight, contentDescription = "Scroll right", modifier = Modifier.size(18.dp))
+            }
+        }
     }
 }
