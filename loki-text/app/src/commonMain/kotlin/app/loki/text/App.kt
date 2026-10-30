@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -93,17 +92,8 @@ expect fun clipboardText(): String?
 /** Puts [text] on the system clipboard. */
 expect fun setClipboardText(text: String)
 
-/** Toolbar buttons that run a WordCraft command by id with no parameters. */
-private val COMMAND_BUTTONS = listOf(
-    "Bold" to "format.bold",
-    "Italic" to "format.italic",
-    "Underline" to "format.underline",
-    "Undo" to "edit.undo",
-    "Redo" to "edit.redo",
-    "Cut" to "edit.cut",
-    "Copy" to "edit.copy",
-    "Paste" to "edit.paste",
-)
+/** Quick-access buttons above the ribbon: command ids with no parameters. */
+private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple("Redo", "edit.redo", "Ctrl+Y"))
 
 /**
  * Walking skeleton: a text box feeds `text.insert`, Bold runs `format.bold`, and the page the Rust
@@ -115,10 +105,13 @@ fun App() = MaterialTheme {
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
-    var input by remember { mutableStateOf("") }
     var revision by remember { mutableStateOf(0) }
     var pages by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
     var selection by remember { mutableStateOf(SelectionGeometry(null, emptyList())) }
+    var ribbon by remember { mutableStateOf<List<RibbonTab>>(emptyList()) }
+    var styles by remember { mutableStateOf<List<StylePreview>>(emptyList()) }
+    // Bumped when a command may have changed the styles (editing them, opening another file).
+    var stylesRevision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
 
     // Engine calls block, so they run off the UI thread. The native session is not thread-safe,
@@ -160,6 +153,19 @@ fun App() = MaterialTheme {
                 }
             }
         }
+        if (command.startsWith("styles.") || command.startsWith("file.")) stylesRevision++
+    }
+
+    LaunchedEffect(Unit) {
+        ribbon = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseRibbon(engine.commands()) }.getOrDefault(emptyList()) } }
+    }
+
+    LaunchedEffect(stylesRevision) {
+        styles = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching { parseStyles(engine.execute("styles.manage", buildJsonObject { put("sort", "recommended") })) }.getOrDefault(emptyList())
+            }
+        }
     }
 
     LaunchedEffect(revision) {
@@ -179,31 +185,32 @@ fun App() = MaterialTheme {
     }
 
     val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row {
-            OutlinedTextField(input, { input = it }, label = { Text("Text to insert") })
-            Button(onClick = {
-                val t = input
-                input = ""
-                scope.launch { perform { insertText(t) } }
-            }, modifier = Modifier.padding(start = 8.dp)) { Text("Insert") }
-            for ((label, command) in COMMAND_BUTTONS) {
-                Button(onClick = { scope.launch { runCommand(command) } }, modifier = Modifier.padding(start = 8.dp)) { Text(label) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            for ((label, command, shortcut) in QUICK_ACCESS) {
+                CommandIconButton(command, label, shortcut) { scope.launch { runCommand(command) } }
             }
-            Button(onClick = {
+            CommandIconButton("file.open", "Open", "") {
                 scope.launch {
                     val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
                     perform { execute("file.open", buildJsonObject { put("path", path) }) }
+                    stylesRevision++
                 }
-            }, modifier = Modifier.padding(start = 8.dp)) { Text("Open") }
-            Button(onClick = {
+            }
+            CommandIconButton("file.saveAs", "Save As", "") {
                 scope.launch {
                     val path = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch
                     perform { execute("file.saveAs", buildJsonObject { put("path", path) }) }
                 }
-            }, modifier = Modifier.padding(start = 8.dp)) { Text("Save As") }
+            }
         }
-        if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error)
+        Ribbon(
+            tabs = ribbon,
+            styles = styles,
+            onApplyStyle = { id -> scope.launch { runCommand("styles.apply", buildJsonObject { put("style", id) }) } },
+            onRun = { id -> scope.launch { runCommand(id) } },
+        )
+        if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         val pageFocus = remember { FocusRequester() }
         Column(
             Modifier.verticalScroll(rememberScrollState())
@@ -213,7 +220,8 @@ fun App() = MaterialTheme {
                     scope.launch { runCommand(k.command, k.params) }
                     true
                 }
-                .focusable(),
+                .focusable()
+                .padding(16.dp),
         ) {
             pages.forEachIndexed { i, bitmap ->
                 // Image scales the bitmap down to fit the window width, so the points-to-pixels

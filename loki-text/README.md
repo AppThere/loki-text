@@ -30,6 +30,12 @@ Desktop: `scripts/build-desktop.sh && gradle :app:run` (add a Gradle wrapper wit
 `scripts/build-ios.sh`, then a thin Xcode host app calls `MainViewControllerKt.MainViewController()`
 (the Xcode project is not generated yet).
 
+## Credits
+
+Ribbon icons are [Lucide](https://lucide.dev) (ISC licence; some derived from Feather, MIT),
+through the Compose Multiplatform package `com.composables:icons-lucide-cmp`. They are a
+dependency, not files in this repository.
+
 ## Rules that still apply
 
 The repository rules in `CLAUDE.md` hold here: never crash (the FFI layer returns errors, and

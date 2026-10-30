@@ -6,6 +6,7 @@ agp = "8.11.1"
 jna = "5.17.0"
 coroutines = "1.10.2"
 serialization = "1.9.0"
+lucide = "2.2.1"
 androidx-activity = "1.10.1"
 
 [libraries]
@@ -13,6 +14,7 @@ jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jna-android = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
+lucide = { module = "com.composables:icons-lucide-cmp", version.ref = "lucide" }
 serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 
