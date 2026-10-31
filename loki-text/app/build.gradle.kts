@@ -37,6 +37,9 @@ kotlin {
             implementation(libs.serialization.json)
             implementation(libs.lucide)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
         // JNA binding shared by the two JVM-based targets.
         val jnaMain by creating { dependsOn(commonMain.get()) }
         jvmMain {
@@ -70,6 +73,16 @@ android {
     }
     // libloki_ffi.so per ABI, built by scripts/build-android.sh into src/androidMain/jniLibs.
     sourceSets["main"].jniLibs.srcDir("src/androidMain/jniLibs")
+
+    buildTypes {
+        release {
+            // Not debuggable, so Compose and ART optimise fully. Signed with the debug key ONLY so a
+            // release build installs for local performance tests; real distribution needs its own key.
+            // R8 stays off until JNA's reflection has keep rules.
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 }
 
 compose.desktop {

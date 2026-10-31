@@ -56,6 +56,8 @@ class Engine(private val native: NativeEngine = NativeEngine()) : AutoCloseable 
     fun insertText(text: String) = execute("text.insert", buildJsonObject { put("text", text) })
     fun inspect(): JsonElement = call("document.inspect")
     fun commands(): JsonElement = call("engine.commands")
+    /** Commands that can't run now (with the reason) and the toggles that are on; see `ffi/src/state.rs`. */
+    fun commandState(): JsonElement = call("loki.commandState")
     /** The window size in points, for the reflowing views (Web Layout, Read Mode). */
     fun setViewport(widthPt: Float, heightPt: Float) {
         call("loki.viewport", buildJsonObject { put("width", widthPt); put("height", heightPt) })

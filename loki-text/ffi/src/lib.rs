@@ -19,6 +19,8 @@ use std::ptr;
 use serde_json::{Value, json};
 use wordcraft_mcp::{Backend, Headless};
 
+mod state;
+
 /// Opaque to C. One per open window/document tab.
 pub struct LokiSession {
     inner: Headless,
@@ -29,9 +31,7 @@ const MAX_PIXELS: u64 = 8192 * 8192;
 
 fn reply(v: Value) -> *mut c_char {
     // JSON text never contains NUL, but fall back to a fixed error rather than panic.
-    CString::new(v.to_string())
-        .or_else(|_| CString::new(r#"{"ok":false,"error":"reply contained NUL"}"#))
-        .map_or(ptr::null_mut(), CString::into_raw)
+    CString::new(v.to_string()).or_else(|_| CString::new(r#"{"ok":false,"error":"reply contained NUL"}"#)).map_or(ptr::null_mut(), CString::into_raw)
 }
 
 fn err(msg: impl Into<String>) -> *mut c_char {
@@ -98,6 +98,12 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(_) => err("internal error (panic caught) reading the selection"),
         };
     }
+    if method == "loki.commandState" {
+        return match catch_unwind(AssertUnwindSafe(|| state::command_state(&mut session.inner.session))) {
+            Ok(v) => reply(json!({"ok": true, "result": v})),
+            Err(_) => err("internal error (panic caught) reading command state"),
+        };
+    }
     if method == "loki.viewport" {
         // Reflowing views (Web Layout, Read Mode) wrap to the window; the engine keeps these
         // transient numbers on the session's view and offers no command to set them.
@@ -131,7 +137,10 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
     let rects: Vec<Value> = if collapsed {
         Vec::new()
     } else {
-        l.selection_rects(&sess.doc, &anchor, &focus, hint).into_iter().map(|(pg, r)| json!({"page": pg, "x": r.x, "y": r.y, "w": r.w, "h": r.h})).collect()
+        l.selection_rects(&sess.doc, &anchor, &focus, hint)
+            .into_iter()
+            .map(|(pg, r)| json!({"page": pg, "x": r.x, "y": r.y, "w": r.w, "h": r.h}))
+            .collect()
     };
     json!({"caret": caret, "rects": rects, "pages": l.pages.len()})
 }

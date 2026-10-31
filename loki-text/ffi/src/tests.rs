@@ -45,3 +45,24 @@ fn hostile_arguments_are_errors_not_crashes() {
         loki_session_free(s);
     }
 }
+
+#[test]
+fn command_state_reports_disabled_commands_and_toggles() {
+    let s = loki_session_new();
+    let r = call(s, "loki.commandState", None);
+    assert_eq!(r["ok"], true, "{r}");
+    let st = &r["result"];
+    // Nothing is selected, so Cut can't run; it says why.
+    assert!(st["disabled"]["edit.cut"].as_str().is_some_and(|w| !w.is_empty()), "{st}");
+    assert!(st["disabled"].get("format.bold").is_none());
+    let on = |st: &Value, id: &str| st["on"].as_array().is_some_and(|a| a.iter().any(|v| v == id));
+    assert!(on(st, "para.alignLeft") && on(st, "view.printLayout") && !on(st, "format.bold"), "{st}");
+
+    call(s, "engine.execute", Some(r#"{"command":"format.bold"}"#));
+    call(s, "engine.execute", Some(r#"{"command":"para.alignCenter"}"#));
+    call(s, "engine.execute", Some(r#"{"command":"view.webLayout"}"#));
+    let st = &call(s, "loki.commandState", None)["result"];
+    assert!(on(st, "format.bold") && on(st, "para.alignCenter") && !on(st, "para.alignLeft"), "{st}");
+    assert!(on(st, "view.webLayout") && !on(st, "view.printLayout"), "{st}");
+    unsafe { loki_session_free(s) };
+}
