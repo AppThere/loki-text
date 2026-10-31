@@ -6,6 +6,7 @@ import androidx.compose.ui.window.ComposeUIViewController
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.Image
+import platform.Foundation.NSTemporaryDirectory
 import org.jetbrains.skia.ImageInfo
 
 actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap =
@@ -19,6 +20,11 @@ actual fun pickFile(save: Boolean): String? = null
 
 // TODO: UIPasteboard.generalPasteboard.
 actual fun publishFile(path: String) {}
+
+actual fun printJobPath(): String = NSTemporaryDirectory() + "loki-print.pdf"
+
+// Printing needs UIPrintInteractionController, which isn't wired up yet.
+actual fun printPdf(path: String, jobName: String): String? = "Printing is not available on iOS yet"
 
 actual fun clipboardText(): String? = null
 

@@ -11,6 +11,8 @@ import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,7 +84,7 @@ import kotlinx.serialization.json.put
 expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap
 
 /** The desk the pages sit on. */
-private val DESK_COLOR = Color(0xFFD5D7DB)
+private val DESK_COLOR = Color(0xFFCCD6E3)
 
 /** Narrower than this, a page (8.5 in) doesn't fit with its margins, and the text reflows instead. */
 private val NARROW_WINDOW = 640.dp
@@ -91,12 +93,27 @@ private val NARROW_WINDOW = 640.dp
 private const val MAX_WEB_WIDTH_PT = 640f
 
 /** Everything one render publishes together. */
-private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?)
+private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState)
 
-/** What `review.wordCount` reports: for the selection when text is selected, else the document. */
-private class Counts(val words: Int, val pages: Int, val characters: Int)
+/** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
+internal class Counts(val words: Int, val pages: Int, val characters: Int)
 
 private fun JsonObject.int(key: String) = this[key]?.jsonPrimitive?.intOrNull ?: 0
+
+internal fun parseCounts(o: JsonObject) = Counts(o.int("words"), o.int("pages"), o.int("charactersWithSpaces"))
+
+/** The last failure reported by [warnOnce]; a snapshot runs on every keystroke, so a repeat would flood the log. */
+private var lastWarning: String? = null
+
+/** Logs [what] failed with [e] (once per distinct message) and returns [fallback], so a broken engine call is visible, not silent. */
+private fun <T> warnOnce(what: String, e: Throwable, fallback: T): T {
+    val msg = "$what failed: ${e.message ?: e::class.simpleName}"
+    if (msg != lastWarning) {
+        lastWarning = msg
+        println(msg)
+    }
+    return fallback
+}
 
 private const val MIN_ZOOM = 0.5f
 private const val MAX_ZOOM = 2f
@@ -141,6 +158,15 @@ private fun sameClipboardText(a: String, b: String) =
  */
 expect fun publishFile(path: String)
 
+/** A fresh temporary path for the PDF that a print job sends, writable by the engine. Call off the UI thread. */
+expect fun printJobPath(): String
+
+/**
+ * Hands the PDF at [path] to the platform's print service (Android's print dialog, the desktop's
+ * print handler). Returns why it couldn't, or null once the job has been handed over. Call off the UI thread.
+ */
+expect fun printPdf(path: String, jobName: String): String?
+
 /** The system clipboard's text, or null when it has none (or the platform has no binding yet). */
 expect fun clipboardText(): String?
 
@@ -156,13 +182,15 @@ private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple(
  * builds on the same three calls: execute, inspect, renderPage.
  */
 @Composable
-fun App() = MaterialTheme {
+fun App() = MaterialTheme(colorScheme = LokiColors) {
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
     var revision by remember { mutableStateOf(0) }
     var pages by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
     var selection by remember { mutableStateOf(SelectionGeometry(null, emptyList())) }
+    // Which commands can't run now and which toggles are on; refreshed with every render.
+    var commandState by remember { mutableStateOf(CommandState.EMPTY) }
     var ribbon by remember { mutableStateOf<List<RibbonTab>>(emptyList()) }
     var styles by remember { mutableStateOf<List<StylePreview>>(emptyList()) }
     // Bumped when a command may have changed the styles (editing them, opening another file).
@@ -240,25 +268,28 @@ fun App() = MaterialTheme {
                     val v = engine.execute("view.state") as JsonObject
                     v["mode"]?.jsonPrimitive?.contentOrNull != "print" && v["readMode"]?.jsonPrimitive?.booleanOrNull != true
                 }.getOrDefault(false)
-                val counts = runCatching { (engine.execute("review.wordCount") as JsonObject).let { Counts(it.int("words"), it.int("pages"), it.int("characters")) } }.getOrNull()
-                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts)
+                val counts = runCatching { parseCounts(engine.execute("review.wordCount") as JsonObject) }.getOrElse { warnOnce("review.wordCount", it, null) }
+                val cmdState = runCatching { parseCommandState(engine.commandState()) }.getOrElse { warnOnce("loki.commandState", it, CommandState.EMPTY) }
+                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
                 val cap = (MAX_PAGES / (zoom * zoom)).toInt().coerceAtLeast(5)
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, scale) }
-                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts)
+                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState)
             }
         }
         selection = snap.selection
         flat = snap.flat
         counts = snap.counts
+        commandState = snap.commands
         pages = snap.pages
     }
 
+    var showAbout by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val quickAccess: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
-            CommandIconButton(command, label, shortcut) { scope.launch { runCommand(command) } }
+            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
         }
         CommandIconButton("file.open", "Open", "") {
             scope.launch {
@@ -274,8 +305,18 @@ fun App() = MaterialTheme {
                     if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
             }
         }
+        CommandIconButton("file.print", "Print", "") {
+            scope.launch {
+                // The engine lays the pages out and writes the PDF; the platform prints it.
+                val path = withContext(Dispatchers.Default) { printJobPath() }
+                perform { execute("file.printPdf", buildJsonObject { put("path", path) }) }
+                if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
+            }
+        }
+        CommandIconButton("app.about", "About $APP_NAME", "") { showAbout = true }
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    if (showAbout) AboutDialog { showAbout = false }
     val sizeClass = when {
         maxWidth < 600.dp -> SizeClass.Compact
         maxWidth < 900.dp -> SizeClass.Medium
@@ -286,6 +327,7 @@ fun App() = MaterialTheme {
         Ribbon(
             tabs = ribbon,
             styles = styles,
+            state = commandState,
             sizeClass = sizeClass,
             leading = quickAccess,
             onApplyStyle = { id -> scope.launch { runCommand("styles.apply", buildJsonObject { put("style", id) }) } },
@@ -397,9 +439,9 @@ private fun StatusBar(
     onZoom: (Float) -> Unit,
     onView: (String) -> Unit,
 ) {
-    HorizontalDivider()
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        val small = MaterialTheme.typography.labelMedium
+    MaterialTheme(colorScheme = OnBarColors) { CompositionLocalProvider(LocalContentColor provides Color.White) {
+    Row(Modifier.fillMaxWidth().background(BarBlue).padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        val small = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
         if (status.isNotEmpty()) {
             Text(status, style = small, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         } else {
@@ -434,8 +476,9 @@ private fun StatusBar(
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                 modifier = Modifier.height(28.dp),
             ) {
-                Text(label, style = small, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
+                Text(label, style = small, fontWeight = if (active) FontWeight.ExtraBold else FontWeight.Normal)
             }
         }
     }
+    } }
 }
