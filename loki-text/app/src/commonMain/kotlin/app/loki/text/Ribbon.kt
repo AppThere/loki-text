@@ -50,6 +50,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import com.composables.icons.lucide.Ellipsis
 import com.composables.icons.lucide.Lucide
 import androidx.compose.material3.PlainTooltip
@@ -58,6 +59,8 @@ import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,6 +76,36 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * Commands that look parameterless to [runsWithoutParams] but fail without input: their params
+ * are optional keys with a rule in prose ("give `tag` or `source`", "`path` or `text`"), or they
+ * act on an id a control has to supply. They need a dialog or control, so no plain button.
+ */
+internal val NEEDS_INPUT = setOf(
+    "format.font", "styles.addToGallery", "layout.size", "design.themeColors",
+    "references.citation", "references.markCitation", "references.markEntry",
+    "select.addObject", "select.objects",
+    "review.compare", "review.combine", "review.resolveComment",
+    "tools.updateStyles",
+)
+
+/**
+ * What the engine says about its commands right now: those that can't run (with the reason) and
+ * the toggles that are on (bold at the caret, the ruler showing, …). From `loki.commandState`.
+ */
+class CommandState(val disabled: Map<String, String>, val on: Set<String>) {
+    companion object {
+        val EMPTY = CommandState(emptyMap(), emptySet())
+    }
+}
+
+fun parseCommandState(state: JsonElement): CommandState {
+    val o = state as? JsonObject ?: return CommandState.EMPTY
+    val disabled = (o["disabled"] as? JsonObject).orEmpty().mapNotNull { (id, why) -> why.jsonPrimitive.contentOrNull?.let { id to it } }.toMap()
+    val on = (o["on"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
+    return CommandState(disabled, on)
+}
 
 /** One ribbon button: a WordCraft command that runs with no parameters. */
 class RibbonItem(val id: String, val label: String, val shortcut: String)
@@ -107,7 +140,7 @@ fun parseRibbon(commands: JsonElement): List<RibbonTab> {
         fun str(k: String) = o[k]?.jsonPrimitive?.contentOrNull ?: ""
         val id = str("id")
         // `ui.*` commands act on a window that this front end does not have yet.
-        if (id.isEmpty() || id.startsWith("ui.") || !runsWithoutParams(str("params"))) continue
+        if (id.isEmpty() || id.startsWith("ui.") || id in NEEDS_INPUT || !runsWithoutParams(str("params"))) continue
         val parts = str("location").split(" › ")
         val tab = parts.firstOrNull()?.takeIf { it in TAB_ORDER } ?: continue
         val group = parts.getOrNull(1) ?: ""
@@ -164,7 +197,7 @@ private fun StyleChip(style: StylePreview, onClick: () -> Unit) {
         onClick = onClick,
         shape = RoundedCornerShape(4.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        color = surface,
+        color = Color.White,
         modifier = Modifier.padding(end = 4.dp, bottom = 4.dp).width(76.dp),
     ) {
         Column(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -188,18 +221,65 @@ private fun StyleChip(style: StylePreview, onClick: () -> Unit) {
 /** An icon button with a tooltip naming the command and its shortcut. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommandIconButton(id: String, label: String, shortcut: String, onClick: () -> Unit) {
+fun CommandIconButton(
+    id: String,
+    label: String,
+    shortcut: String,
+    /** Why the command can't run now (greys the button and is shown in the tooltip); null when it can. */
+    disabledReason: String? = null,
+    /** A toggle that is on, drawn pressed. */
+    checked: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val name = if (shortcut.isEmpty()) label else "$label  (${displayShortcut(shortcut)})"
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = { PlainTooltip { Text(if (shortcut.isEmpty()) label else "$label  (${displayShortcut(shortcut)})") } },
+        tooltip = { PlainTooltip { Text(if (disabledReason == null) name else "$name — $disabledReason") } },
         state = rememberTooltipState(),
     ) {
-        IconButton(onClick = onClick, modifier = Modifier.size(32.dp)) { RibbonIcon(id) }
+        IconButton(
+            onClick = onClick,
+            enabled = disabledReason == null,
+            colors = IconButtonDefaults.iconButtonColors(containerColor = if (checked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent),
+            modifier = Modifier.size(32.dp),
+        ) { RibbonIcon(id) }
     }
 }
 
+/** The ribbon's tab bar: white labels on [BarBlue], a white bar under the selected tab. */
+@Composable
+private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    ScrollableTabRow(
+        selectedTabIndex = selectedIndex,
+        edgePadding = 0.dp,
+        containerColor = BarBlue,
+        contentColor = Color.White,
+        indicator = { positions ->
+            positions.getOrNull(selectedIndex)?.let { TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(it), height = 3.dp, color = Color.White) }
+        },
+        divider = {},
+    ) {
+        tabs.forEachIndexed { i, t ->
+            Tab(
+                selected = i == selectedIndex,
+                onClick = { onSelect(i) },
+                selectedContentColor = Color.White,
+                unselectedContentColor = Color.White.copy(alpha = 0.78f),
+                text = { Text(t.name, style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium) },
+            )
+        }
+    }
+}
+
+/** [CommandIconButton] for a ribbon item, with its state from [state]. */
+@Composable
+private fun StatefulIconButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
+    CommandIconButton(item.id, item.label, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
+
 /** Height of a group's content area: three rows of icon buttons. */
 private val GROUP_CONTENT_HEIGHT = 96.dp
+/** Room for a group's name under its buttons. */
+private val GROUP_NAME_HEIGHT = 16.dp
 
 /** The "more commands" button that opens a group's menu. */
 @Composable
@@ -211,18 +291,26 @@ private fun MoreButton(onClick: () -> Unit) {
 
 /** A button that opens a menu of commands. */
 @Composable
-private fun CommandMenu(items: List<RibbonItem>, onRun: (String) -> Unit, button: @Composable (onClick: () -> Unit) -> Unit) {
+private fun CommandMenu(items: List<RibbonItem>, state: CommandState, onRun: (String) -> Unit, button: @Composable (onClick: () -> Unit) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         button { open = true }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.widthIn(min = 240.dp)) {
             // Own rows rather than DropdownMenuItem, which caps an item at 280 dp and cuts long names.
             for (item in items) {
+                val off = item.id in state.disabled
                 Row(
-                    Modifier.fillMaxWidth().clickable { open = false; onRun(item.id) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().clickable(enabled = !off) { open = false; onRun(item.id) }.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(item.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false, modifier = Modifier.weight(1f))
+                    Text(
+                        (if (item.id in state.on) "✓ " else "") + item.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (off) MaterialTheme.colorScheme.outline else Color.Unspecified,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.weight(1f),
+                    )
                     if (item.shortcut.isNotEmpty()) {
                         Text(
                             displayShortcut(item.shortcut),
@@ -246,6 +334,7 @@ fun Ribbon(
     styles: List<StylePreview>,
     onApplyStyle: (String) -> Unit,
     onRun: (String) -> Unit,
+    state: CommandState = CommandState.EMPTY,
     sizeClass: SizeClass = SizeClass.Expanded,
     /** Quick-access buttons; the full ribbon leaves them to the caller, the smaller ones put them in their row. */
     leading: @Composable () -> Unit = {},
@@ -254,19 +343,17 @@ fun Ribbon(
     var selected by remember { mutableStateOf(0) }
     val tab = tabs[selected.coerceIn(0, tabs.lastIndex)]
     if (sizeClass != SizeClass.Expanded) {
-        SimpleRibbon(tabs, tab, { selected = it }, styles, onApplyStyle, onRun, leading)
+        SimpleRibbon(tabs, tab, { selected = it }, styles, onApplyStyle, onRun, state, leading)
         return
     }
     Column(Modifier.fillMaxWidth()) {
         // The row's own divider stops at the last tab; a divider of our own spans the whole width.
-        ScrollableTabRow(selectedTabIndex = tabs.indexOf(tab), edgePadding = 0.dp, divider = {}) {
-            tabs.forEachIndexed { i, t ->
-                Tab(selected = t === tab, onClick = { selected = i }, text = { Text(t.name, style = MaterialTheme.typography.labelLarge) })
-            }
-        }
+        RibbonTabRow(tabs, tabs.indexOf(tab)) { selected = it }
         HorizontalDivider()
         ScrollRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            for (g in tab.groups) {
+            tab.groups.forEachIndexed { gi, g ->
+                // A rule between neighbouring groups, as tall as a group's buttons plus its name.
+                if (gi > 0) VerticalDivider(Modifier.height(GROUP_CONTENT_HEIGHT + GROUP_NAME_HEIGHT), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
                 val featured = g.items.filter { hasRibbonIcon(it.id) }
                 val rest = g.items - featured.toSet()
                 Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -279,23 +366,23 @@ fun Ribbon(
                                 LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.width(80.dp * 4).height(GROUP_CONTENT_HEIGHT)) {
                                     items(styles) { st -> StyleChip(st) { onApplyStyle(st.id) } }
                                 }
-                                CommandMenu(g.items, onRun) { openMenu -> MoreButton(openMenu) }
+                                CommandMenu(g.items, state, onRun) { openMenu -> MoreButton(openMenu) }
                             }
                         } else if (featured.isEmpty() && g.items.size == 1) {
                             // A menu of one is pointless: the group is just that command's button.
                             val only = g.items.single()
-                            TextButton(onClick = { onRun(only.id) }, contentPadding = PaddingValues(horizontal = 10.dp)) {
+                            TextButton(onClick = { onRun(only.id) }, enabled = only.id !in state.disabled, contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 Text(only.label, style = MaterialTheme.typography.labelLarge)
                             }
                         } else if (featured.isEmpty()) {
                             // Nothing here has an icon yet: one button opens the group's commands by name.
-                            CommandMenu(g.items, onRun) { openMenu -> MoreButton(openMenu) }
+                            CommandMenu(g.items, state, onRun) { openMenu -> MoreButton(openMenu) }
                         } else {
                             // Fill all three rows of the group before widening it.
                             val perRow = ((featured.size + (if (rest.isNotEmpty()) 1 else 0) + 2) / 3).coerceAtLeast(1)
                             FlowRow(Modifier.widthIn(max = 32.dp * perRow + 16.dp), maxItemsInEachRow = perRow) {
-                                for (item in featured) CommandIconButton(item.id, item.label, item.shortcut) { onRun(item.id) }
-                                if (rest.isNotEmpty()) CommandMenu(rest, onRun) { openMenu -> MoreButton(openMenu) }
+                                for (item in featured) StatefulIconButton(item, state, onRun)
+                                if (rest.isNotEmpty()) CommandMenu(rest, state, onRun) { openMenu -> MoreButton(openMenu) }
                             }
                         }
                     }
@@ -340,14 +427,13 @@ private fun SimpleRibbon(
     styles: List<StylePreview>,
     onApplyStyle: (String) -> Unit,
     onRun: (String) -> Unit,
+    state: CommandState,
     leading: @Composable () -> Unit,
 ) {
     var showAll by remember { mutableStateOf(false) }
     val shown = tab
     Column(Modifier.fillMaxWidth()) {
-        ScrollableTabRow(selectedTabIndex = tabs.indexOf(tab), edgePadding = 0.dp, divider = {}) {
-            tabs.forEachIndexed { i, t -> Tab(selected = t === tab, onClick = { onSelect(i) }, text = { Text(t.name, style = MaterialTheme.typography.labelLarge) }) }
-        }
+        RibbonTabRow(tabs, tabs.indexOf(tab), onSelect)
         HorizontalDivider()
         ScrollRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
             leading()
@@ -358,12 +444,12 @@ private fun SimpleRibbon(
                 val featured = g.items.filter { hasRibbonIcon(it.id) }
                 if (featured.isEmpty()) continue
                 VerticalRule()
-                for (item in featured) CommandIconButton(item.id, item.label, item.shortcut) { onRun(item.id) }
+                for (item in featured) StatefulIconButton(item, state, onRun)
             }
         }
         HorizontalDivider()
     }
-    if (showAll) AllCommandsDialog(tabs, tabs.indexOf(tab), onRun) { showAll = false }
+    if (showAll) AllCommandsDialog(tabs, tabs.indexOf(tab), state, onRun) { showAll = false }
 }
 
 /** One line of the all-commands list: a group heading (item null) or a command. */
@@ -371,7 +457,7 @@ private class CommandRow(val heading: String?, val item: RibbonItem?)
 
 /** Every ribbon command, by tab and group, with a search box. */
 @Composable
-private fun AllCommandsDialog(tabs: List<RibbonTab>, initial: Int, onRun: (String) -> Unit, onDismiss: () -> Unit) {
+private fun AllCommandsDialog(tabs: List<RibbonTab>, initial: Int, state: CommandState, onRun: (String) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var tabIx by remember { mutableStateOf(initial.coerceIn(0, tabs.lastIndex)) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -407,9 +493,13 @@ private fun AllCommandsDialog(tabs: List<RibbonTab>, initial: Int, onRun: (Strin
                         if (item == null) {
                             Text(r.heading.orEmpty(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
                         } else {
-                            Row(Modifier.fillMaxWidth().clickable { onDismiss(); onRun(item.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val why = state.disabled[item.id]
+                            Row(Modifier.fillMaxWidth().clickable(enabled = why == null) { onDismiss(); onRun(item.id) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(28.dp), contentAlignment = Alignment.CenterStart) { if (hasRibbonIcon(item.id)) RibbonIcon(item.id) }
-                                Text(item.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.label, style = MaterialTheme.typography.bodyMedium, color = if (why == null) Color.Unspecified else MaterialTheme.colorScheme.outline)
+                                    if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                }
                                 if (item.shortcut.isNotEmpty()) Text(displayShortcut(item.shortcut), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                             }
                         }

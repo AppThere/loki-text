@@ -12,6 +12,8 @@ import com.composables.icons.lucide.ALargeSmall
 import com.composables.icons.lucide.Accessibility
 import com.composables.icons.lucide.AppWindow
 import com.composables.icons.lucide.Bold
+import com.composables.icons.lucide.Info
+import com.composables.icons.lucide.Printer
 import com.composables.icons.lucide.BookA
 import com.composables.icons.lucide.BookMarked
 import com.composables.icons.lucide.BookOpen
@@ -120,6 +122,9 @@ import com.composables.icons.lucide.ZoomOut
 private fun iconFor(id: String): ImageVector? = when (id) {
     "file.open" -> Lucide.FolderOpen
     "file.saveAs" -> Lucide.Save
+    "file.print" -> Lucide.Printer
+    // Not an engine command: the About button in the quick-access toolbar.
+    "app.about" -> Lucide.Info
     "edit.paste" -> Lucide.ClipboardPaste
     "edit.cut" -> Lucide.Scissors
     "edit.copy" -> Lucide.Copy

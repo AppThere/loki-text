@@ -10,6 +10,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import java.io.File
 import java.util.concurrent.CompletableFuture
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
+import java.io.FileOutputStream
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.graphics.ImageBitmap
@@ -85,6 +93,42 @@ actual fun publishFile(path: String) {
     val host = activity ?: return
     val uri = pendingSaves[path] ?: return
     host.contentResolver.openOutputStream(uri, "wt")?.use { out -> File(path).inputStream().use { it.copyTo(out) } }
+}
+
+/** A new file per job: the print service reads it after we return, so a later job must not overwrite it. */
+actual fun printJobPath(): String {
+    val dir = File((activity?.cacheDir ?: File(System.getProperty("java.io.tmpdir") ?: ".")), "print").apply { mkdirs() }
+    // Spooled jobs are done with their file long before an hour has passed.
+    val stale = System.currentTimeMillis() - 60 * 60 * 1000
+    dir.listFiles()?.filter { it.lastModified() < stale }?.forEach { it.delete() }
+    return File(dir, "job-${System.nanoTime()}.pdf").path
+}
+
+actual fun printPdf(path: String, jobName: String): String? {
+    val host = activity ?: return "No window to print from"
+    val file = File(path)
+    if (!file.isFile) return "The document was not exported for printing"
+    val manager = host.getSystemService(PrintManager::class.java) ?: return "This device has no print service"
+    host.runOnUiThread { manager.print(jobName, PdfPrintAdapter(file, jobName), null) }
+    return null
+}
+
+/** Feeds an already-made PDF to Android's print dialog, which handles printer choice and options. */
+private class PdfPrintAdapter(private val file: File, private val name: String) : PrintDocumentAdapter() {
+    override fun onLayout(old: PrintAttributes?, new: PrintAttributes?, cancel: CancellationSignal?, callback: LayoutResultCallback, extras: Bundle?) {
+        if (cancel?.isCanceled == true) return callback.onLayoutCancelled()
+        val info = PrintDocumentInfo.Builder(name).setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(PrintDocumentInfo.PAGE_COUNT_UNKNOWN).build()
+        callback.onLayoutFinished(info, true)
+    }
+
+    override fun onWrite(pages: Array<PageRange>, destination: ParcelFileDescriptor, cancel: CancellationSignal?, callback: WriteResultCallback) {
+        try {
+            file.inputStream().use { input -> FileOutputStream(destination.fileDescriptor).use { input.copyTo(it) } }
+            callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+        } catch (e: Exception) {
+            callback.onWriteFailed(e.message)
+        }
+    }
 }
 
 private fun clipboard(): ClipboardManager? = activity?.getSystemService(ClipboardManager::class.java)

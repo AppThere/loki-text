@@ -27,6 +27,26 @@ actual fun pickFile(save: Boolean): String? {
 
 actual fun publishFile(path: String) {}
 
+actual fun printJobPath(): String = java.nio.file.Files.createTempFile("loki-print-", ".pdf").toFile().apply { deleteOnExit() }.path
+
+actual fun printPdf(path: String, jobName: String): String? {
+    val file = java.io.File(path)
+    if (!file.isFile) return "The document was not exported for printing"
+    if (!java.awt.Desktop.isDesktopSupported()) return "This system has no print handler"
+    val desktop = java.awt.Desktop.getDesktop()
+    return try {
+        when {
+            desktop.isSupported(java.awt.Desktop.Action.PRINT) -> desktop.print(file)
+            // Many systems only open a PDF; its viewer has the print dialog.
+            desktop.isSupported(java.awt.Desktop.Action.OPEN) -> desktop.open(file)
+            else -> return "This system has no print handler"
+        }
+        null
+    } catch (e: Exception) {
+        "Could not print: ${e.message ?: e::class.simpleName}"
+    }
+}
+
 actual fun clipboardText(): String? = runCatching {
     Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
 }.getOrNull()
