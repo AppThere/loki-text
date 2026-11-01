@@ -34,6 +34,7 @@ fun keyCommand(e: KeyEvent): KeyCommand? {
             Key.U -> KeyCommand("format.underline")
             Key.Z -> KeyCommand(if (e.isShiftPressed) "edit.redo" else "edit.undo")
             Key.Y -> KeyCommand("edit.redo")
+            Key.S -> KeyCommand("file.save")
             Key.A -> KeyCommand("select.all")
             Key.C -> KeyCommand("edit.copy")
             Key.X -> KeyCommand("edit.cut")

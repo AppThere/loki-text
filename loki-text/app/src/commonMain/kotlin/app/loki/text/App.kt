@@ -17,6 +17,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.horizontalScroll
@@ -96,7 +97,7 @@ private val NARROW_WINDOW = 640.dp
 private const val MAX_WEB_WIDTH_PT = 640f
 
 /** Everything one render publishes together. */
-private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState)
+private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState, val dirty: Boolean = false)
 
 /** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
 internal class Counts(val words: Int, val pages: Int, val characters: Int)
@@ -185,7 +186,7 @@ private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple(
  * builds on the same three calls: execute, inspect, renderPage.
  */
 @Composable
-fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
+fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
@@ -199,6 +200,9 @@ fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(
     // Bumped when a command may have changed the styles (editing them, opening another file).
     var stylesRevision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
+    // Unsaved changes, from the engine; and the action (Open, closing the window) waiting on the user's answer.
+    var unsaved by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var flat by remember { mutableStateOf(false) }
     // Client-side zoom: the pages are simply rendered at a larger or smaller scale.
     var zoom by remember { mutableStateOf(1f) }
@@ -277,52 +281,61 @@ fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(
                 }.getOrDefault(false)
                 val counts = runCatching { parseCounts(engine.execute("review.wordCount") as JsonObject) }.getOrElse { warnOnce("review.wordCount", it, null) }
                 val cmdState = runCatching { parseCommandState(engine.commandState()) }.getOrElse { warnOnce("loki.commandState", it, CommandState.EMPTY) }
-                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState)
+                val dirty = runCatching { (engine.execute("file.info") as? JsonObject)?.get("dirty")?.jsonPrimitive?.booleanOrNull == true }.getOrDefault(false)
+                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState, dirty)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
                 val cap = (MAX_PAGES / (zoom * zoom)).toInt().coerceAtLeast(5)
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, scale) }
-                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState)
+                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty)
             }
         }
         selection = snap.selection
         flat = snap.flat
         counts = snap.counts
         commandState = snap.commands
+        unsaved = snap.dirty
         pages = snap.pages
     }
 
     var showAbout by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // Save, or Save As for a document that has no file yet. True when the document was written
+    // (and published, on platforms that need it); false when the user cancelled or it failed.
+    suspend fun saveDocument(): Boolean {
+        var saved: String? = null
+        perform {
+            val r = execute("file.save") as? JsonObject
+            if (r?.get("saved")?.jsonPrimitive?.booleanOrNull == true) saved = r["path"]?.jsonPrimitive?.contentOrNull
+        }
+        if (status.isNotEmpty()) return false
+        val path = saved ?: (withContext(Dispatchers.Default) { pickFile(save = true) } ?: return false).also { target ->
+            perform { execute("file.saveAs", buildJsonObject { put("path", target) }) }
+            if (status.isNotEmpty()) return false
+        }
+        withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
+        return true
+    }
+
+    // Runs [action] now, or after the user has chosen what to do with unsaved changes.
+    fun guarded(action: () -> Unit) { if (unsaved) pendingAction = action else action() }
+
+    LaunchedEffect(closeRequest) { if (closeRequest > 0) guarded(onClose) }
     val quickAccess: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
             CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
         }
         CommandIconButton("file.open", "Open", "") {
-            scope.launch {
-                val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
-                perform { execute("file.open", buildJsonObject { put("path", path) }) }
-                stylesRevision++
-            }
-        }
-        CommandIconButton("file.save", "Save", "Ctrl+S") {
-            scope.launch {
-                var saved: String? = null
-                perform {
-                    val r = execute("file.save") as? JsonObject
-                    if (r?.get("saved")?.jsonPrimitive?.contentOrNull == "true") saved = r["path"]?.jsonPrimitive?.contentOrNull
-                }
-                val path = saved
-                if (path != null) {
-                    if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
-                } else if (status.isEmpty()) {
-                    // A document that has never been saved has no file yet: ask for one, as Save As does.
-                    val target = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch
-                    perform { execute("file.saveAs", buildJsonObject { put("path", target) }) }
-                    if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(target) } }
+            guarded {
+                scope.launch {
+                    val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
+                    perform { execute("file.open", buildJsonObject { put("path", path) }) }
+                    stylesRevision++
                 }
             }
         }
+        CommandIconButton("file.save", "Save", "Ctrl+S") { scope.launch { saveDocument() } }
         CommandIconButton("file.saveAs", "Save As", "") {
             scope.launch {
                 val path = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch
@@ -343,6 +356,25 @@ fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    pendingAction?.let { action ->
+        AlertDialog(
+            onDismissRequest = { pendingAction = null },
+            title = { Text("Save changes?") },
+            text = { Text("This document has changes that are not saved. If you don't save them, they will be lost.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingAction = null
+                    scope.launch { if (saveDocument()) action() }
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { pendingAction = null; action() }) { Text("Don't save") }
+                    TextButton(onClick = { pendingAction = null }) { Text("Cancel") }
+                }
+            },
+        )
+    }
     val sizeClass = when {
         maxWidth < 600.dp -> SizeClass.Compact
         maxWidth < 900.dp -> SizeClass.Medium
@@ -386,7 +418,8 @@ fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(
                 .focusRequester(pageFocus)
                 .onPreviewKeyEvent { e ->
                     val k = keyCommand(e) ?: return@onPreviewKeyEvent false
-                    scope.launch { runCommand(k.command, k.params) }
+                    // Save may need a file picker, so it goes through the same path as the button.
+                    if (k.command == "file.save") scope.launch { saveDocument() } else scope.launch { runCommand(k.command, k.params) }
                     true
                 }
                 .focusable()

@@ -1,6 +1,9 @@
 package app.loki.text
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
@@ -56,5 +59,7 @@ actual fun setClipboardText(text: String) {
 }
 
 fun main() = application {
-    Window(onCloseRequest = ::exitApplication, title = "Loki Text") { App() }
+    // Closing asks about unsaved changes first; App calls exitApplication once that is settled.
+    var closeRequest by remember { mutableStateOf(0) }
+    Window(onCloseRequest = { closeRequest++ }, title = "Loki Text") { App(closeRequest, ::exitApplication) }
 }
