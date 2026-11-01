@@ -41,6 +41,9 @@ Generated-in-code art is original and has no file to list: the UI icon set (`cra
 | `assets/fonts/JetBrainsMono-Regular.ttf` | The JetBrains Mono Project Authors | https://github.com/JetBrains/JetBrainsMono | OFL-1.1 (`assets/fonts/OFL-JetBrainsMono.txt`) | Open-source typeface (Latin UI/document font, carried over from DesignCraft) |
 | `assets/fonts/OFL-Inter.txt` | (licence text) | upstream project | — |  |
 | `assets/fonts/OFL-JetBrainsMono.txt` | (licence text) | upstream project | — |  |
+| `loki-text/app/src/commonMain/composeResources/font/atkinson_hyperlegible_next.ttf` | The Atkinson Hyperlegible Next Project Authors (Braille Institute, Applied Design Works) | https://github.com/googlefonts/atkinson-hyperlegible-next | OFL-1.1 (`loki-text/app/src/commonMain/composeResources/font/OFL-AtkinsonHyperlegibleNext.txt`) | Loki Text control font (variable, upright), bundled in the app |
+| `loki-text/app/src/commonMain/composeResources/font/atkinson_hyperlegible_next_italic.ttf` | The Atkinson Hyperlegible Next Project Authors (Braille Institute, Applied Design Works) | https://github.com/googlefonts/atkinson-hyperlegible-next | OFL-1.1 (`loki-text/app/src/commonMain/composeResources/font/OFL-AtkinsonHyperlegibleNext.txt`) | Loki Text control font (variable, italic), bundled in the app |
+| `loki-text/app/src/commonMain/composeResources/font/OFL-AtkinsonHyperlegibleNext.txt` | (licence text) | upstream project | — |  |
 | `assets/fonts/OFL-SourceSans3.txt` | (licence text) | upstream project | — |  |
 | `assets/fonts/OFL-SourceSerif4.txt` | (licence text) | upstream project | — |  |
 | `assets/fonts/SourceSans3-Bold.ttf` | Paul D. Hunt / Frank Grießhammer, Adobe (released as open source) | https://github.com/adobe-fonts/source-sans · https://github.com/adobe-fonts/source-serif | OFL-1.1 (`assets/fonts/OFL-SourceSans3.txt`, `OFL-SourceSerif4.txt`) | Open-source typeface (Latin UI/document font, carried over from DesignCraft) |
