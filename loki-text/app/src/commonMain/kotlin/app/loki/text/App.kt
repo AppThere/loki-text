@@ -249,6 +249,10 @@ fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(
     }
 
     LaunchedEffect(Unit) {
+        if (installDocumentFonts(engine, engineLock)) revision++
+    }
+
+    LaunchedEffect(Unit) {
         ribbon = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseRibbon(engine.commands()) }.getOrDefault(emptyList()) } }
     }
 
