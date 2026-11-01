@@ -9,6 +9,9 @@ import com.composables.icons.lucide.ZoomIn
 import com.composables.icons.lucide.ZoomOut
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
@@ -182,7 +185,7 @@ private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple(
  * builds on the same three calls: execute, inspect, renderPage.
  */
 @Composable
-fun App() = MaterialTheme(colorScheme = LokiColors) {
+fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
@@ -315,7 +318,8 @@ fun App() = MaterialTheme(colorScheme = LokiColors) {
         }
         CommandIconButton("app.about", "About $APP_NAME", "") { showAbout = true }
     }
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
     val sizeClass = when {
         maxWidth < 600.dp -> SizeClass.Compact

@@ -33,6 +33,7 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.material3)
             implementation(compose.ui)
+            implementation(compose.components.resources)
             implementation(libs.coroutines.core)
             implementation(libs.serialization.json)
             implementation(libs.lucide)
@@ -83,6 +84,10 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+compose.resources {
+    packageOfResClass = "app.loki.text.res"
 }
 
 compose.desktop {
