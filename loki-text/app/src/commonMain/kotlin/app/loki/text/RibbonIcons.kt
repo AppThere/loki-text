@@ -121,7 +121,7 @@ import com.composables.icons.lucide.ZoomOut
 
 private fun iconFor(id: String): ImageVector? = when (id) {
     "file.open" -> Lucide.FolderOpen
-    "file.saveAs" -> Lucide.Save
+    "file.save", "file.saveAs" -> Lucide.Save
     "file.print" -> Lucide.Printer
     // Not an engine command: the About button in the quick-access toolbar.
     "app.about" -> Lucide.Info

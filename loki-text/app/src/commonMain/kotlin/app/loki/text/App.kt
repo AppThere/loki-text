@@ -305,6 +305,24 @@ fun App() = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(
                 stylesRevision++
             }
         }
+        CommandIconButton("file.save", "Save", "Ctrl+S") {
+            scope.launch {
+                var saved: String? = null
+                perform {
+                    val r = execute("file.save") as? JsonObject
+                    if (r?.get("saved")?.jsonPrimitive?.contentOrNull == "true") saved = r["path"]?.jsonPrimitive?.contentOrNull
+                }
+                val path = saved
+                if (path != null) {
+                    if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
+                } else if (status.isEmpty()) {
+                    // A document that has never been saved has no file yet: ask for one, as Save As does.
+                    val target = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch
+                    perform { execute("file.saveAs", buildJsonObject { put("path", target) }) }
+                    if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(target) } }
+                }
+            }
+        }
         CommandIconButton("file.saveAs", "Save As", "") {
             scope.launch {
                 val path = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch

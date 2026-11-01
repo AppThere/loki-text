@@ -84,6 +84,8 @@ actual fun pickFile(save: Boolean): String? {
             pendingSaves[file.path] = uri
         } else {
             resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return null
+            // Save writes back to the document the user opened (when the provider allows writing).
+            pendingSaves[file.path] = uri
         }
         file.path
     } catch (e: Exception) {
@@ -95,7 +97,8 @@ actual fun pickFile(save: Boolean): String? {
 actual fun publishFile(path: String) {
     val host = activity ?: return
     val uri = pendingSaves[path] ?: return
-    host.contentResolver.openOutputStream(uri, "wt")?.use { out -> File(path).inputStream().use { it.copyTo(out) } }
+    // A read-only source (or a revoked grant) must not crash the app; Save As remains.
+    runCatching { host.contentResolver.openOutputStream(uri, "wt")?.use { out -> File(path).inputStream().use { it.copyTo(out) } } }
 }
 
 /** A new file per job: the print service reads it after we return, so a later job must not overwrite it. */
