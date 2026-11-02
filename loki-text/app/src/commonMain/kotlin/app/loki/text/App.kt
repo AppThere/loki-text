@@ -97,7 +97,7 @@ private val NARROW_WINDOW = 640.dp
 private const val MAX_WEB_WIDTH_PT = 640f
 
 /** Everything one render publishes together. */
-private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState, val dirty: Boolean = false)
+private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState, val dirty: Boolean = false, val format: FormatState = FormatState.EMPTY)
 
 /** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
 internal class Counts(val words: Int, val pages: Int, val characters: Int)
@@ -196,6 +196,9 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
     // Which commands can't run now and which toggles are on; refreshed with every render.
     var commandState by remember { mutableStateOf(CommandState.EMPTY) }
     var ribbon by remember { mutableStateOf<List<RibbonTab>>(emptyList()) }
+    // The selection's font, size and colours, for the Home tab's boxes; and the families to pick from.
+    var formatState by remember { mutableStateOf(FormatState.EMPTY) }
+    var fontFamilies by remember { mutableStateOf<List<String>>(emptyList()) }
     var styles by remember { mutableStateOf<List<StylePreview>>(emptyList()) }
     // Bumped when a command may have changed the styles (editing them, opening another file).
     var stylesRevision by remember { mutableStateOf(0) }
@@ -254,6 +257,11 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
 
     LaunchedEffect(Unit) {
         if (installDocumentFonts(engine, engineLock)) revision++
+        fontFamilies = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching { parseFontFamilies(engine.execute("font.list", buildJsonObject { put("all", true) })) }.getOrDefault(emptyList())
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -281,19 +289,21 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                 }.getOrDefault(false)
                 val counts = runCatching { parseCounts(engine.execute("review.wordCount") as JsonObject) }.getOrElse { warnOnce("review.wordCount", it, null) }
                 val cmdState = runCatching { parseCommandState(engine.commandState()) }.getOrElse { warnOnce("loki.commandState", it, CommandState.EMPTY) }
+                val fmt = runCatching { parseFormatState(engine.execute("format.state")) }.getOrDefault(FormatState.EMPTY)
                 val dirty = runCatching { (engine.execute("file.info") as? JsonObject)?.get("dirty")?.jsonPrimitive?.booleanOrNull == true }.getOrDefault(false)
-                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState, dirty)
+                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState, dirty, fmt)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
                 val cap = (MAX_PAGES / (zoom * zoom)).toInt().coerceAtLeast(5)
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, scale) }
-                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty)
+                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty, fmt)
             }
         }
         selection = snap.selection
         flat = snap.flat
         counts = snap.counts
         commandState = snap.commands
+        formatState = snap.format
         unsaved = snap.dirty
         pages = snap.pages
     }
@@ -390,6 +400,9 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
             leading = quickAccess,
             onApplyStyle = { id -> scope.launch { runCommand("styles.apply", buildJsonObject { put("style", id) }) } },
             onRun = { id -> scope.launch { runCommand(id) } },
+            format = formatState,
+            fonts = fontFamilies,
+            onRunWith = { id, params -> scope.launch { runCommand(id, params) } },
         )
         val pageFocus = remember { FocusRequester() }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(if (flat) Color.White else DESK_COLOR)) {

@@ -3,6 +3,7 @@
 
 use serde_json::{Map, Value, json};
 use wordcraft_doc::Align;
+use wordcraft_doc::props::LineSpacing;
 use wordcraft_engine::Session;
 
 /// `format.state` keys that are toggles, with the command that flips each.
@@ -80,5 +81,34 @@ pub fn command_state(sess: &mut Session) -> Value {
     if lists.multilevel {
         on.push("para.multilevel");
     }
-    json!({"disabled": disabled, "on": on})
+    json!({"disabled": disabled, "on": on, "layout": layout_state(sess)})
+}
+
+/// A number the UI may show: finite, else null (a document can carry anything).
+fn num(v: f32) -> Value {
+    if v.is_finite() { json!(v) } else { Value::Null }
+}
+
+/// What the Layout tab's menus mark as current: the paragraph at the caret (indents and spacing in
+/// points, line spacing as a multiple when it is one) and its section (orientation, paper,
+/// margins and columns presets, as the engine names them; null when none matches).
+fn layout_state(sess: &Session) -> Value {
+    let para = sess.doc.para_at(&sess.sel.focus).map(|p| sess.doc.styles.resolve_para(&p.props));
+    let sect = wordcraft_engine::cmd::page::sect(sess);
+    let multiple = para.as_ref().and_then(|r| match r.line_spacing {
+        LineSpacing::Multiple(m) => Some(m),
+        _ => None,
+    });
+    json!({
+        "indentLeft": para.as_ref().map_or(Value::Null, |r| num(r.indent_left)),
+        "indentRight": para.as_ref().map_or(Value::Null, |r| num(r.indent_right)),
+        "firstLine": para.as_ref().map_or(Value::Null, |r| num(r.indent_first)),
+        "spaceBefore": para.as_ref().map_or(Value::Null, |r| num(r.space_before)),
+        "spaceAfter": para.as_ref().map_or(Value::Null, |r| num(r.space_after)),
+        "lineSpacing": multiple.map_or(Value::Null, num),
+        "landscape": sect.landscape,
+        "paper": wordcraft_geom::paper_name(sect.page_w, sect.page_h),
+        "margins": wordcraft_engine::cmd::page::margins_preset_at(sess),
+        "columns": wordcraft_engine::cmd::page::columns_preset_at(sess),
+    })
 }

@@ -705,6 +705,7 @@ dependencies = [
  "serde_json",
  "wordcraft-doc",
  "wordcraft-engine",
+ "wordcraft-geom",
  "wordcraft-mcp",
  "wordcraft-render",
 ]
@@ -1400,11 +1401,11 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wordcraft-control-key"
-version = "0.11.0"
+version = "0.13.2"
 
 [[package]]
 name = "wordcraft-doc"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "base64 0.23.1",
  "log",
@@ -1417,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-docbin"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "cfb",
  "chrono",
@@ -1432,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-docx"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "aes",
  "base64 0.23.1",
@@ -1454,7 +1455,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-engine"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "chrono",
  "getrandom",
@@ -1482,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-fonts"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "brotli-decompressor",
  "harfrust",
@@ -1496,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-formats"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "cfb",
  "chardetng",
@@ -1508,12 +1509,13 @@ dependencies = [
  "quick-xml",
  "wordcraft-doc",
  "wordcraft-geom",
+ "wordcraft-metafile",
  "zip",
 ]
 
 [[package]]
 name = "wordcraft-geom"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "image",
  "serde",
@@ -1521,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-layout"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "image",
  "js-sys",
@@ -1541,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-mcp"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "log",
  "serde_json",
@@ -1553,7 +1555,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-metafile"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "kurbo",
  "thiserror",
@@ -1561,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-pdf"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "chrono",
  "craft-pdf",
@@ -1579,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-proof"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "log",
  "miniz_oxide 0.9.1",
@@ -1588,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-render"
-version = "0.11.0"
+version = "0.13.2"
 dependencies = [
  "image",
  "log",

@@ -1,5 +1,9 @@
 package app.loki.text
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.text.font.FontFamily
 import app.loki.text.engine.Engine
 import app.loki.text.res.Res
 import kotlin.io.encoding.Base64
@@ -51,3 +55,35 @@ internal suspend fun installDocumentFonts(engine: Engine, lock: Mutex): Boolean 
     installed = true
     return true
 }
+
+/** The bundled families Compose can draw a preview with, and the file of each one's regular face. */
+private val PREVIEW_FILES = mapOf(
+    "Carlito" to "Carlito-Regular.ttf",
+    "Caladea" to "Caladea-Regular.ttf",
+    "Tinos" to "Tinos-Regular.ttf",
+    "Cousine" to "Cousine-Regular.ttf",
+    "Arimo" to "Arimo-VariableFont_wght.ttf",
+    "Gelasio" to "Gelasio-VariableFont_wght.ttf",
+)
+
+/**
+ * Each bundled document font as a Compose family, so the font menu can show its names in their own
+ * typeface. Empty until the files are read; a file that fails to read is left out (that name just
+ * shows in the interface font).
+ */
+@Composable
+internal fun rememberPreviewFonts(): Map<String, FontFamily> {
+    val fonts by produceState(emptyMap<String, FontFamily>()) {
+        value = withContext(Dispatchers.Default) {
+            PREVIEW_FILES.mapNotNull { (family, file) ->
+                runCatching { family to (previewFontFamily(file, Res.readBytes("files/doc-fonts/$file")) ?: error("unsupported")) }
+                    .onFailure { println("preview font $file not read: ${it.message}") }
+                    .getOrNull()
+            }.toMap()
+        }
+    }
+    return fonts
+}
+
+/** A Compose family from a font file's bytes, or null where the platform can't make one. */
+expect fun previewFontFamily(identity: String, bytes: ByteArray): FontFamily?

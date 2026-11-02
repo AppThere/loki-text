@@ -63,3 +63,6 @@ fun main() = application {
     var closeRequest by remember { mutableStateOf(0) }
     Window(onCloseRequest = { closeRequest++ }, title = "Loki Text") { App(closeRequest, ::exitApplication) }
 }
+
+actual fun previewFontFamily(identity: String, bytes: ByteArray): androidx.compose.ui.text.font.FontFamily? =
+    runCatching { androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.platform.Font(identity, bytes)) }.getOrNull()

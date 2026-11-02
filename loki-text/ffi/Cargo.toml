@@ -12,6 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 wordcraft-mcp = { path = "../../crates/mcp" }
 wordcraft-engine = { path = "../../crates/engine" }
 wordcraft-doc = { path = "../../crates/doc" }
+wordcraft-geom = { path = "../../crates/geom" }
 wordcraft-render = { path = "../../crates/render" }
 serde_json = "1"
 
