@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.runtime.rememberCoroutineScope
@@ -94,17 +97,51 @@ internal val NEEDS_INPUT = setOf(
  * What the engine says about its commands right now: those that can't run (with the reason) and
  * the toggles that are on (bold at the caret, the ruler showing, …). From `loki.commandState`.
  */
-class CommandState(val disabled: Map<String, String>, val on: Set<String>) {
+class CommandState(val disabled: Map<String, String>, val on: Set<String>, val layout: LayoutState = LayoutState.EMPTY) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
     }
 }
 
+/**
+ * The paragraph and page settings at the caret that the Home and Layout menus mark as current:
+ * indents and spacing in points, line spacing as a multiple, and the engine's names for the
+ * section's margins and columns presets and its paper. A field is null when unknown.
+ */
+class LayoutState(
+    val indentLeft: Float?,
+    val indentRight: Float?,
+    val spaceBefore: Float?,
+    val spaceAfter: Float?,
+    val lineSpacing: Float?,
+    val landscape: Boolean?,
+    val paper: String?,
+    val margins: String?,
+    val columns: String?,
+) {
+    companion object {
+        val EMPTY = LayoutState(null, null, null, null, null, null, null, null, null)
+    }
+}
+
+fun parseLayoutState(e: JsonElement?): LayoutState {
+    val o = e as? JsonObject ?: return LayoutState.EMPTY
+    fun f(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.floatOrNull
+    fun t(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    return LayoutState(
+        f("indentLeft"), f("indentRight"), f("spaceBefore"), f("spaceAfter"), f("lineSpacing"),
+        (o["landscape"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull, t("paper"), t("margins"), t("columns"),
+    )
+}
+
+/** Is [value] (in points or a multiple) the one the engine reports, give or take rounding? */
+fun sameNumber(a: Float?, b: Float): Boolean = a != null && abs(a - b) < 0.01f
+
 fun parseCommandState(state: JsonElement): CommandState {
     val o = state as? JsonObject ?: return CommandState.EMPTY
     val disabled = (o["disabled"] as? JsonObject).orEmpty().mapNotNull { (id, why) -> why.jsonPrimitive.contentOrNull?.let { id to it } }.toMap()
     val on = (o["on"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
-    return CommandState(disabled, on)
+    return CommandState(disabled, on, parseLayoutState(o["layout"]))
 }
 
 /** One ribbon button: a WordCraft command that runs with no parameters. */
@@ -276,6 +313,25 @@ private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, onSelect: (I
 private fun StatefulIconButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
     CommandIconButton(item.id, item.label, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
 
+/** A large button with the command's name under its icon, with its state from [state]. */
+@Composable
+private fun StatefulBigButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
+    RibbonButton(item.id, item.label, ButtonSize.Big, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
+
+/** A small button with the command's name beside its icon. */
+@Composable
+private fun StatefulLabeledButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
+    RibbonButton(item.id, item.label, ButtonSize.Labeled, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
+
+/** The "more commands" entry of a group, as a labelled button. */
+@Composable
+private fun MoreLabeledButton(onClick: () -> Unit) {
+    TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp)) {
+        Icon(Lucide.Ellipsis, contentDescription = null, modifier = Modifier.size(16.dp))
+        Text("More", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 6.dp))
+    }
+}
+
 /** Height of a group's content area: three rows of icon buttons. */
 private val GROUP_CONTENT_HEIGHT = 96.dp
 /** Room for a group's name under its buttons. */
@@ -338,12 +394,22 @@ fun Ribbon(
     sizeClass: SizeClass = SizeClass.Expanded,
     /** Quick-access buttons; the full ribbon leaves them to the caller, the smaller ones put them in their row. */
     leading: @Composable () -> Unit = {},
+    /** The formatting at the selection, shown in the font and size boxes. */
+    format: FormatState = FormatState.EMPTY,
+    /** Font families for the font box. */
+    fonts: List<String> = emptyList(),
+    /** Runs a command with parameters (a font name, a colour). */
+    onRunWith: (String, JsonObject) -> Unit = { _, _ -> },
 ) {
     if (tabs.isEmpty()) return
     var selected by remember { mutableStateOf(0) }
     val tab = tabs[selected.coerceIn(0, tabs.lastIndex)]
+    val previews = rememberPreviewFonts()
+    val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith) {
+        RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith)
+    }
     if (sizeClass != SizeClass.Expanded) {
-        SimpleRibbon(tabs, tab, { selected = it }, styles, onApplyStyle, onRun, state, leading)
+        SimpleRibbon(tabs, tab, { selected = it }, styles, onApplyStyle, onRun, state, leading, env)
         return
     }
     Column(Modifier.fillMaxWidth()) {
@@ -358,8 +424,11 @@ fun Ribbon(
                 val rest = g.items - featured.toSet()
                 Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     // Every group's content gets the same height, so the names below line up.
-                    Box(Modifier.height(GROUP_CONTENT_HEIGHT), contentAlignment = Alignment.TopCenter) {
-                        if (tab.name == "Home" && g.name == "Styles" && styles.isNotEmpty()) {
+                    Box(Modifier.height(GROUP_CONTENT_HEIGHT), contentAlignment = if (hasCustomGroup(tab.name, g.name)) Alignment.Center else Alignment.TopCenter) {
+                        if (hasCustomGroup(tab.name, g.name)) {
+                            // Font and size boxes, colour buttons, a large Paste: controls that take a value.
+                            CustomGroup(tab.name, g.name, env)
+                        } else if (tab.name == "Home" && g.name == "Styles" && styles.isNotEmpty()) {
                             // The gallery: each style drawn as it looks. The rest of the group is a menu.
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 // A grid that scrolls vertically, so every style is reachable.
@@ -377,12 +446,23 @@ fun Ribbon(
                         } else if (featured.isEmpty()) {
                             // Nothing here has an icon yet: one button opens the group's commands by name.
                             CommandMenu(g.items, state, onRun) { openMenu -> MoreButton(openMenu) }
+                        } else if (featured.size <= 3 && rest.isEmpty()) {
+                            // A few commands: large buttons, each with its name under the icon.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                for (item in featured) StatefulBigButton(item, state, onRun)
+                            }
                         } else {
-                            // Fill all three rows of the group before widening it.
-                            val perRow = ((featured.size + (if (rest.isNotEmpty()) 1 else 0) + 2) / 3).coerceAtLeast(1)
-                            FlowRow(Modifier.widthIn(max = 32.dp * perRow + 16.dp), maxItemsInEachRow = perRow) {
-                                for (item in featured) StatefulIconButton(item, state, onRun)
-                                if (rest.isNotEmpty()) CommandMenu(rest, state, onRun) { openMenu -> MoreButton(openMenu) }
+                            // Many commands: columns of three, each with its name beside the icon.
+                            Row(verticalAlignment = Alignment.Top) {
+                                val cells = featured.size + (if (rest.isNotEmpty()) 1 else 0)
+                                for (c in 0 until (cells + 2) / 3) {
+                                    Column {
+                                        for (i in c * 3 until minOf(c * 3 + 3, cells)) {
+                                            if (i < featured.size) StatefulLabeledButton(featured[i], state, onRun)
+                                            else CommandMenu(rest, state, onRun) { openMenu -> MoreLabeledButton(openMenu) }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -429,6 +509,7 @@ private fun SimpleRibbon(
     onRun: (String) -> Unit,
     state: CommandState,
     leading: @Composable () -> Unit,
+    env: RibbonEnv,
 ) {
     var showAll by remember { mutableStateOf(false) }
     val shown = tab
@@ -439,6 +520,14 @@ private fun SimpleRibbon(
             leading()
             VerticalRule()
             IconButton(onClick = { showAll = true }, modifier = Modifier.size(32.dp)) { Icon(Lucide.Menu, contentDescription = "All commands", modifier = Modifier.size(18.dp)) }
+            if (shown.name == "Home") {
+                // Font and size, as on the full ribbon.
+                Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DropdownField(env.format.font.orEmpty(), 130.dp, env.fonts, "Font", env.previews) { f -> env.onRunWith("format.font", buildJsonObject { put("name", f) }) }
+                    Spacer(Modifier.width(4.dp))
+                    SizeField(env.format.size) { sz -> env.onRunWith("format.size", buildJsonObject { put("size", sz) }) }
+                }
+            }
             if (shown.name == "Home" && styles.isNotEmpty()) StylesButton(styles, onApplyStyle)
             for (g in shown.groups) {
                 val featured = g.items.filter { hasRibbonIcon(it.id) }

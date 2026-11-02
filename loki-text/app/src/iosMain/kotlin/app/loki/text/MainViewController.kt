@@ -29,3 +29,6 @@ actual fun printPdf(path: String, jobName: String): String? = "Printing is not a
 actual fun clipboardText(): String? = null
 
 actual fun setClipboardText(text: String) {}
+
+actual fun previewFontFamily(identity: String, bytes: ByteArray): androidx.compose.ui.text.font.FontFamily? =
+    runCatching { androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.platform.Font(identity, bytes)) }.getOrNull()

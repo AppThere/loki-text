@@ -66,3 +66,48 @@ fn command_state_reports_disabled_commands_and_toggles() {
     assert!(on(st, "view.webLayout") && !on(st, "view.printLayout"), "{st}");
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn command_state_reports_the_layout_at_the_caret() {
+    let s = loki_session_new();
+    let layout = |s| call(s, "loki.commandState", None)["result"]["layout"].clone();
+    let l = layout(s);
+    // A new document: portrait, one column, no indent or spacing set.
+    assert_eq!(l["landscape"], false, "{l}");
+    assert_eq!(l["columns"], "one", "{l}");
+    assert!(l["indentLeft"].is_number() && l["spaceAfter"].is_number(), "{l}");
+
+    call(s, "engine.execute", Some(r#"{"command":"layout.orientation","params":{"value":"landscape"}}"#));
+    call(s, "engine.execute", Some(r#"{"command":"layout.columns","params":{"count":2}}"#));
+    call(s, "engine.execute", Some(r#"{"command":"layout.margins","params":{"preset":"narrow"}}"#));
+    call(s, "engine.execute", Some(r#"{"command":"para.indents","params":{"left":36}}"#));
+    call(s, "engine.execute", Some(r#"{"command":"para.spacing","params":{"after":12}}"#));
+    let l = layout(s);
+    assert_eq!(l["landscape"], true, "{l}");
+    assert_eq!(l["columns"], "two", "{l}");
+    assert_eq!(l["margins"], "narrow", "{l}");
+    assert_eq!(l["indentLeft"], 36.0, "{l}");
+    assert_eq!(l["spaceAfter"], 12.0, "{l}");
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn insert_ribbon_menus_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| {
+        let req = format!(r#"{{"command":"{cmd}","params":{params}}}"#);
+        call(s, "engine.execute", Some(&req))
+    };
+    for (cmd, params) in [
+        ("insert.table", r#"{"rows":3,"cols":3}"#),
+        ("insert.header", r#"{"preset":"blankThree"}"#),
+        ("insert.footer", r#"{"preset":"title"}"#),
+        ("insert.pageNumber", r#"{"position":"bottom","align":"center"}"#),
+        ("insert.symbol", r#"{"char":"©"}"#),
+        ("insert.shape", r#"{"kind":"heart"}"#),
+    ] {
+        let r = run(cmd, params);
+        assert!(r.get("error").is_none(), "{cmd}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}

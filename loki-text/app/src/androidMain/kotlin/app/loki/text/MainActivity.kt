@@ -163,3 +163,11 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
+
+/** The font is written under the app's cache (Android makes typefaces from files), once per name. */
+actual fun previewFontFamily(identity: String, bytes: ByteArray): androidx.compose.ui.text.font.FontFamily? = runCatching {
+    val dir = File(activity?.cacheDir ?: return null, "preview-fonts").apply { mkdirs() }
+    val file = File(dir, identity)
+    if (!file.exists() || file.length() != bytes.size.toLong()) file.writeBytes(bytes)
+    androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Font(file))
+}.getOrNull()

@@ -5,13 +5,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.AArrowDown
 import com.composables.icons.lucide.AArrowUp
 import com.composables.icons.lucide.ALargeSmall
 import com.composables.icons.lucide.Accessibility
 import com.composables.icons.lucide.AppWindow
+import com.composables.icons.lucide.ArrowUpDown
+import com.composables.icons.lucide.Baseline
+import com.composables.icons.lucide.ArrowDownAZ
 import com.composables.icons.lucide.Bold
+import com.composables.icons.lucide.ChevronsDown
+import com.composables.icons.lucide.ChevronsUp
+import com.composables.icons.lucide.Columns3
+import com.composables.icons.lucide.RectangleHorizontal
+import com.composables.icons.lucide.CaseSensitive
+import com.composables.icons.lucide.Paintbrush
+import com.composables.icons.lucide.Square
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.PaintBucket
+import com.composables.icons.lucide.RemoveFormatting
 import com.composables.icons.lucide.Info
 import com.composables.icons.lucide.Printer
 import com.composables.icons.lucide.BookA
@@ -137,10 +151,30 @@ private fun iconFor(id: String): ImageVector? = when (id) {
     "format.strikethrough" -> Lucide.Strikethrough
     "format.subscript" -> Lucide.Subscript
     "format.superscript" -> Lucide.Superscript
+    "format.changeCase" -> Lucide.CaseSensitive
+    "para.sort" -> Lucide.ArrowDownAZ
+    "para.borders" -> Lucide.Square
+    // Not an engine command: the Home tab's two-tap Format Painter button.
+    "app.formatPainter" -> Lucide.Paintbrush
+    "layout.orientation" -> Lucide.RectangleHorizontal
+    "layout.columns" -> Lucide.Columns3
+    // Not engine commands: the Layout tab's paragraph menus.
+    "app.indentLeft" -> Lucide.ListIndentIncrease
+    "app.indentRight" -> Lucide.ListIndentDecrease
+    "app.spaceBefore" -> Lucide.ChevronsUp
+    "app.spaceAfter" -> Lucide.ChevronsDown
+    "format.clear" -> Lucide.RemoveFormatting
+    // Controls with values (colours, spacing): drawn by the Home tab's own widgets, which look these up.
+    "format.color" -> Lucide.Baseline
+    "format.highlight" -> Lucide.Highlighter
+    "para.lineSpacing" -> Lucide.ArrowUpDown
+    "para.shading" -> Lucide.PaintBucket
+    "ui.dropdown" -> Lucide.ChevronDown
     "format.growFont" -> Lucide.AArrowUp
     "format.shrinkFont" -> Lucide.AArrowDown
     "para.bullets" -> Lucide.List
     "para.numbering" -> Lucide.ListOrdered
+    "para.multilevel" -> Lucide.ListTree
     "para.outdent" -> Lucide.ListIndentDecrease
     "para.indent" -> Lucide.ListIndentIncrease
     "para.alignLeft" -> Lucide.TextAlignStart
@@ -251,7 +285,7 @@ private fun iconFor(id: String): ImageVector? = when (id) {
 fun hasRibbonIcon(id: String): Boolean = iconFor(id) != null
 
 @Composable
-fun RibbonIcon(id: String) {
+fun RibbonIcon(id: String, size: Dp = 18.dp) {
     val icon = iconFor(id) ?: return
-    Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+    Icon(icon, contentDescription = null, modifier = Modifier.size(size))
 }
