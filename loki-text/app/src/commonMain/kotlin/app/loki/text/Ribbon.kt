@@ -97,7 +97,13 @@ internal val NEEDS_INPUT = setOf(
  * What the engine says about its commands right now: those that can't run (with the reason) and
  * the toggles that are on (bold at the caret, the ruler showing, …). From `loki.commandState`.
  */
-class CommandState(val disabled: Map<String, String>, val on: Set<String>, val layout: LayoutState = LayoutState.EMPTY) {
+class CommandState(
+    val disabled: Map<String, String>,
+    val on: Set<String>,
+    val layout: LayoutState = LayoutState.EMPTY,
+    /** The contextual tabs the selection brings up (Table Layout, Picture Format, …), in ribbon order. */
+    val contextual: List<String> = emptyList(),
+) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
     }
@@ -141,7 +147,8 @@ fun parseCommandState(state: JsonElement): CommandState {
     val o = state as? JsonObject ?: return CommandState.EMPTY
     val disabled = (o["disabled"] as? JsonObject).orEmpty().mapNotNull { (id, why) -> why.jsonPrimitive.contentOrNull?.let { id to it } }.toMap()
     val on = (o["on"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
-    return CommandState(disabled, on, parseLayoutState(o["layout"]))
+    val contextual = (o["contextual"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it in CONTEXTUAL_ORDER }
+    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual)
 }
 
 /** One ribbon button: a WordCraft command that runs with no parameters. */
@@ -151,11 +158,20 @@ class RibbonGroup(val name: String, val items: List<RibbonItem>)
 
 class RibbonTab(val name: String, val groups: List<RibbonGroup>)
 
-/**
- * The main tabs, in ribbon order. Contextual tabs (Table Layout, Picture Format, …) only make
- * sense with something selected, so they are left out until the app knows the selection's kind.
- */
+/** The main tabs, in ribbon order. */
 private val TAB_ORDER = listOf("Home", "Insert", "Draw", "Design", "Layout", "References", "Mailings", "Review", "View", "Developer")
+
+/**
+ * Tabs that only make sense with something selected. [parseRibbon] builds them like any other tab;
+ * [visibleTabs] shows the ones the engine says the selection brings up (`CommandState.contextual`).
+ */
+internal val CONTEXTUAL_ORDER = listOf(
+    "Table Design", "Table Layout", "Picture Format", "Shape Format", "SmartArt Design", "Chart Design", "Equation", "Outlining",
+)
+
+/** [tabs] with the contextual tabs the selection doesn't bring up left out. */
+fun visibleTabs(tabs: List<RibbonTab>, state: CommandState): List<RibbonTab> =
+    tabs.filter { it.name !in CONTEXTUAL_ORDER || it.name in state.contextual }
 
 /**
  * Can a command run from a plain button? Its params must be empty or all optional. A command that
@@ -179,11 +195,11 @@ fun parseRibbon(commands: JsonElement): List<RibbonTab> {
         // `ui.*` commands act on a window that this front end does not have yet.
         if (id.isEmpty() || id.startsWith("ui.") || id in NEEDS_INPUT || !runsWithoutParams(str("params"))) continue
         val parts = str("location").split(" › ")
-        val tab = parts.firstOrNull()?.takeIf { it in TAB_ORDER } ?: continue
+        val tab = parts.firstOrNull()?.takeIf { it in TAB_ORDER || it in CONTEXTUAL_ORDER } ?: continue
         val group = parts.getOrNull(1) ?: ""
         byTab.getOrPut(tab) { LinkedHashMap() }.getOrPut(group) { mutableListOf() }.add(RibbonItem(id, str("label").ifEmpty { id }, str("shortcut")))
     }
-    return TAB_ORDER.mapNotNull { name ->
+    return (TAB_ORDER + CONTEXTUAL_ORDER).mapNotNull { name ->
         byTab[name]?.let { groups -> RibbonTab(name, groups.map { (g, items) -> RibbonGroup(g, items) }) }
     }
 }
@@ -401,20 +417,22 @@ fun Ribbon(
     /** Runs a command with parameters (a font name, a colour). */
     onRunWith: (String, JsonObject) -> Unit = { _, _ -> },
 ) {
-    if (tabs.isEmpty()) return
-    var selected by remember { mutableStateOf(0) }
-    val tab = tabs[selected.coerceIn(0, tabs.lastIndex)]
+    val shown = remember(tabs, state.contextual) { visibleTabs(tabs, state) }
+    if (shown.isEmpty()) return
+    // Selected by name: a contextual tab can vanish with the selection, which falls back to the first tab.
+    var selectedName by remember { mutableStateOf(shown.first().name) }
+    val tab = shown.firstOrNull { it.name == selectedName } ?: shown.first()
     val previews = rememberPreviewFonts()
     val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith) {
         RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith)
     }
     if (sizeClass != SizeClass.Expanded) {
-        SimpleRibbon(tabs, tab, { selected = it }, styles, onApplyStyle, onRun, state, leading, env)
+        SimpleRibbon(shown, tab, { selectedName = shown.getOrNull(it)?.name ?: selectedName }, styles, onApplyStyle, onRun, state, leading, env)
         return
     }
     Column(Modifier.fillMaxWidth()) {
         // The row's own divider stops at the last tab; a divider of our own spans the whole width.
-        RibbonTabRow(tabs, tabs.indexOf(tab)) { selected = it }
+        RibbonTabRow(shown, shown.indexOf(tab)) { selectedName = shown.getOrNull(it)?.name ?: selectedName }
         HorizontalDivider()
         ScrollRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             tab.groups.forEachIndexed { gi, g ->

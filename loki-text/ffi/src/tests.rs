@@ -111,3 +111,14 @@ fn insert_ribbon_menus_send_params_the_engine_accepts() {
     }
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn command_state_names_the_contextual_tabs_of_the_selection() {
+    let s = loki_session_new();
+    let tabs = |s| call(s, "loki.commandState", None)["result"]["contextual"].clone();
+    assert_eq!(tabs(s), serde_json::json!([]));
+    call(s, "engine.execute", Some(r#"{"command":"insert.table","params":{"rows":2,"cols":2}}"#));
+    let t = tabs(s);
+    assert!(t.as_array().is_some_and(|a| a.iter().any(|x| x == "Table Layout")), "{t}");
+    unsafe { loki_session_free(s) };
+}

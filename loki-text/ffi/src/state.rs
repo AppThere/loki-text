@@ -81,7 +81,7 @@ pub fn command_state(sess: &mut Session) -> Value {
     if lists.multilevel {
         on.push("para.multilevel");
     }
-    json!({"disabled": disabled, "on": on, "layout": layout_state(sess)})
+    json!({"disabled": disabled, "on": on, "layout": layout_state(sess), "contextual": wordcraft_engine::ribbon::contextual_tabs(sess)})
 }
 
 /// A number the UI may show: finite, else null (a document can carry anything).

@@ -41,9 +41,19 @@ class RibbonTest {
     }
 
     @Test
-    fun uiCommandsAndContextualTabsAreLeftOut() {
-        val tabs = parseRibbon(commands(Triple("ui.find", "Home › Editing", "{}"), Triple("table.merge", "Table Layout › Merge", "{}")))
+    fun uiCommandsAreLeftOut() {
+        val tabs = parseRibbon(commands(Triple("ui.find", "Home › Editing", "{}")))
         assertTrue(ids(tabs).isEmpty())
+    }
+
+    @Test
+    fun contextualTabsShowOnlyWhenTheSelectionBringsThemUp() {
+        val tabs = parseRibbon(commands(Triple("format.bold", "Home › Font", "{}"), Triple("table.merge", "Table Layout › Merge", "{}"), Triple("image.crop", "Picture Format › Size", "{}")))
+        assertEquals(listOf("Home", "Table Layout", "Picture Format"), tabs.map { it.name })
+        assertEquals(listOf("Home"), visibleTabs(tabs, CommandState.EMPTY).map { it.name })
+        val inTable = parseCommandState(Json.parseToJsonElement("""{"disabled":{},"on":[],"contextual":["Table Layout","Nonsense"]}"""))
+        assertEquals(listOf("Table Layout"), inTable.contextual)
+        assertEquals(listOf("Home", "Table Layout"), visibleTabs(tabs, inTable).map { it.name })
     }
 
     @Test
