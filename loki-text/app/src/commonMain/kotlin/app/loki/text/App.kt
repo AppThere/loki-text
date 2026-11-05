@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
@@ -58,7 +59,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -405,6 +405,7 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
             onRunWith = { id, params -> scope.launch { runCommand(id, params) } },
         )
         val pageFocus = remember { FocusRequester() }
+        val keyboard = LocalSoftwareKeyboardController.current
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(if (flat) Color.White else DESK_COLOR)) {
         val viewport = maxWidth
         val density = LocalDensity.current
@@ -428,17 +429,17 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())
                 .widthIn(min = viewport)
-                .focusRequester(pageFocus)
                 .onPreviewKeyEvent { e ->
                     val k = keyCommand(e) ?: return@onPreviewKeyEvent false
                     // Save may need a file picker, so it goes through the same path as the button.
                     if (k.command == "file.save") scope.launch { saveDocument() } else scope.launch { runCommand(k.command, k.params) }
                     true
                 }
-                .focusable()
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // The page is a bitmap, so this hidden input is what the on-screen keyboard and IME talk to.
+            ImeInput(Modifier.focusRequester(pageFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
             pages.forEachIndexed { i, bitmap ->
                 // Image scales the bitmap down to fit the window width, so the points-to-pixels
                 // factor is measured from the displayed size rather than assumed to be PAGE_SCALE.
@@ -458,7 +459,7 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                             drawSelection(selection, i, pxPerPt)
                         }
                         .pointerInput(i, pxPerPt) {
-                            detectTapGestures { o -> pageFocus.requestFocus(); scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
+                            detectTapGestures { o -> pageFocus.requestFocus(); keyboard?.show(); scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
                         }
                         .pointerInput(i, pxPerPt) {
                             // Dragging selects with a mouse or pen. A finger's drag is left alone so it scrolls.
