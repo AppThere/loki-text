@@ -66,6 +66,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.pointer.pointerInput
 import app.loki.text.engine.SelectionGeometry
@@ -426,8 +428,26 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
             if (narrow) { autoWeb = true; runCommand("view.webLayout") }
             else if (autoWeb) { autoWeb = false; runCommand("view.printLayout") }
         }
+        // Where each page sits in the scrolled content (top, pixels per point), to find the caret on screen.
+        val pageGeo = remember { mutableMapOf<Int, Pair<Float, Float>>() }
+        val vScroll = rememberScrollState()
+        // Keep the caret in view as it moves, and when the keyboard shrinks the viewport.
+        val viewportPx = constraints.maxHeight
+        LaunchedEffect(selection, viewportPx) {
+            val c = selection.caret ?: return@LaunchedEffect
+            val (top, pxPerPt) = pageGeo[c.page] ?: return@LaunchedEffect
+            val margin = with(density) { 24.dp.toPx() }
+            val caretTop = top + c.y * pxPerPt
+            val caretBottom = caretTop + c.h * pxPerPt
+            val target = when {
+                caretBottom + margin > vScroll.value + viewportPx -> (caretBottom + margin - viewportPx).toInt()
+                caretTop - margin < vScroll.value -> (caretTop - margin).toInt()
+                else -> return@LaunchedEffect
+            }
+            vScroll.animateScrollTo(target.coerceAtLeast(0))
+        }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())
+            Modifier.fillMaxSize().verticalScroll(vScroll).horizontalScroll(rememberScrollState())
                 .widthIn(min = viewport)
                 .onPreviewKeyEvent { e ->
                     val k = keyCommand(e) ?: return@onPreviewKeyEvent false
@@ -454,6 +474,7 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                         .size(with(density) { bitmap.width.toDp() }, with(density) { bitmap.height.toDp() })
                         .then(if (flat) Modifier else Modifier.shadow(4.dp, RectangleShape, clip = false))
                         .onSizeChanged { shown = it }
+                        .onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt }
                         .drawWithContent {
                             drawContent()
                             drawSelection(selection, i, pxPerPt)
