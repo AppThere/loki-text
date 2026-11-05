@@ -32,7 +32,9 @@ if [ "$(uname -m)" = "aarch64" ] && [ "$(uname -s)" = "Linux" ]; then
         t=$(triple_for "$abi")
         rustup target add "$t"
         wrapper=$(mktemp)
-        printf '#!/bin/sh\nexec clang --target=%s%s --sysroot=%s/sysroot -resource-dir=%s -fuse-ld=lld "$@"\n' "$t" "$API" "$PRE" "$RES" > "$wrapper"
+        # The versioned --target goes last: cc-rs adds an unversioned one, clang obeys the last, and NDK
+        # headers reject an unversioned triple.
+        printf '#!/bin/sh\nexec clang --sysroot=%s/sysroot -resource-dir=%s -fuse-ld=lld "$@" --target=%s%s\n' "$PRE" "$RES" "$t" "$API" > "$wrapper"
         chmod +x "$wrapper"
         up=$(echo "$t" | tr 'a-z-' 'A-Z_')
         env "CARGO_TARGET_${up}_LINKER=$wrapper" "CC_$(echo "$t" | tr - _)=$wrapper" "AR_$(echo "$t" | tr - _)=$AR" \
