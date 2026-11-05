@@ -150,4 +150,17 @@ class RibbonTest {
         assertEquals(null, dialogParams(InsertDialog.TextBox, mapOf("width" to "-4")))
         assertTrue(dialogParams(InsertDialog.TextBox, mapOf("text" to "", "width" to "200", "height" to "80")) != null)
     }
+
+    @Test
+    fun valueControlsJoinTheGenericButtonsOfTheirGroups() {
+        assertTrue(hasGroupExtras("Review", "Comments"))
+        assertTrue(hasGroupExtras("References", "Table of Contents"))
+        assertTrue(!hasGroupExtras("Review", "Tracking"))
+        // The group keeps its generic buttons: it is not a custom group.
+        assertTrue(!hasCustomGroup("Review", "Comments"))
+        assertEquals(listOf("text"), InsertDialog.NewComment.fields.map { it.key })
+        assertTrue(dialogParams(InsertDialog.NewComment, mapOf("text" to " ")) == null)
+        assertTrue(READING_SPEEDS.all { it.second in 0.5..3.0 })
+        assertTrue(TOC_LEVELS.all { it.second in 1..9 })
+    }
 }

@@ -122,3 +122,19 @@ fn command_state_names_the_contextual_tabs_of_the_selection() {
     assert!(t.as_array().is_some_and(|a| a.iter().any(|x| x == "Table Layout")), "{t}");
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn review_and_references_menus_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Hello"}}"#));
+    for (cmd, params) in [
+        ("readAloud.speed", r#"{"value":1.25}"#),
+        ("references.toc", r#"{"levels":3}"#),
+        ("review.newComment", r#"{"text":"Check this"}"#),
+    ] {
+        let req = format!(r#"{{"command":"{cmd}","params":{params}}}"#);
+        let r = call(s, "engine.execute", Some(&req));
+        assert!(r.get("error").is_none(), "{cmd}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}

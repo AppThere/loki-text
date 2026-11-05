@@ -443,6 +443,10 @@ fun Ribbon(
                 Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     // Every group's content gets the same height, so the names below line up.
                     Box(Modifier.height(GROUP_CONTENT_HEIGHT), contentAlignment = if (hasCustomGroup(tab.name, g.name)) Alignment.Center else Alignment.TopCenter) {
+                      // Controls that take a value sit beside the group's ordinary buttons.
+                      val extras = hasGroupExtras(tab.name, g.name)
+                      @Composable
+                      fun Body() {
                         if (hasCustomGroup(tab.name, g.name)) {
                             // Font and size boxes, colour buttons, a large Paste: controls that take a value.
                             CustomGroup(tab.name, g.name, env)
@@ -483,6 +487,8 @@ fun Ribbon(
                                 }
                             }
                         }
+                      }
+                      if (extras) Row(verticalAlignment = Alignment.CenterVertically) { Body(); GroupExtras(tab.name, g.name, env) } else Body()
                     }
                     Text(g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
                 }

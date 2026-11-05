@@ -32,6 +32,7 @@ enum class InsertDialog(val title: String, val command: String, val fields: List
     Bookmark("Bookmark", "insert.bookmark", listOf(DialogField("name", "Bookmark name", required = true))),
     Picture("Insert Picture", "insert.picture", listOf(DialogField("path", "File", required = true, browse = true), DialogField("alt", "Alt text"), DialogField("width", "Width (pt)"))),
     TextBox("Text Box", "insert.textBox", listOf(DialogField("text", "Text"), DialogField("width", "Width (pt)", "200"), DialogField("height", "Height (pt)", "80"))),
+    NewComment("New Comment", "review.newComment", listOf(DialogField("text", "Comment", required = true))),
     DateTime("Date & Time", "insert.dateTime", listOf(DialogField("format", "Format", "M/d/yyyy", required = true))),
 }
 
