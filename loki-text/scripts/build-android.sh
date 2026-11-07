@@ -3,6 +3,7 @@
 #
 #   scripts/build-android.sh          # arm64-v8a (phones, ARM Chromebooks) and the APK
 #   ABIS="arm64-v8a x86_64" scripts/build-android.sh
+#   VARIANT=Release scripts/build-android.sh   # the release APK (signed with the debug key)
 #
 # Needs the Android SDK + NDK (ANDROID_HOME, default ~/Android/Sdk) and rustup. On x86_64 hosts it
 # uses cargo-ndk. The NDK's compiler is x86_64-only, so on an aarch64 Linux host (an ARM
@@ -52,6 +53,8 @@ else
 fi
 
 if [ -x ./gradlew ]; then GRADLE=./gradlew; else GRADLE=gradle; fi
-$GRADLE :app:assembleDebug
-echo "APK: app/build/outputs/apk/debug/app-debug.apk"
-echo "Install: adb install -r app/build/outputs/apk/debug/app-debug.apk"
+VARIANT="${VARIANT:-Debug}"
+$GRADLE ":app:assemble$VARIANT"
+lower=$(echo "$VARIANT" | tr 'A-Z' 'a-z')
+echo "APK: app/build/outputs/apk/$lower/app-$lower.apk"
+echo "Install: adb install -r app/build/outputs/apk/$lower/app-$lower.apk"
