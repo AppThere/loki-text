@@ -81,6 +81,8 @@ fun ImeInput(modifier: Modifier = Modifier, onCommand: (KeyCommand) -> Unit) {
         },
         modifier = modifier.size(1.dp).alpha(0f),
         cursorBrush = SolidColor(Color.Transparent),
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, keyboardType = KeyboardType.Text, autoCorrectEnabled = true),
+        // No keyboard auto-capitalisation: the field only ever holds filler, so the keyboard would think
+        // every keystroke starts a sentence (stuck on capitals). The engine's AutoCorrect capitalises sentences.
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, keyboardType = KeyboardType.Text, autoCorrectEnabled = true),
     )
 }
