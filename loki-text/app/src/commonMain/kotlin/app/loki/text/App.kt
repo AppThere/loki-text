@@ -240,6 +240,7 @@ fun App(
     // The Font dialog's starting values while it is open.
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
+    var pageDialog by remember { mutableStateOf<PageForm?>(null) }
     // The Find / Replace / Go To bar; null while it is closed.
     var findBar by remember { mutableStateOf<FindState?>(null) }
     // Unsaved changes, from the engine; and the action (Open, closing the window) waiting on the user's answer.
@@ -294,6 +295,11 @@ fun App(
         }
         if ((command == "edit.findNext" || command == "edit.findPrevious") && bare) {
             findBar?.let { b -> runCommand(command, findParams(b)) }
+            return
+        }
+        if (command == "layout.pageSetup" && params["section"] == null) {
+            val section = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("layout.section") as? JsonObject }.getOrNull() } }
+            pageDialog = pageFormFrom(section ?: JsonObject(emptyMap()))
             return
         }
         if (command == "para.dialog") {
@@ -453,6 +459,12 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    pageDialog?.let { start ->
+        PageSetupDialog(start, onApply = { changes ->
+            pageDialog = null
+            if (changes.isNotEmpty()) scope.launch { runCommand("layout.pageLayout", changes) }
+        }, onDismiss = { pageDialog = null })
+    }
     paraDialog?.let { start ->
         ParagraphDialog(start, onApply = { changes ->
             paraDialog = null
