@@ -243,6 +243,9 @@ fun App(
     var pageDialog by remember { mutableStateOf<PageForm?>(null) }
     // Manage Styles: open or not, its sort order, the list it shows, and the Modify / New dialogs over it.
     var manageStyles by remember { mutableStateOf(false) }
+    // List dialogs: the multilevel definition (levels as read), and the three small ones.
+    var listLevels by remember { mutableStateOf<List<LevelForm>?>(null) }
+    var listDialog by remember { mutableStateOf<String?>(null) }
     var stylesAlphabetical by remember { mutableStateOf(false) }
     var styleEntries by remember { mutableStateOf<List<StyleEntry>>(emptyList()) }
     var modifyStyle by remember { mutableStateOf<StyleEntry?>(null) }
@@ -304,6 +307,12 @@ fun App(
             findBar?.let { b -> runCommand(command, findParams(b)) }
             return
         }
+        if (command == "list.define" && params["levels"] == null) {
+            val got = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("list.get") }.getOrNull() } }
+            listLevels = levelsFrom(got)
+            return
+        }
+        if (params.isEmpty() && command in setOf("para.defineBullet", "para.defineNumber", "para.setNumberingValue")) { listDialog = command; return }
         if (command == "styles.manage") { manageStyles = true; return }
         if (command == "styles.create" && params["name"] == null) { newStyleBase = null; newStyleOpen = true; return }
         if (command == "styles.modify" && params["style"] == null) {
@@ -373,8 +382,8 @@ fun App(
         }
     }
 
-    LaunchedEffect(stylesRevision, manageStyles, stylesAlphabetical) {
-        if (!manageStyles) return@LaunchedEffect
+    LaunchedEffect(stylesRevision, manageStyles, stylesAlphabetical, listLevels != null) {
+        if (!manageStyles && listLevels == null) return@LaunchedEffect
         styleEntries = engineLock.withLock {
             withContext(Dispatchers.Default) {
                 runCatching { parseStyleEntries(engine.execute("styles.manage", buildJsonObject { put("sort", if (stylesAlphabetical) "alphabetical" else "recommended") })) }.getOrDefault(emptyList())
@@ -484,6 +493,19 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    listLevels?.let { start ->
+        DefineListDialog(
+            start,
+            styleEntries.filter { (it.type == "paragraph" || it.type == "linked") && !it.hidden }.map { it.id to it.name }.sortedBy { it.second },
+            onApply = { p -> listLevels = null; scope.launch { runCommand("list.define", p) } },
+            onDismiss = { listLevels = null },
+        )
+    }
+    when (listDialog) {
+        "para.defineBullet" -> DefineBulletDialog({ p -> listDialog = null; scope.launch { runCommand("para.defineBullet", p) } }, { listDialog = null })
+        "para.defineNumber" -> DefineNumberDialog({ p -> listDialog = null; scope.launch { runCommand("para.defineNumber", p) } }, { listDialog = null })
+        "para.setNumberingValue" -> NumberingValueDialog({ p -> listDialog = null; scope.launch { runCommand("para.setNumberingValue", p) } }, { listDialog = null })
+    }
     if (manageStyles) {
         ManageStylesDialog(
             styleEntries, stylesAlphabetical, { stylesAlphabetical = it },

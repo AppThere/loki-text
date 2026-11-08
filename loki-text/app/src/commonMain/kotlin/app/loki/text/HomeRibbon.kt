@@ -146,19 +146,19 @@ fun HomeGroup(name: String, env: RibbonEnv) {
                 fun kind(k: String) = buildJsonObject { put("kind", k) }
                 SplitMenuButton(
                     "para.bullets", env.label("para.bullets", "Bullets"), "para.bullets" in on, env.reason("para.bullets"),
-                    listOf(MenuChoice("Bullet Library")) + BULLET_GLYPHS.map { MenuChoice(it, "para.bullets", kind(it)) } + MenuChoice("None", "para.bullets", none),
+                    listOf(MenuChoice("Bullet Library")) + BULLET_GLYPHS.map { MenuChoice(it, "para.bullets", kind(it)) } + MenuChoice("None", "para.bullets", none) + MenuChoice("Define New Bullet…", "para.defineBullet"),
                     onClick = { env.onRun("para.bullets") },
                 ) { c -> env.onRunWith(c.command, c.params) }
                 SplitMenuButton(
                     "para.numbering", env.label("para.numbering", "Numbering"), "para.numbering" in on, env.reason("para.numbering"),
                     NUMBERINGS.map { (l, k) -> MenuChoice(l, "para.numbering", kind(k)) } +
-                        listOf(MenuChoice("Restart at 1", "para.restartNumbering"), MenuChoice("None", "para.numbering", none)),
+                        listOf(MenuChoice("Restart at 1", "para.restartNumbering"), MenuChoice("Set Numbering Value…", "para.setNumberingValue"), MenuChoice("Define New Number Format…", "para.defineNumber"), MenuChoice("None", "para.numbering", none)),
                     onClick = { env.onRun("para.numbering") },
                 ) { c -> env.onRunWith(c.command, c.params) }
                 SplitMenuButton(
                     "para.multilevel", env.label("para.multilevel", "Multilevel List"), "para.multilevel" in on, env.reason("para.multilevel"),
                     listOf(MenuChoice("1.  1.1.  1.1.1.", "para.multilevel", kind("legal")), MenuChoice("I.  A.  1.  a.", "para.multilevel", kind("outline")), MenuChoice("Linked to headings")) +
-                        MULTILEVEL_PRESETS.map { (l, p) -> MenuChoice(l, "list.multilevelPreset", buildJsonObject { put("preset", p) }) },
+                        MULTILEVEL_PRESETS.map { (l, p) -> MenuChoice(l, "list.multilevelPreset", buildJsonObject { put("preset", p) }) } + MenuChoice("Define New Multilevel List…", "list.define"),
                     onClick = { env.onRun("para.multilevel") },
                 ) { c -> env.onRunWith(c.command, c.params) }
                 Row(Modifier.padding(start = 6.dp)) {
