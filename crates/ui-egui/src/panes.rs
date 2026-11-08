@@ -9,8 +9,6 @@ use std::collections::BTreeMap;
 use craft_ui::panes::{Edge, PaneContent, PaneHost, PaneLabels, PaneRequest, PaneState, Place, SidePolicy};
 use egui::{Stroke, Ui, vec2};
 use serde_json::{Value, json};
-use wordcraft_doc::numbering::{Counters, LevelSuffix};
-use wordcraft_doc::section::NumFormat;
 use wordcraft_doc::{Document, Path, Pos, StoryRef};
 use wordcraft_engine::StylesPaneDock;
 

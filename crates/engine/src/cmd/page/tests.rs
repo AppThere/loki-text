@@ -459,6 +459,6 @@ fn page_layout_applies_together_or_not_at_all() {
         let _ = s.run("layout.pageLayout", &p);
     }
     assert!(sect(&s).page_w.is_finite() && sect(&s).margin_left >= 0.0);
-    assert_eq!(s.run("layout.pageLayout", &json!({"left": 5000.0})).is_err(), true);
+    assert!(s.run("layout.pageLayout", &json!({"left": 5000.0})).is_err());
     assert_eq!(sect(&s).page_h, before.page_h);
 }

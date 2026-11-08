@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.RectangleShape
@@ -599,7 +601,19 @@ fun App(
         }
         val pageFocus = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(if (flat) Color.White else DESK_COLOR)) {
+        // The Navigation pane follows the engine's View › Navigation Pane toggle: beside the page, or above it in a narrow window.
+        val navOpen = "view.navigationPane" in commandState.on
+        val navRun: suspend (String, JsonObject) -> Result<kotlinx.serialization.json.JsonElement?> = { cmd, p ->
+            runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd != "nav.headings" && cmd != "nav.search") revision++ }
+        }
+        if (navOpen && sizeClass == SizeClass.Compact) {
+            NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.fillMaxWidth().height(240.dp))
+        }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+        if (navOpen && sizeClass != SizeClass.Compact) {
+            NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.width(300.dp).fillMaxHeight())
+        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().background(if (flat) Color.White else DESK_COLOR)) {
         val viewport = maxWidth
         val density = LocalDensity.current
         val gutterPx = with(density) { 32.dp.toPx() }
@@ -709,6 +723,7 @@ fun App(
                 }
                 }
             }
+        }
         }
         }
         StatusBar(
