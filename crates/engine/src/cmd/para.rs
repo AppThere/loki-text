@@ -14,6 +14,7 @@ use crate::{CmdError, CmdResult, CommandSpec, Session, p};
 mod format;
 mod lists;
 mod outline;
+mod state;
 mod styles;
 mod tabs_borders;
 mod tools;
@@ -24,6 +25,7 @@ pub use lists::{ListButtons, list_buttons, manage_list, touch_all};
 use lists::{list, restart_numbering};
 pub(crate) use outline::{ensure_heading_style, set_heading};
 use outline::{move_paras, outline_step, sort};
+use state::para_state;
 use styles::{apply_style, apply_styles, create_style, delete_style, modify_style, set_visibility, style_id, update_to_match};
 pub use tabs_borders::border_sides;
 use tabs_borders::{borders, tabs};
@@ -228,6 +230,9 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("para.set", "Set Paragraph Formatting", "Home › Paragraph › Paragraph", set_props).params(
             r#"{"props": ParaProps, "onPage"?: {"align"?: "left|center|right|justify|distribute", "left"?: pt, "right"?: pt} (alignment and indents as seen on the page: each paragraph's own direction, after `props`, says which edge is its start)}"#,
         ),
+        CommandSpec::new("para.state", "Paragraph Formatting at Selection", "Home › Paragraph", para_state)
+            .params(r#"(no params) the Paragraph dialog's fields as para.set takes them, shared by every selected paragraph; null where they differ"#)
+            .pure(),
         CommandSpec::new("para.dialog", "Paragraph Settings", "Home › Paragraph", |s, _| {
             s.push_ui_request(json!({"open": "paragraph"}));
             sel_result(s)

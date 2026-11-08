@@ -239,6 +239,7 @@ fun App(
     var status by remember { mutableStateOf("") }
     // The Font dialog's starting values while it is open.
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
+    var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
     // Unsaved changes, from the engine; and the action (Open, closing the window) waiting on the user's answer.
     var unsaved by remember { mutableStateOf(false) }
     // The file the document is saved to, or null for one that has none yet.
@@ -273,6 +274,11 @@ fun App(
             // The engine only asks a UI to open it; this UI shows its own dialog from the selection's formatting.
             val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("format.state") as? JsonObject }.getOrNull() } }
             fontDialog = fontFormFrom(state ?: JsonObject(emptyMap()))
+            return
+        }
+        if (command == "para.dialog") {
+            val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("para.state") as? JsonObject }.getOrNull() } }
+            paraDialog = paraFormFrom(state ?: JsonObject(emptyMap()))
             return
         }
         var p = params
@@ -427,6 +433,12 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    paraDialog?.let { start ->
+        ParagraphDialog(start, onApply = { changes ->
+            paraDialog = null
+            if (changes.isNotEmpty()) scope.launch { runCommand("para.set", changes) }
+        }, onDismiss = { paraDialog = null })
+    }
     fontDialog?.let { start ->
         FontDialog(start, fontFamilies, onApply = { changes ->
             fontDialog = null
