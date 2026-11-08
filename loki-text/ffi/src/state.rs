@@ -22,6 +22,7 @@ const VIEW_TOGGLES: &[(&str, &str)] = &[
     ("ruler", "view.ruler"),
     ("gridlines", "view.gridlines"),
     ("navPane", "view.navigationPane"),
+    ("commentsPane", "view.commentsPane"),
     ("fullScreen", "view.fullScreen"),
     ("focusMode", "view.focus"),
     ("darkMode", "view.darkMode"),

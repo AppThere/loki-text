@@ -315,6 +315,7 @@ fun App(
             return
         }
         if (params.isEmpty() && command in setOf("para.defineBullet", "para.defineNumber", "para.setNumberingValue")) { listDialog = command; return }
+        if (command == "review.comments") { runCommand("view.commentsPane"); return }
         if (command == "styles.manage") { manageStyles = true; return }
         if (command == "styles.create" && params["name"] == null) { newStyleBase = null; newStyleOpen = true; return }
         if (command == "styles.modify" && params["style"] == null) {
@@ -604,10 +605,14 @@ fun App(
         // The Navigation pane follows the engine's View › Navigation Pane toggle: beside the page, or above it in a narrow window.
         val navOpen = "view.navigationPane" in commandState.on
         val navRun: suspend (String, JsonObject) -> Result<kotlinx.serialization.json.JsonElement?> = { cmd, p ->
-            runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd != "nav.headings" && cmd != "nav.search") revision++ }
+            runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd != "nav.headings" && cmd != "nav.search" && cmd != "review.comments") revision++ }
         }
         if (navOpen && sizeClass == SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.fillMaxWidth().height(240.dp))
+        }
+        val commentsOpen = "view.commentsPane" in commandState.on
+        if (commentsOpen && sizeClass == SizeClass.Compact) {
+            CommentsPane(revision, navRun, { scope.launch { runCommand("view.commentsPane") } }, Modifier.fillMaxWidth().height(240.dp))
         }
         Row(Modifier.weight(1f).fillMaxWidth()) {
         if (navOpen && sizeClass != SizeClass.Compact) {
@@ -724,6 +729,9 @@ fun App(
                 }
             }
         }
+        }
+        if (commentsOpen && sizeClass != SizeClass.Compact) {
+            CommentsPane(revision, navRun, { scope.launch { runCommand("view.commentsPane") } }, Modifier.width(320.dp).fillMaxHeight())
         }
         }
         StatusBar(
