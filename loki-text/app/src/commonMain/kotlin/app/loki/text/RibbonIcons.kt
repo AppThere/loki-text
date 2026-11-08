@@ -8,6 +8,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.AArrowDown
+import com.composables.icons.lucide.AlignCenterHorizontal
+import com.composables.icons.lucide.Layers
+import com.composables.icons.lucide.LayoutDashboard
+import com.composables.icons.lucide.RotateCw
+import com.composables.icons.lucide.TextWrap
+import com.composables.icons.lucide.Blend
+import com.composables.icons.lucide.Crop
+import com.composables.icons.lucide.ImageMinus
+import com.composables.icons.lucide.RotateCcw
+import com.composables.icons.lucide.Scaling
+import com.composables.icons.lucide.Shrink
+import com.composables.icons.lucide.SquareRoundCorner
+import com.composables.icons.lucide.SunMedium
+import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.AlignHorizontalDistributeCenter
 import com.composables.icons.lucide.AlignVerticalDistributeCenter
 import com.composables.icons.lucide.BetweenHorizontalEnd
@@ -228,6 +242,25 @@ private fun iconFor(id: String): ImageVector? = when (id) {
     "insert.removeLink" -> Lucide.Unlink
     "table.quick" -> Lucide.Table
     "table.fromText" -> Lucide.Table
+    "picture.removeBackground" -> Lucide.ImageMinus
+    "picture.corrections" -> Lucide.SunMedium
+    "picture.color" -> Lucide.Palette
+    "picture.effects" -> Lucide.WandSparkles
+    "picture.transparency" -> Lucide.Blend
+    "picture.compress" -> Lucide.Shrink
+    "picture.change" -> Lucide.Replace
+    "picture.reset" -> Lucide.RotateCcw
+    "picture.iconColor" -> Lucide.PaintBucket
+    "picture.style" -> Lucide.SquareRoundCorner
+    "picture.border" -> Lucide.Frame
+    "picture.altText" -> Lucide.Accessibility
+    "picture.crop" -> Lucide.Crop
+    "picture.size" -> Lucide.Scaling
+    "app.pictureOriginal" -> Lucide.Maximize
+    "app.pictureHeight" -> Lucide.MoveVertical
+    "app.pictureWidth" -> Lucide.MoveHorizontal
+    "table.draw" -> Lucide.Pencil
+    "table.eraser" -> Lucide.Eraser
     "table.insertRowAbove" -> Lucide.BetweenHorizontalStart
     "table.insertRowBelow" -> Lucide.BetweenHorizontalEnd
     "table.insertColumnLeft" -> Lucide.BetweenVerticalStart
@@ -273,6 +306,11 @@ private fun iconFor(id: String): ImageVector? = when (id) {
     "layout.lineNumbers" -> Lucide.ListOrdered
     "layout.pageSetup" -> Lucide.FileCog
     "arrange.bringForward" -> Lucide.BringToFront
+    "arrange.position" -> Lucide.LayoutDashboard
+    "arrange.wrap" -> Lucide.TextWrap
+    "arrange.align" -> Lucide.AlignCenterHorizontal
+    "arrange.rotate" -> Lucide.RotateCw
+    "arrange.selectionPane" -> Lucide.Layers
     "arrange.sendBackward" -> Lucide.SendToBack
     "arrange.group" -> Lucide.Group
     "arrange.ungroup" -> Lucide.Ungroup

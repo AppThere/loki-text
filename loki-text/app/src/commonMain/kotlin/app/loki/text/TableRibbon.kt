@@ -57,7 +57,7 @@ val TABLE_DESIGN_GROUPS = setOf("Table Style Options")
  * The Table Layout groups that [TableLayoutGroup] lays out itself, compactly (menus for Select and
  * Delete, stacked small buttons), so the tab fits a laptop screen.
  */
-val TABLE_LAYOUT_GROUPS = setOf("Table", "Rows & Columns", "Merge", "Alignment", "Cell Size", "Data")
+val TABLE_LAYOUT_GROUPS = setOf("Table", "Draw", "Rows & Columns", "Merge", "Alignment", "Cell Size", "Data")
 
 /** Table groups that keep their generic buttons and add [TableExtras] beside them, as (tab, group). */
 internal val TABLE_EXTRA_GROUPS = setOf("Table Design" to "Table Styles", "Table Design" to "Borders")
@@ -181,6 +181,7 @@ internal val TABLE_LAYOUT_PLACED = mapOf(
         "table.insertRowAbove", "table.insertRowBelow", "table.insertColumnLeft", "table.insertColumnRight",
         "table.deleteCells", "table.deleteColumn", "table.deleteRow", "table.deleteTable",
     ),
+    "Draw" to listOf("table.eraser"),
     "Merge" to listOf("table.merge", "table.split", "table.splitTable"),
     "Alignment" to listOf("table.textDirection", "table.cellMargins"),
     "Cell Size" to listOf("table.distributeRows", "table.distributeColumns"),
@@ -212,6 +213,10 @@ fun TableLayoutGroup(group: String, items: List<RibbonItem>, env: RibbonEnv) {
             "Table" -> {
                 menu("table.selectTable", "Select", listOf("table.selectCell", "table.selectColumn", "table.selectRow", "table.selectTable"))
                 Column { small("table.viewGridlines"); small("table.properties"); more() }
+            }
+            "Draw" -> {
+                TableToolButton(env, "table.draw", "Draw Table")
+                TableToolButton(env, "table.eraser", "Eraser")
             }
             "Rows & Columns" -> {
                 big("table.insertRowAbove")
@@ -260,7 +265,7 @@ fun TableLayoutGroup(group: String, items: List<RibbonItem>, env: RibbonEnv) {
  */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun InchField(iconId: String, label: String, pt: Float?, disabledReason: String?, onPick: (Float) -> Unit) {
+internal fun InchField(iconId: String, label: String, pt: Float?, disabledReason: String?, onPick: (Float) -> Unit) {
     val shown = inchText(pt)
     // Starts over when the caret's size changes.
     var typed by remember(shown) { mutableStateOf(shown) }
@@ -395,5 +400,14 @@ private fun TableBordersButton(env: RibbonEnv) {
                 )
             }
         }
+    }
+}
+
+/** A page tool's button: on while the tool is, and pressing it again turns the tool off. */
+@Composable
+internal fun TableToolButton(env: RibbonEnv, id: String, fallback: String, size: ButtonSize = ButtonSize.Big) {
+    val on = env.tableTool == id
+    RibbonButton(id, env.label(id, fallback), size, disabledReason = env.reason(id).takeUnless { on }, checked = on) {
+        env.onTableTool(if (on) null else id)
     }
 }

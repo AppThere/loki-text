@@ -208,6 +208,87 @@ fn table_dialogs_send_params_the_engine_accepts() {
 }
 
 #[test]
+fn draw_table_from_page_points_makes_a_table() {
+    let s = loki_session_new();
+    let tabs = |s| call(s, "loki.commandState", None)["result"]["contextual"].clone();
+    // The pen's stroke as the page reports it: a rectangle in page points on the first page.
+    let r = call(s, "engine.execute", Some(r#"{"command":"table.draw","params":{"page":0,"x0":100,"y0":100,"x1":400,"y1":220}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    let t = tabs(s);
+    assert!(t.as_array().is_some_and(|a| a.iter().any(|x| x == "Table Layout")), "{t}");
+    unsafe { loki_session_free(s) };
+}
+
+/// A 4×4 red PNG, for picture commands.
+const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR4nGM4YaPxHxkzkC4AAJdYIrFAMbGxAAAAAElFTkSuQmCC";
+
+#[test]
+fn command_state_reports_the_selected_picture() {
+    let s = loki_session_new();
+    let state = |s| call(s, "loki.commandState", None)["result"].clone();
+    assert!(state(s)["picture"].is_null());
+    let req = format!(r#"{{"command":"insert.picture","params":{{"data":"{PNG}","width":144}}}}"#);
+    let r = call(s, "engine.execute", Some(&req));
+    assert!(r.get("error").is_none(), "{r}");
+    let st = state(s);
+    assert!(st["contextual"].as_array().is_some_and(|a| a.iter().any(|x| x == "Picture Format")), "{st}");
+    let p = &st["picture"];
+    assert_eq!(p["width"], 144.0, "{p}");
+    assert_eq!(p["height"], 144.0, "{p}");
+    assert_eq!(p["crop"], serde_json::json!([0.0, 0.0, 0.0, 0.0]), "{p}");
+    let r = call(s, "engine.execute", Some(r#"{"command":"picture.altText","params":{"text":"A red square","title":"Red","decorative":false}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    assert_eq!(st["arrange"]["wrap"], "inline", "{st}");
+    let r = call(s, "engine.execute", Some(r#"{"command":"arrange.wrap","params":{"wrap":"square"}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    assert_eq!(state(s)["arrange"]["wrap"], "square");
+    let p = state(s)["picture"].clone();
+    assert_eq!(p["alt"], "A red square", "{p}");
+    assert_eq!(p["title"], "Red", "{p}");
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn picture_format_menus_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    let req = format!(r#"{{"command":"insert.picture","params":{{"data":"{PNG}","width":144}}}}"#);
+    call(s, "engine.execute", Some(&req));
+    for req in [
+        r#"{"command":"picture.corrections","params":{"brightness":20,"contrast":-20}}"#,
+        r#"{"command":"picture.corrections","params":{"sharpen":40}}"#,
+        r#"{"command":"picture.color","params":{"mode":"saturation","saturation":200}}"#,
+        r#"{"command":"picture.color","params":{"mode":"grayscale"}}"#,
+        r#"{"command":"picture.color","params":{"mode":"sepia"}}"#,
+        r#"{"command":"picture.color","params":{"mode":"washout"}}"#,
+        r#"{"command":"picture.color","params":{"mode":"blackAndWhite"}}"#,
+        r#"{"command":"picture.effects","params":{"effect":"blur"}}"#,
+        r#"{"command":"picture.effects","params":{"effect":"none"}}"#,
+        r#"{"command":"picture.transparency","params":{"percent":50}}"#,
+        r#"{"command":"picture.style","params":{"style":"rounded"}}"#,
+        r#"{"command":"picture.border","params":{"width":4,"color":"2060D0"}}"#,
+        r#"{"command":"picture.size","params":{"width":108,"lockAspect":true}}"#,
+        r#"{"command":"picture.size","params":{"original":true}}"#,
+        r#"{"command":"picture.crop","params":{"left":0.1,"top":0,"right":0.1,"bottom":0}}"#,
+        r#"{"command":"picture.removeBackground","params":{}}"#,
+        r#"{"command":"picture.compress","params":{}}"#,
+        r#"{"command":"picture.reset","params":{}}"#,
+        r#"{"command":"picture.iconColor","params":{"color":"2060D0"}}"#,
+        r#"{"command":"arrange.wrap","params":{"wrap":"tight"}}"#,
+        r#"{"command":"arrange.position","params":{"preset":"middleCenter"}}"#,
+        r#"{"command":"arrange.moveWithText","params":{"value":false}}"#,
+        r#"{"command":"arrange.rotate","params":{"direction":"right"}}"#,
+        r#"{"command":"arrange.rotate","params":{"direction":"flipHorizontal"}}"#,
+        r#"{"command":"arrange.align","params":{"value":"center"}}"#,
+        r#"{"command":"arrange.bringForward","params":{}}"#,
+        r#"{"command":"arrange.wrap","params":{"wrap":"inline"}}"#,
+    ] {
+        let r = call(s, "engine.execute", Some(req));
+        assert!(r.get("error").is_none(), "{req}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
 fn review_and_references_menus_send_params_the_engine_accepts() {
     let s = loki_session_new();
     call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Hello"}}"#));

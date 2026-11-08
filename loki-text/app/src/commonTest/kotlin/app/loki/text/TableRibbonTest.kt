@@ -62,6 +62,18 @@ class TableRibbonTest {
         assertEquals("Align Bottom Center", cellAlignLabel("bottomCenter"))
     }
 
+    @Test fun theDrawGroupStaysThoughItsCommandsNeedPagePoints() {
+        val tabs = parseRibbon(Json.parseToJsonElement(
+            """[{"id":"table.eraser","label":"Eraser","location":"Table Layout › Draw","params":"{\"page\": n, \"x\": pt, \"y\": pt}"},
+               {"id":"table.merge","label":"Merge Cells","location":"Table Layout › Merge","params":""},
+               {"id":"table.moveDrag","label":"Move","location":"Table Layout › Table","params":"{\"page\": n, \"x\": pt}"}]""",
+        ))
+        val layout = tabs.single { it.name == "Table Layout" }
+        // Draw and Table keep their place though their commands need a mouse; the app draws them.
+        assertEquals(listOf("Draw", "Merge", "Table"), layout.groups.map { it.name })
+        assertTrue(layout.groups.first { it.name == "Draw" }.items.isEmpty())
+    }
+
     @Test fun tableTabsGetTheirControls() {
         assertTrue(hasCustomGroup("Table Design", "Table Style Options"))
         for (group in TABLE_LAYOUT_GROUPS) assertTrue(hasCustomGroup("Table Layout", group), group)

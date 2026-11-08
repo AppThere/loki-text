@@ -106,6 +106,10 @@ class CommandState(
     val contextual: List<String> = emptyList(),
     /** The table at the caret, or null outside a table. */
     val table: TableState? = null,
+    /** The selected picture, or null when none is. */
+    val picture: PictureState? = null,
+    /** The selected picture, shape, text box or group, for the Arrange controls; null when none is. */
+    val arrange: ArrangeState? = null,
 ) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
@@ -151,7 +155,7 @@ fun parseCommandState(state: JsonElement): CommandState {
     val disabled = (o["disabled"] as? JsonObject).orEmpty().mapNotNull { (id, why) -> why.jsonPrimitive.contentOrNull?.let { id to it } }.toMap()
     val on = (o["on"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
     val contextual = (o["contextual"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it in CONTEXTUAL_ORDER }
-    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]))
+    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]), parsePictureState(o["picture"]), parseArrangeState(o["arrange"]))
 }
 
 /**
@@ -260,14 +264,20 @@ fun parseRibbon(commands: JsonElement): List<RibbonTab> {
         fun str(k: String) = o[k]?.jsonPrimitive?.contentOrNull ?: ""
         val id = str("id")
         // `ui.*` commands act on a window that this front end does not have yet.
-        if (id.isEmpty() || id.startsWith("ui.") || id in NEEDS_INPUT || !runsWithoutParams(str("params"))) continue
+        if (id.isEmpty() || id.startsWith("ui.") || id in NEEDS_INPUT) continue
         val parts = str("location").split(" › ")
         val tab = parts.firstOrNull()?.takeIf { it in TAB_ORDER || it in CONTEXTUAL_ORDER } ?: continue
         val group = parts.getOrNull(1) ?: ""
+        if (!runsWithoutParams(str("params"))) {
+            // A group the app draws itself supplies the values (Table Layout › Draw takes page
+            // points from the mouse), so it stays even when none of its commands is a plain button.
+            if (hasCustomGroup(tab, group)) byTab.getOrPut(tab) { LinkedHashMap() }.getOrPut(group) { mutableListOf() }
+            continue
+        }
         byTab.getOrPut(tab) { LinkedHashMap() }.getOrPut(group) { mutableListOf() }.add(RibbonItem(id, str("label").ifEmpty { id }, str("shortcut")))
     }
     return (TAB_ORDER + CONTEXTUAL_ORDER).mapNotNull { name ->
-        byTab[name]?.let { groups -> RibbonTab(name, groups.map { (g, items) -> RibbonGroup(g, items) }) }
+        byTab[name]?.let { groups -> RibbonTab(name, withAppGroups(name, groups.map { (g, items) -> RibbonGroup(g, items) })) }
     }
 }
 
@@ -483,6 +493,9 @@ fun Ribbon(
     fonts: List<String> = emptyList(),
     /** Runs a command with parameters (a font name, a colour). */
     onRunWith: (String, JsonObject) -> Unit = { _, _ -> },
+    /** The page tool that is on (Draw Table, Eraser), and how to switch it. */
+    tableTool: String? = null,
+    onTableTool: (String?) -> Unit = {},
 ) {
     val shown = remember(tabs, state.contextual) { visibleTabs(tabs, state) }
     if (shown.isEmpty()) return
@@ -490,8 +503,8 @@ fun Ribbon(
     var selectedName by remember { mutableStateOf(shown.first().name) }
     val tab = shown.firstOrNull { it.name == selectedName } ?: shown.first()
     val previews = rememberPreviewFonts()
-    val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith) {
-        RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith)
+    val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool) {
+        RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool)
     }
     if (sizeClass != SizeClass.Expanded) {
         SimpleRibbon(shown, tab, { selectedName = shown.getOrNull(it)?.name ?: selectedName }, styles, onApplyStyle, onRun, state, leading, env)
@@ -711,4 +724,59 @@ private fun ScrollRow(modifier: Modifier = Modifier, content: @Composable RowSco
             }
         }
     }
+}
+
+/**
+ * The selected picture, as Picture Format shows it: display size in points, crop as fractions of
+ * the source (left, top, right, bottom), and its alt text, title and decorative mark.
+ */
+class PictureState(
+    val width: Float?,
+    val height: Float?,
+    val crop: List<Float>,
+    val alt: String,
+    val title: String,
+    val decorative: Boolean,
+)
+
+fun parsePictureState(e: JsonElement?): PictureState? {
+    val o = e as? JsonObject ?: return null
+    fun p(k: String) = o[k] as? kotlinx.serialization.json.JsonPrimitive
+    val crop = (o["crop"] as? JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.floatOrNull?.takeIf { f -> f.isFinite() } }
+    return PictureState(
+        width = p("width")?.floatOrNull?.takeIf { it.isFinite() && it > 0f },
+        height = p("height")?.floatOrNull?.takeIf { it.isFinite() && it > 0f },
+        crop = crop?.takeIf { it.size == 4 } ?: listOf(0f, 0f, 0f, 0f),
+        alt = p("alt")?.contentOrNull.orEmpty(),
+        title = p("title")?.contentOrNull.orEmpty(),
+        decorative = p("decorative")?.booleanOrNull == true,
+    )
+}
+
+/**
+ * Groups the app adds to a tab the engine lists elsewhere, as (tab, group, the group it goes
+ * before): Picture Format gets Layout's Arrange controls, as Word shows them there too.
+ */
+internal val APP_GROUPS = listOf(Triple("Picture Format", "Arrange", "Size"))
+
+/** [groups] of [tab] with its [APP_GROUPS] added (empty: the app draws them), each before its neighbour or last. */
+internal fun withAppGroups(tab: String, groups: List<RibbonGroup>): List<RibbonGroup> {
+    var out = groups
+    for ((t, name, before) in APP_GROUPS) {
+        if (t != tab || out.any { it.name == name }) continue
+        val at = out.indexOfFirst { it.name == before }.takeIf { it >= 0 } ?: out.size
+        out = out.take(at) + RibbonGroup(name, emptyList()) + out.drop(at)
+    }
+    return out
+}
+
+/** The selected object's wrapping (as `arrange.wrap` names it) and whether it moves with its paragraph. */
+class ArrangeState(val wrap: String?, val moveWithText: Boolean)
+
+fun parseArrangeState(e: JsonElement?): ArrangeState? {
+    val o = e as? JsonObject ?: return null
+    return ArrangeState(
+        wrap = (o["wrap"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+        moveWithText = (o["moveWithText"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull == true,
+    )
 }

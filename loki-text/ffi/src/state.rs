@@ -97,6 +97,8 @@ pub fn command_state(sess: &mut Session) -> Value {
         "on": on,
         "layout": layout_state(sess),
         "table": table,
+        "picture": picture_state(sess),
+        "arrange": arrange_state(sess),
         "contextual": wordcraft_engine::ribbon::contextual_tabs(sess),
     })
 }
@@ -196,4 +198,37 @@ fn table_state(sess: &Session, para_align: Option<Align>) -> Value {
 fn cell_margins(sess: &Session, t: &wordcraft_doc::Table) -> [f32; 4] {
     let style = t.props.style.as_deref().and_then(|id| sess.doc.styles.table_style(id));
     t.props.cell_margins.or(style.and_then(|st| st.parts.cell_margins)).unwrap_or([0.0, 5.4, 0.0, 5.4])
+}
+
+/// The selected picture for Picture Format (null when none): its display size in points, its crop
+/// as fractions (left, top, right, bottom), and its alt text, title and decorative mark.
+fn picture_state(sess: &Session) -> Value {
+    let Some((_, o)) = wordcraft_engine::cmd::objects::selected(sess) else { return Value::Null };
+    let wordcraft_doc::para::InlineObject::Image { w, h, crop, float, .. } = &o else { return Value::Null };
+    json!({
+        "width": num(*w),
+        "height": num(*h),
+        "crop": crop.iter().map(|c| num(*c)).collect::<Vec<_>>(),
+        "alt": o.alt_text(),
+        "title": float.alt.title,
+        "decorative": float.alt.decorative,
+    })
+}
+
+/// The selected picture, shape, text box or group for the Arrange controls (null when none): its
+/// wrapping as `arrange.wrap` names it, and whether it moves with its paragraph.
+fn arrange_state(sess: &Session) -> Value {
+    use wordcraft_doc::para::{Anchor, Wrap};
+    let Some((_, o)) = wordcraft_engine::cmd::objects::selected(sess) else { return Value::Null };
+    let Some((_, _, f)) = o.frame() else { return Value::Null };
+    let wrap = match f.wrap {
+        Wrap::Inline => "inline",
+        Wrap::Square => "square",
+        Wrap::Tight => "tight",
+        Wrap::Through => "through",
+        Wrap::TopAndBottom => "topAndBottom",
+        Wrap::BehindText => "behindText",
+        Wrap::InFrontOfText => "inFrontOfText",
+    };
+    json!({"wrap": wrap, "moveWithText": f.v_rel == Anchor::Paragraph})
 }

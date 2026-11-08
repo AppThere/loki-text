@@ -45,6 +45,10 @@ class RibbonEnv(
     val previews: Map<String, FontFamily>,
     val onRun: (String) -> Unit,
     val onRunWith: (String, JsonObject) -> Unit,
+    /** The page tool that is on (`table.draw` or `table.eraser`), or null. */
+    val tableTool: String? = null,
+    /** Turns a page tool on, or all off with null. */
+    val onTableTool: (String?) -> Unit = {},
 ) {
     fun label(id: String, fallback: String) = items[id]?.label ?: fallback
     fun shortcut(id: String) = items[id]?.shortcut ?: ""
@@ -61,6 +65,7 @@ fun hasCustomGroup(tab: String, group: String): Boolean = when (tab) {
     "Insert" -> group in INSERT_GROUPS
     "Table Design" -> group in TABLE_DESIGN_GROUPS
     "Table Layout" -> group in TABLE_LAYOUT_GROUPS
+    "Picture Format" -> group in PICTURE_GROUPS
     else -> false
 }
 
@@ -68,10 +73,11 @@ fun hasCustomGroup(tab: String, group: String): Boolean = when (tab) {
 @Composable
 fun CustomGroup(tab: String, group: String, env: RibbonEnv, items: List<RibbonItem> = emptyList()) {
     when (tab) {
-        "Layout" -> LayoutGroup(group, env)
+        "Layout" -> LayoutGroup(group, env, items)
         "Insert" -> InsertGroup(group, env)
         "Table Design" -> TableGroup(group, env)
         "Table Layout" -> TableLayoutGroup(group, items, env)
+        "Picture Format" -> PictureGroup(group, env)
         else -> HomeGroup(group, env)
     }
 }

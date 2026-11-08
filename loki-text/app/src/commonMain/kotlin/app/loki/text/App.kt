@@ -73,6 +73,14 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.PointerIcon
 import app.loki.text.engine.SelectionGeometry
 import androidx.compose.ui.unit.dp
 import app.loki.text.engine.Engine
@@ -166,6 +174,15 @@ private fun Engine.setCaret(page: Int, o: Offset, pxPerPt: Float, extend: Boolea
     })
 }
 
+/** The stroke a page tool is drawing: a dashed rectangle (a new table) or a line (a cell border). */
+private fun DrawScope.drawPenStroke(st: PenStroke, pxPerPt: Float, ink: Color) {
+    val a = Offset(st.x0 * pxPerPt, st.y0 * pxPerPt)
+    val b = Offset(st.x1 * pxPerPt, st.y1 * pxPerPt)
+    val dash = Stroke(width = 1.5f * density, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * density, 4f * density)))
+    if (penPreviewIsLine(st)) drawLine(ink, a, b, strokeWidth = dash.width, pathEffect = dash.pathEffect)
+    else drawRect(ink, topLeft = Offset(minOf(a.x, b.x), minOf(a.y, b.y)), size = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y)), style = dash)
+}
+
 private fun DrawScope.drawSelection(sel: SelectionGeometry, page: Int, scale: Float) {
     for (r in sel.rects) if (r.page == page) {
         drawRect(Color(0x553390FF), Offset(r.x * scale, r.y * scale), Size(r.w * scale, r.h * scale))
@@ -241,6 +258,14 @@ fun App(
     // Bumped when a command may have changed the styles (editing them, opening another file).
     var stylesRevision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
+    // Draw Table or Eraser while one is on: presses on the page draw instead of moving the caret.
+    var tableTool by remember { mutableStateOf<String?>(null) }
+    var penStroke by remember { mutableStateOf<PenStroke?>(null) }
+    fun setTableTool(tool: String?) {
+        tableTool = tool?.takeIf { it in TABLE_TOOLS }
+        penStroke = null
+        status = tableTool?.let(::tableToolHint).orEmpty()
+    }
     // The Font dialog's starting values while it is open.
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
@@ -605,6 +630,8 @@ fun App(
             format = formatState,
             fonts = fontFamilies,
             onRunWith = { id, params -> scope.launch { runCommand(id, params) } },
+            tableTool = tableTool,
+            onTableTool = ::setTableTool,
         )
         findBar?.let { b ->
             FindBar(
@@ -680,6 +707,10 @@ fun App(
             Modifier.fillMaxSize().verticalScroll(vScroll).horizontalScroll(rememberScrollState())
                 .widthIn(min = viewport)
                 .onPreviewKeyEvent { e ->
+                    if (tableTool != null && e.key == Key.Escape && e.type == KeyEventType.KeyDown) {
+                        setTableTool(null)
+                        return@onPreviewKeyEvent true
+                    }
                     val k = keyCommand(e) ?: return@onPreviewKeyEvent false
                     // File commands may need a picker or a new window, so they go through the menu's path.
                     if (k.command.startsWith("file.")) scope.launch { runFileMenu(k.command) } else scope.launch { runCommand(k.command, k.params) }
@@ -690,6 +721,7 @@ fun App(
         ) {
             // The page is a bitmap, so this hidden input is what the on-screen keyboard and IME talk to.
             ImeInput(Modifier.focusRequester(pageFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
+            val penInk = MaterialTheme.colorScheme.primary
             pages.forEachIndexed { i, bitmap ->
                 // Image scales the bitmap down to fit the window width, so the points-to-pixels
                 // factor is measured from the displayed size rather than assumed to be PAGE_SCALE.
@@ -708,8 +740,32 @@ fun App(
                         .drawWithContent {
                             drawContent()
                             drawSelection(selection, i, pxPerPt)
+                            penStroke?.takeIf { it.page == i }?.let { drawPenStroke(it, pxPerPt, penInk) }
                         }
-                        .pointerInput(i, pxPerPt) {
+                        .then(if (tableTool == null) Modifier else Modifier.pointerHoverIcon(PointerIcon.Crosshair).pointerInput(i, pxPerPt, tableTool) {
+                            // A page tool: every press is a stroke (a finger's too), and the caret stays put.
+                            val tool = tableTool ?: return@pointerInput
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                val x0 = down.position.x / pxPerPt
+                                val y0 = down.position.y / pxPerPt
+                                penStroke = PenStroke(i, x0, y0, x0, y0)
+                                drag(down.id) { change ->
+                                    change.consume()
+                                    penStroke = PenStroke(i, x0, y0, change.position.x / pxPerPt, change.position.y / pxPerPt)
+                                }
+                                val done = penStroke
+                                penStroke = null
+                                val cmd = done?.let { penCommand(tool, it) } ?: return@awaitEachGesture
+                                scope.launch {
+                                    runCommand(cmd.first, cmd.second)
+                                    // The hint stays while the tool does; a failed stroke's reason shows instead.
+                                    if (tableTool == tool && status.isEmpty()) status = tableToolHint(tool)
+                                }
+                            }
+                        })
+                        .then(if (tableTool != null) Modifier else Modifier.pointerInput(i, pxPerPt) {
                             detectTapGestures(
                                 // Long press selects the word under the finger; the handles then adjust it.
                                 onLongPress = { o ->
@@ -733,7 +789,7 @@ fun App(
                                     scope.launch { perform { setCaret(i, change.position, pxPerPt, true) } }
                                 }
                             }
-                        },
+                        }),
                 )
                 // Selection handles hang below the first and last line; dragging one moves that end.
                 selectionHandles(selection.rects)?.let { (startPt, endPt) ->

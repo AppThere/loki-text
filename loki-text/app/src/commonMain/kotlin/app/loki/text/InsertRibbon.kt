@@ -57,8 +57,11 @@ fun InsertGroup(name: String, env: RibbonEnv) {
         RibbonButton(id, env.label(id, fallback), ButtonSize.Labeled, env.shortcut(id), env.reason(id)) { env.onRun(id) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         when (name) {
-            "Tables" -> IconMenuButton("insert.table", env.label("insert.table", "Table"), TABLE_SIZES.map { it.first }, null, env.reason("insert.table"), ButtonSize.Big) { i ->
-                env.pick("insert.table", TABLE_SIZES, i) { (_, rc) -> buildJsonObject { put("rows", rc.first); put("cols", rc.second) } }
+            "Tables" -> {
+                IconMenuButton("insert.table", env.label("insert.table", "Table"), TABLE_SIZES.map { it.first }, null, env.reason("insert.table"), ButtonSize.Big) { i ->
+                    env.pick("insert.table", TABLE_SIZES, i) { (_, rc) -> buildJsonObject { put("rows", rc.first); put("cols", rc.second) } }
+                }
+                TableToolButton(env, "table.draw", "Draw Table")
             }
             "Header & Footer" -> {
                 for ((id, fallback) in listOf("insert.header" to "Header", "insert.footer" to "Footer")) {

@@ -109,7 +109,8 @@ the caret is for the new document and the page for the old one.
 
 `engine.commands` returns every command with `location` = `Tab › Group[ › …]`. `parseRibbon`:
 
-* keeps only main tabs in a fixed `TAB_ORDER` (contextual tabs wait until selection kind is known);
+* keeps the main tabs in a fixed `TAB_ORDER`, then the contextual tabs (`CONTEXTUAL_ORDER`) that
+  `loki.commandState` says the selection brings up;
 * drops `ui.*` commands (they act on a window this front end doesn't have) and commands that need a
   value (`runsWithoutParams` inspects the params doc: a required key reads `"name":`, optional `"name"?:`);
 * groups items by tab and group, preserving engine order.
@@ -264,10 +265,11 @@ On x86_64 it uses `cargo-ndk`.
 
 * iOS target is scaffolded, never built (needs macOS; `UIDocumentPickerViewController` and `UIPasteboard`
   are TODOs in `iosMain`). No Xcode host project exists.
-* No IME/composition handling; hardware-keyboard and `input text` only.
-* Contextual ribbon tabs (Table Layout, Picture Format…) are omitted until selection kind is known.
-* Only the main tabs' parameterless commands are buttons; commands that need a value (font size, colour)
-  need real controls (dropdowns, pickers) that don't exist yet.
+* Contextual tabs with their own controls: Table Design, Table Layout (with Draw Table and Eraser as page
+  tools) and Picture Format. Shape Format, SmartArt Design, Chart Design, Equation and Outlining still show
+  only the engine's parameterless commands. Arrange (Position, Wrap Text, Align, Rotate) is one group shared by
+  Layout and Picture Format; the app adds it to Picture Format (`APP_GROUPS`).
+* Some commands that need a value still have no control; they are left off the ribbon (`runsWithoutParams`).
 * No dark theme.
 * `loki.commandState` is computed for every command on every snapshot; fine at Word's scale, measure before
   copying it to an app with thousands of commands.

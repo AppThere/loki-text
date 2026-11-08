@@ -11,7 +11,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** The Layout tab groups that [LayoutGroup] draws itself. */
-val LAYOUT_GROUPS = setOf("Page Setup", "Paragraph")
+val LAYOUT_GROUPS = setOf("Page Setup", "Paragraph", "Arrange")
 
 private val MARGIN_PRESETS = listOf(
     "Normal" to "normal", "Narrow" to "narrow", "Moderate" to "moderate", "Wide" to "wide", "Mirrored" to "mirrored", "Office 2003 Default" to "office2003",
@@ -40,7 +40,7 @@ private val COLUMN_NAMES = mapOf("one" to "One", "two" to "Two", "three" to "Thr
 
 /** The Layout tab's Page Setup and Paragraph groups, with menus for the settings that take a value. */
 @Composable
-fun LayoutGroup(name: String, env: RibbonEnv) {
+fun LayoutGroup(name: String, env: RibbonEnv, items: List<RibbonItem> = emptyList()) {
     val lay = env.state.layout
     when (name) {
         "Page Setup" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -65,6 +65,7 @@ fun LayoutGroup(name: String, env: RibbonEnv) {
                 }
             }
         }
+        "Arrange" -> ArrangeGroup(env, items)
         "Paragraph" -> Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconMenuButton("app.indentLeft", "Indent Left", INDENTS.map { it.first }, markedLabel(INDENTS) { sameNumber(lay.indentLeft, it) }, env.reason("para.indents"), ButtonSize.Labeled) { i ->
