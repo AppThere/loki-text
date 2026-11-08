@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -129,6 +130,30 @@ private const val MAX_PAGES = 50
 /** Pixels per point the pages are rendered at; the displayed factor can be smaller. */
 private const val PAGE_SCALE = 1.5f
 
+/** The most memory the rendered page bitmaps may use together (RGBA, 4 bytes a pixel). */
+private const val PAGE_BYTES_BUDGET = 160L * 1024 * 1024
+
+/**
+ * Pixels per point to render at. A point is [PAGE_SCALE] *density-independent* pixels at 100%
+ * zoom, so text is the same physical size on a phone (density 2.6) as on a desktop (density 1).
+ */
+internal fun pagePxPerPt(zoom: Float, density: Float): Float = (PAGE_SCALE * zoom * density.coerceIn(0.5f, 4f)).coerceAtMost(MAX_PAGE_PX_PER_PT)
+
+/** The most pixels per point the engine renders (`loki_render_page` clamps to the same). */
+private const val MAX_PAGE_PX_PER_PT = 6f
+
+/**
+ * How many pages to render: at most [MAX_PAGES] (fewer when zoomed in, as a bitmap grows with the
+ * square of the zoom), and no more than fit in [PAGE_BYTES_BUDGET] given the first page's size.
+ * Always at least one, so the document is never blank.
+ */
+internal fun pageRenderCap(zoom: Float, firstWidth: Int, firstHeight: Int): Int {
+    val byZoom = (MAX_PAGES / (zoom * zoom)).toInt().coerceAtLeast(5)
+    val bytes = firstWidth.toLong().coerceAtLeast(1) * firstHeight.toLong().coerceAtLeast(1) * 4
+    val byMemory = (PAGE_BYTES_BUDGET / bytes).toInt().coerceAtLeast(1)
+    return minOf(byZoom, byMemory)
+}
+
 /** Moves the caret to a pixel position on a rendered page; the engine takes points. */
 private fun Engine.setCaret(page: Int, o: Offset, pxPerPt: Float, extend: Boolean) {
     execute("caret.set", buildJsonObject {
@@ -211,7 +236,8 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
     var flat by remember { mutableStateOf(false) }
     // Client-side zoom: the pages are simply rendered at a larger or smaller scale.
     var zoom by remember { mutableStateOf(1f) }
-    val scale = PAGE_SCALE * zoom
+    val screenDensity = LocalDensity.current.density
+    val scale = pagePxPerPt(zoom, screenDensity)
     // From the engine's word count; of the selection when there is one.
     var counts by remember { mutableStateOf<Counts?>(null) }
 
@@ -296,7 +322,7 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                 val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState, dirty, fmt)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
-                val cap = (MAX_PAGES / (zoom * zoom)).toInt().coerceAtLeast(5)
+                val cap = pageRenderCap(zoom, first.width, first.height)
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, scale) }
                 Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty, fmt)
             }
@@ -466,21 +492,27 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                 // Kept per page index, not per bitmap, so a new image doesn't reset it for a frame.
                 var shown by remember(i) { mutableStateOf(IntSize.Zero) }
                 val pxPerPt = if (shown.width > 0) shown.width * scale / bitmap.width else scale
+                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt }) {
                 Image(
                     bitmap,
                     contentDescription = "Page ${i + 1}",
                     // Full size: a window narrower than the page scrolls sideways instead of shrinking it.
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    modifier = Modifier
                         .size(with(density) { bitmap.width.toDp() }, with(density) { bitmap.height.toDp() })
                         .then(if (flat) Modifier else Modifier.shadow(4.dp, RectangleShape, clip = false))
                         .onSizeChanged { shown = it }
-                        .onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt }
                         .drawWithContent {
                             drawContent()
                             drawSelection(selection, i, pxPerPt)
                         }
                         .pointerInput(i, pxPerPt) {
-                            detectTapGestures { o -> pageFocus.requestFocus(); keyboard?.show(); scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
+                            detectTapGestures(
+                                // Long press selects the word under the finger; the handles then adjust it.
+                                onLongPress = { o ->
+                                    pageFocus.requestFocus()
+                                    scope.launch { perform { setCaret(i, o, pxPerPt, false); execute("select.word") } }
+                                },
+                            ) { o -> pageFocus.requestFocus(); keyboard?.show(); scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
                         }
                         .pointerInput(i, pxPerPt) {
                             // Dragging selects with a mouse or pen. A finger's drag is left alone so it scrolls.
@@ -499,6 +531,18 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                             }
                         },
                 )
+                // Selection handles hang below the first and last line; dragging one moves that end.
+                selectionHandles(selection.rects)?.let { (startPt, endPt) ->
+                    for ((end, pt) in listOf(HandleEnd.Start to startPt, HandleEnd.End to endPt)) if (pt.page == i) {
+                        SelectionHandle(
+                            end, pt, pxPerPt,
+                            // The far end stays put; this end follows the finger.
+                            onStart = { e -> scope.launch { perform { execute("select.grabEnd", buildJsonObject { put("end", if (e == HandleEnd.Start) "start" else "end") }) } } },
+                            onDrag = { _, pos -> scope.launch { perform { setCaret(i, pos, pxPerPt, true) } } },
+                        )
+                    }
+                }
+                }
             }
         }
         }

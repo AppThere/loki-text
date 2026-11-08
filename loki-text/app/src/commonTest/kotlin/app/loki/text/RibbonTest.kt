@@ -1,5 +1,6 @@
 package app.loki.text
 
+import app.loki.text.engine.PageRect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -162,5 +163,41 @@ class RibbonTest {
         assertTrue(dialogParams(InsertDialog.NewComment, mapOf("text" to " ")) == null)
         assertTrue(READING_SPEEDS.all { it.second in 0.5..3.0 })
         assertTrue(TOC_LEVELS.all { it.second in 1..9 })
+    }
+
+    @Test
+    fun textIsTheSamePhysicalSizeAtEveryScreenDensity() {
+        // A 12 pt line is the same number of dp tall on a desktop (1.0) and a Pixel (2.625).
+        assertEquals(pagePxPerPt(1f, 1f) * 2.625f, pagePxPerPt(1f, 2.625f), 0.001f)
+        assertEquals(pagePxPerPt(2f, 1f), pagePxPerPt(1f, 1f) * 2f, 0.001f)
+        // A hostile density can't make the scale zero or huge.
+        assertTrue(pagePxPerPt(1f, 0f) > 0f && pagePxPerPt(1f, 1000f) <= pagePxPerPt(1f, 4f))
+    }
+
+    @Test
+    fun pageBitmapsStayWithinTheMemoryBudget() {
+        // US Letter at 3.94 px/pt on a phone is about 30 MB a page: a handful, not fifty.
+        val cap = pageRenderCap(1f, 2410, 3120)
+        assertTrue(cap in 1..6, "$cap")
+        // A small page keeps the old page limit; a gigantic one still renders one page.
+        assertEquals(50, pageRenderCap(1f, 459, 594))
+        assertEquals(38, pageRenderCap(1f, 918, 1188))
+        assertEquals(1, pageRenderCap(1f, 20000, 20000))
+        assertEquals(1, pageRenderCap(1f, 0, 0).coerceAtMost(1))
+    }
+
+    @Test
+    fun selectionHandlesSitAtTheStartAndEndOfTheSelection() {
+        assertEquals(null, selectionHandles(emptyList()))
+        // One line: the start handle at its left, the end handle at its right, both under the line.
+        val (a, b) = selectionHandles(listOf(PageRect(0, 10f, 20f, 30f, 12f)))!!
+        assertEquals(10f, a.x); assertEquals(40f, b.x)
+        assertEquals(32f, a.bottom); assertEquals(26f, a.mid)
+        // Several lines, over two pages: the first box starts it, the last box ends it.
+        val (s, e) = selectionHandles(listOf(PageRect(0, 50f, 700f, 400f, 12f), PageRect(1, 72f, 72f, 100f, 12f)))!!
+        assertEquals(0, s.page); assertEquals(50f, s.x)
+        assertEquals(1, e.page); assertEquals(172f, e.x)
+        // A box with a non-finite number gives no handles rather than a bad position.
+        assertEquals(null, selectionHandles(listOf(PageRect(0, Float.NaN, 0f, 1f, 1f))))
     }
 }

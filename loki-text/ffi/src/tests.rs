@@ -138,3 +138,23 @@ fn review_and_references_menus_send_params_the_engine_accepts() {
     }
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn grabbing_an_end_keeps_the_selection_and_moves_the_other_side() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    run("text.insert", r#"{"text":"alpha beta gamma"}"#);
+    let r = run("select.word", "{}");
+    assert!(r.get("error").is_none(), "{r}");
+    let before = call(s, "loki.selection", None)["result"]["rects"].clone();
+    assert!(before.as_array().is_some_and(|a| !a.is_empty()), "select.word selected nothing: {before}");
+    for end in ["start", "end"] {
+        let r = run("select.grabEnd", &format!(r#"{{"end":"{end}"}}"#));
+        assert!(r.get("error").is_none(), "{end}: {r}");
+        let after = call(s, "loki.selection", None)["result"]["rects"].clone();
+        assert_eq!(before, after, "grabbing the {end} must not change what is selected");
+    }
+    let bad = run("select.grabEnd", r#"{"end":"middle"}"#);
+    assert!(bad.get("error").is_some(), "{bad}");
+    unsafe { loki_session_free(s) };
+}

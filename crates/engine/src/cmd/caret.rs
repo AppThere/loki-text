@@ -54,6 +54,9 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("select.all", "Select All", "Home › Editing › Select", select_all).key("Mod+A").pure(),
         CommandSpec::new("select.range", "Select Range", "Navigation", select_range).params(r#"{"anchor": Pos, "focus": Pos}"#).pure(),
         CommandSpec::new("select.word", "Select Word", "Navigation", select_word).pure(),
+        CommandSpec::new("select.grabEnd", "Grab Selection End", "Navigation", grab_end)
+            .params(r#"{"end": "start"|"end"}"#)
+            .pure(),
         CommandSpec::new("select.sentence", "Select Sentence", "Navigation", select_sentence).pure(),
         CommandSpec::new("select.paragraph", "Select Paragraph", "Navigation", select_paragraph).pure(),
         CommandSpec::new("select.dragUnit", "Extend Selection by Units", "Navigation", drag_unit)
@@ -396,6 +399,21 @@ fn select_unit(s: &mut Session, unit: Unit) -> CmdResult {
         s.sel = Selection { anchor: a, focus: b };
         s.pending = None;
     }
+    sel_result(s)
+}
+
+/// Makes one end of the selection the end that moves (the focus), keeping the other fixed, without
+/// changing what is selected: dragging a selection handle then extends from the far end. A touch
+/// front end's start handle needs this, as the anchor may be at either end.
+fn grab_end(s: &mut Session, v: &Value) -> CmdResult {
+    let (first, last) = s.sel.ordered();
+    let (anchor, focus) = match v.get("end").and_then(Value::as_str) {
+        Some("start") => (last, first),
+        Some("end") => (first, last),
+        _ => return Err(CmdError::Params("`end` must be \"start\" or \"end\"".into())),
+    };
+    s.sel = Selection { anchor, focus };
+    s.goal_x = None;
     sel_result(s)
 }
 

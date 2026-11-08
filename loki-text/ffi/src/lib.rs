@@ -167,7 +167,7 @@ pub unsafe extern "C" fn loki_string_free(p: *mut c_char) {
 pub unsafe extern "C" fn loki_render_page(s: *mut LokiSession, page: u32, scale: f32, width: *mut u32, height: *mut u32, pages: *mut u32) -> *mut u8 {
     // SAFETY: caller's contract.
     let Some(session) = (unsafe { s.as_mut() }) else { return ptr::null_mut() };
-    let scale = if scale.is_finite() { scale.clamp(0.1, 4.0) } else { 1.0 };
+    let scale = if scale.is_finite() { scale.clamp(0.1, 6.0) } else { 1.0 };
     let out = catch_unwind(AssertUnwindSafe(|| {
         let sess = &mut session.inner.session;
         let l = sess.layout();
