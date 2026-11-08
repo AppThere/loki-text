@@ -241,6 +241,13 @@ fun App(
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
     var pageDialog by remember { mutableStateOf<PageForm?>(null) }
+    // Manage Styles: open or not, its sort order, the list it shows, and the Modify / New dialogs over it.
+    var manageStyles by remember { mutableStateOf(false) }
+    var stylesAlphabetical by remember { mutableStateOf(false) }
+    var styleEntries by remember { mutableStateOf<List<StyleEntry>>(emptyList()) }
+    var modifyStyle by remember { mutableStateOf<StyleEntry?>(null) }
+    var newStyleBase by remember { mutableStateOf<StyleEntry?>(null) }
+    var newStyleOpen by remember { mutableStateOf(false) }
     // The Find / Replace / Go To bar; null while it is closed.
     var findBar by remember { mutableStateOf<FindState?>(null) }
     // Unsaved changes, from the engine; and the action (Open, closing the window) waiting on the user's answer.
@@ -295,6 +302,15 @@ fun App(
         }
         if ((command == "edit.findNext" || command == "edit.findPrevious") && bare) {
             findBar?.let { b -> runCommand(command, findParams(b)) }
+            return
+        }
+        if (command == "styles.manage") { manageStyles = true; return }
+        if (command == "styles.create" && params["name"] == null) { newStyleBase = null; newStyleOpen = true; return }
+        if (command == "styles.modify" && params["style"] == null) {
+            // The style at the caret.
+            val id = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { (engine.execute("format.state") as? JsonObject)?.get("style")?.jsonPrimitive?.contentOrNull }.getOrNull() } }
+            val all = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseStyleEntries(engine.execute("styles.manage")) }.getOrDefault(emptyList()) } }
+            all.firstOrNull { it.id == id }?.let { modifyStyle = it } ?: run { manageStyles = true }
             return
         }
         if (command == "layout.pageSetup" && params["section"] == null) {
@@ -353,6 +369,15 @@ fun App(
         styles = engineLock.withLock {
             withContext(Dispatchers.Default) {
                 runCatching { parseStyles(engine.execute("styles.manage", buildJsonObject { put("sort", "recommended") })) }.getOrDefault(emptyList())
+            }
+        }
+    }
+
+    LaunchedEffect(stylesRevision, manageStyles, stylesAlphabetical) {
+        if (!manageStyles) return@LaunchedEffect
+        styleEntries = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching { parseStyleEntries(engine.execute("styles.manage", buildJsonObject { put("sort", if (stylesAlphabetical) "alphabetical" else "recommended") })) }.getOrDefault(emptyList())
             }
         }
     }
@@ -459,6 +484,27 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    if (manageStyles) {
+        ManageStylesDialog(
+            styleEntries, stylesAlphabetical, { stylesAlphabetical = it },
+            run = { cmd, p -> scope.launch { runCommand(cmd, p) } },
+            onModify = { modifyStyle = it },
+            onNew = { newStyleBase = it; newStyleOpen = true },
+            onClose = { manageStyles = false },
+        )
+    }
+    modifyStyle?.let { st ->
+        ModifyStyleDialog(st, onApply = { p ->
+            modifyStyle = null
+            if (p.isNotEmpty()) scope.launch { runCommand("styles.modify", p) }
+        }, onDismiss = { modifyStyle = null })
+    }
+    if (newStyleOpen) {
+        NewStyleDialog(newStyleBase?.name, onCreate = { p ->
+            newStyleOpen = false
+            scope.launch { runCommand("styles.create", p) }
+        }, onDismiss = { newStyleOpen = false })
+    }
     pageDialog?.let { start ->
         PageSetupDialog(start, onApply = { changes ->
             pageDialog = null
