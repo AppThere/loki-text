@@ -3,6 +3,7 @@ package app.loki.text
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
@@ -17,20 +18,40 @@ class TitleBarConfig(
     val leftInset: Dp,
     /** Room the system keeps at the right (Windows caption buttons). */
     val rightInset: Dp,
-    /** Called with true while the pointer is over a control, so clicks go to it and not to the window drag. */
+    /** Called for each pointer event over the bar: true on a control (clicks go to it), false elsewhere (the system drags the window). */
     val onControl: (Boolean) -> Unit,
     /** Minimize, maximize and close drawn by the app, where the system does not draw them (Linux); null otherwise. */
     val windowButtons: (@Composable () -> Unit)?,
 )
 
+/** Whether the pointer is on one of the title bar's controls, kept by [titleBarControl] for [titleBarArea]. */
+class TitleBarHits {
+    internal var overControl = false
+}
+
 /** Marks an interactive part of the title bar: while the pointer is on it, the bar does not start a window drag. */
-fun Modifier.titleBarControl(config: TitleBarConfig): Modifier = pointerInput(config) {
+fun Modifier.titleBarControl(hits: TitleBarHits): Modifier = pointerInput(hits) {
     awaitPointerEventScope {
         while (true) {
             when (awaitPointerEvent().type) {
-                PointerEventType.Enter, PointerEventType.Move, PointerEventType.Press -> config.onControl(true)
-                PointerEventType.Exit -> config.onControl(false)
+                PointerEventType.Enter, PointerEventType.Move, PointerEventType.Press -> hits.overControl = true
+                PointerEventType.Exit -> hits.overControl = false
             }
+        }
+    }
+}
+
+/**
+ * The whole title bar. The JetBrains Runtime treats a window with mouse listeners (every Compose
+ * window) as client area unless told otherwise for each mouse event, so every event over the bar is
+ * reported: a control, or the bar itself, which the system drags. The Main pass reaches the
+ * controls first, so [hits] is current when this runs.
+ */
+fun Modifier.titleBarArea(config: TitleBarConfig, hits: TitleBarHits): Modifier = pointerInput(config, hits) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent(PointerEventPass.Main)
+            config.onControl(hits.overControl)
         }
     }
 }

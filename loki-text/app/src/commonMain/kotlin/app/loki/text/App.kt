@@ -489,12 +489,13 @@ fun App(
         }
     }
 
-    val quickAccess: @Composable () -> Unit = {
-        FileMenuButton { id -> scope.launch { runFileMenu(id) } }
+    val fileMenu: @Composable () -> Unit = { FileMenuButton { id -> scope.launch { runFileMenu(id) } } }
+    val quickCommands: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
             CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
         }
     }
+    val quickAccess: @Composable () -> Unit = { fileMenu(); quickCommands() }
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
@@ -576,18 +577,21 @@ fun App(
     }
     Column(Modifier.fillMaxSize()) {
         if (titleBar != null) {
-            // The title bar is the top row at every width: menu and Undo/Redo, the document's name, window buttons.
+            // The title bar is the top row at every width: Undo/Redo, the document's name, the menu, window buttons.
+            val hits = remember { TitleBarHits() }
             Row(
-                Modifier.fillMaxWidth().height(titleBar.height).padding(start = titleBar.leftInset + 8.dp, end = titleBar.rightInset),
+                Modifier.fillMaxWidth().height(titleBar.height).titleBarArea(titleBar, hits)
+                    .padding(start = titleBar.leftInset + 8.dp, end = titleBar.rightInset + 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(Modifier.titleBarControl(titleBar)) { quickAccess() }
+                Row(Modifier.titleBarControl(hits)) { quickCommands() }
                 Text(
                     windowTitle(docPath, unsaved),
                     style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                 )
-                titleBar.windowButtons?.let { buttons -> Row(Modifier.titleBarControl(titleBar)) { buttons() } }
+                Row(Modifier.titleBarControl(hits)) { fileMenu() }
+                titleBar.windowButtons?.let { buttons -> Row(Modifier.titleBarControl(hits)) { buttons() } }
             }
         } else if (sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
         Ribbon(
