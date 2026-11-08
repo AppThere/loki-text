@@ -240,6 +240,8 @@ fun App(
     // The Font dialog's starting values while it is open.
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
+    // The Find / Replace / Go To bar; null while it is closed.
+    var findBar by remember { mutableStateOf<FindState?>(null) }
     // Unsaved changes, from the engine; and the action (Open, closing the window) waiting on the user's answer.
     var unsaved by remember { mutableStateOf(false) }
     // The file the document is saved to, or null for one that has none yet.
@@ -274,6 +276,24 @@ fun App(
             // The engine only asks a UI to open it; this UI shows its own dialog from the selection's formatting.
             val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("format.state") as? JsonObject }.getOrNull() } }
             fontDialog = fontFormFrom(state ?: JsonObject(emptyMap()))
+            return
+        }
+        // Find, Replace and Go To live in a bar above the page. Commands with text go straight to the engine.
+        val bare = params.isEmpty()
+        val open: FindMode? = when {
+            command == "edit.find" && bare || command == "edit.advancedFind" && bare -> FindMode.Find
+            command == "edit.findReplace" -> if (params["tab"]?.jsonPrimitive?.contentOrNull == "find") FindMode.Find
+                else if (params["tab"]?.jsonPrimitive?.contentOrNull == "goto") FindMode.GoTo else FindMode.Replace
+            command == "edit.goto" && bare -> FindMode.GoTo
+            (command == "edit.findNext" || command == "edit.findPrevious") && bare && findBar?.query.isNullOrEmpty() -> FindMode.Find
+            else -> null
+        }
+        if (open != null) {
+            findBar = (findBar ?: FindState()).copy(mode = open)
+            return
+        }
+        if ((command == "edit.findNext" || command == "edit.findPrevious") && bare) {
+            findBar?.let { b -> runCommand(command, findParams(b)) }
             return
         }
         if (command == "para.dialog") {
@@ -483,6 +503,20 @@ fun App(
             fonts = fontFamilies,
             onRunWith = { id, params -> scope.launch { runCommand(id, params) } },
         )
+        findBar?.let { b ->
+            FindBar(
+                b, { findBar = it },
+                run = { cmd, p ->
+                    runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }
+                        .onSuccess { revision++ }
+                        .recoverCatching { e -> throw (e as? EngineException ?: e) }
+                },
+                onClose = {
+                    findBar = null
+                    scope.launch { runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute("edit.advancedFind", buildJsonObject { put("highlight", false) }) } } }; revision++ }
+                },
+            )
+        }
         val pageFocus = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(if (flat) Color.White else DESK_COLOR)) {
