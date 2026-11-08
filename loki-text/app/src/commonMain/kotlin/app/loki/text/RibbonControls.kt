@@ -123,7 +123,7 @@ fun RibbonButton(
 
 /** The thin outlined frame behind the font and size boxes. */
 @Composable
-private fun FieldFrame(width: Dp, content: @Composable () -> Unit) {
+internal fun FieldFrame(width: Dp, content: @Composable () -> Unit) {
     Surface(
         shape = CONTROL_SHAPE,
         color = MaterialTheme.colorScheme.surface,

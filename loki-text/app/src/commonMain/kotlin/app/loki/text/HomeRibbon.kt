@@ -59,15 +59,19 @@ fun hasCustomGroup(tab: String, group: String): Boolean = when (tab) {
     "Home" -> group in HOME_GROUPS
     "Layout" -> group in LAYOUT_GROUPS
     "Insert" -> group in INSERT_GROUPS
+    "Table Design" -> group in TABLE_DESIGN_GROUPS
+    "Table Layout" -> group in TABLE_LAYOUT_GROUPS
     else -> false
 }
 
 /** The group's own controls. */
 @Composable
-fun CustomGroup(tab: String, group: String, env: RibbonEnv) {
+fun CustomGroup(tab: String, group: String, env: RibbonEnv, items: List<RibbonItem> = emptyList()) {
     when (tab) {
         "Layout" -> LayoutGroup(group, env)
         "Insert" -> InsertGroup(group, env)
+        "Table Design" -> TableGroup(group, env)
+        "Table Layout" -> TableLayoutGroup(group, items, env)
         else -> HomeGroup(group, env)
     }
 }

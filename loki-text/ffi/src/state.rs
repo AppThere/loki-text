@@ -2,8 +2,8 @@
 //! which toggles are on. Read from the engine's own state, the same sources the egui ribbon uses.
 
 use serde_json::{Map, Value, json};
-use wordcraft_doc::Align;
-use wordcraft_doc::props::LineSpacing;
+use wordcraft_doc::props::{HeightRule, LineSpacing, VAlign};
+use wordcraft_doc::{Align, StyleKind};
 use wordcraft_engine::Session;
 
 /// `format.state` keys that are toggles, with the command that flips each.
@@ -72,7 +72,7 @@ pub fn command_state(sess: &mut Session) -> Value {
         });
         on.push(if r.bidi { "para.rtl" } else { "para.ltr" });
     }
-    let lists = wordcraft_engine::cmd::para::list_buttons(&sess.doc, rp.and_then(|r| r.numbering));
+    let lists = wordcraft_engine::cmd::para::list_buttons(&sess.doc, rp.as_ref().and_then(|r| r.numbering));
     if lists.bullets {
         on.push("para.bullets");
     }
@@ -82,7 +82,23 @@ pub fn command_state(sess: &mut Session) -> Value {
     if lists.multilevel {
         on.push("para.multilevel");
     }
-    json!({"disabled": disabled, "on": on, "layout": layout_state(sess), "contextual": wordcraft_engine::ribbon::contextual_tabs(sess)})
+    let table = table_state(sess, rp.as_ref().map(|r| r.align));
+    if table.get("gridlines").and_then(Value::as_bool) == Some(true) {
+        on.push("table.viewGridlines");
+    }
+    if table.get("repeatHeader").and_then(Value::as_bool) == Some(true) {
+        on.push("table.repeatHeader");
+    }
+    if table.get("rtl").and_then(Value::as_bool) == Some(true) {
+        on.push("table.rtl");
+    }
+    json!({
+        "disabled": disabled,
+        "on": on,
+        "layout": layout_state(sess),
+        "table": table,
+        "contextual": wordcraft_engine::ribbon::contextual_tabs(sess),
+    })
 }
 
 /// A number the UI may show: finite, else null (a document can carry anything).
@@ -112,4 +128,72 @@ fn layout_state(sess: &Session) -> Value {
         "margins": wordcraft_engine::cmd::page::margins_preset_at(sess),
         "columns": wordcraft_engine::cmd::page::columns_preset_at(sess),
     })
+}
+
+/// What the Table Design and Table Layout tabs mark as current, for the table at the caret (null
+/// outside a table): its style and Table Style Options, the caret row's height (null when the text
+/// sets it) and rule, the caret column's width, the cell alignment as `table.cellAlign` names it
+/// (null for justified text), the toggles, and the document's table styles for the gallery.
+fn table_state(sess: &Session, para_align: Option<Align>) -> Value {
+    let Some((tp, r, c)) = sess.sel.focus.path.cell() else { return Value::Null };
+    let Some(t) = sess.doc.table(sess.sel.focus.story, &tp) else { return Value::Null };
+    let row = t.rows.get(r);
+    let cell = row.and_then(|x| x.cells.get(c));
+    let l = &t.props.look;
+    let v = match cell.and_then(|x| x.props.valign).unwrap_or_default() {
+        VAlign::Top => "top",
+        VAlign::Center => "center",
+        VAlign::Bottom => "bottom",
+    };
+    let h = match para_align {
+        Some(Align::Left) => Some("Left"),
+        Some(Align::Center) => Some("Center"),
+        Some(Align::Right) => Some("Right"),
+        _ => None,
+    };
+    let cell_align = h.map(|h| if v == "center" && h == "Center" { "center".to_string() } else { format!("{v}{h}") });
+    let mut styles: Vec<&wordcraft_doc::Style> = sess.doc.styles.styles.iter().filter(|s| s.kind == StyleKind::Table && !s.hidden).collect();
+    // The document's own styles first, then the built-in ones, each by name.
+    styles.sort_by(|a, b| a.builtin.cmp(&b.builtin).then_with(|| a.name.cmp(&b.name)));
+    json!({
+        "style": t.props.style,
+        "look": {
+            "headerRow": l.header_row,
+            "totalRow": l.total_row,
+            "bandedRows": l.banded_rows,
+            "firstColumn": l.first_column,
+            "lastColumn": l.last_column,
+            "bandedColumns": l.banded_columns,
+        },
+        "rowHeight": row.and_then(|x| x.props.height).map_or(Value::Null, num),
+        "exact": row.is_some_and(|x| x.props.height_rule == HeightRule::Exact),
+        "columnWidth": t.grid.get(t.grid_col(r, c)).map_or(Value::Null, |w| num(*w)),
+        "cellAlign": cell_align,
+        "gridlines": sess.view.table_gridlines,
+        "repeatHeader": row.is_some_and(|x| x.props.header),
+        "rtl": t.props.bidi_visual,
+        "styles": styles.iter().map(|s| json!({"id": s.id, "name": s.name})).collect::<Vec<_>>(),
+        // For the dialogs: the table's shape and settings, and the caret row's and cell's.
+        "columns": t.grid.len(),
+        "align": match t.props.align {
+            Some(Align::Center) => "center",
+            Some(Align::Right) => "right",
+            _ => "left",
+        },
+        "width": t.props.width.map_or(Value::Null, num),
+        "indent": t.props.indent.map_or(Value::Null, num),
+        "allowBreak": !row.is_some_and(|x| x.props.cant_split),
+        "cellWidth": cell.and_then(|x| x.props.width).map_or(Value::Null, num),
+        "valign": v,
+        "cellMargins": cell_margins(sess, t).map(num),
+        "altTitle": t.props.caption,
+        "altText": t.props.description,
+    })
+}
+
+/// The table's default cell margins in points as `[top, left, bottom, right]`: its own, else its
+/// style's, else Word's default (`table.cellMargins` starts from the same values).
+fn cell_margins(sess: &Session, t: &wordcraft_doc::Table) -> [f32; 4] {
+    let style = t.props.style.as_deref().and_then(|id| sess.doc.styles.table_style(id));
+    t.props.cell_margins.or(style.and_then(|st| st.parts.cell_margins)).unwrap_or([0.0, 5.4, 0.0, 5.4])
 }

@@ -19,7 +19,7 @@ import kotlinx.serialization.json.put
 private val EXTRA_GROUPS = setOf("Review" to "Comments", "Review" to "Speech", "References" to "Table of Contents")
 
 /** Does [group] of [tab] get [GroupExtras] beside its generic buttons? */
-fun hasGroupExtras(tab: String, group: String): Boolean = (tab to group) in EXTRA_GROUPS
+fun hasGroupExtras(tab: String, group: String): Boolean = (tab to group) in EXTRA_GROUPS || (tab to group) in TABLE_EXTRA_GROUPS
 
 /** Reading speeds: label, and the multiple `readAloud.speed` takes. */
 internal val READING_SPEEDS = listOf("0.5×" to 0.5, "0.75×" to 0.75, "Normal" to 1.0, "1.25×" to 1.25, "1.5×" to 1.5, "2×" to 2.0)
@@ -45,6 +45,7 @@ fun GroupExtras(tab: String, group: String, env: RibbonEnv) {
                 val n = TOC_LEVELS.getOrNull(i)?.second ?: return@IconMenuButton
                 env.onRunWith("references.toc", buildJsonObject { put("levels", n) })
             }
+            else -> if ((tab to group) in TABLE_EXTRA_GROUPS) TableExtras(tab, group, env)
         }
     }
 }

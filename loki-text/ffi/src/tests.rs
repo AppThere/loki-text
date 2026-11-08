@@ -124,6 +124,90 @@ fn command_state_names_the_contextual_tabs_of_the_selection() {
 }
 
 #[test]
+fn command_state_reports_the_caret_table() {
+    let s = loki_session_new();
+    let state = |s| call(s, "loki.commandState", None)["result"].clone();
+    let run = |s, req: &str| {
+        let r = call(s, "engine.execute", Some(req));
+        assert!(r.get("error").is_none(), "{req}: {r}");
+    };
+    assert!(state(s)["table"].is_null());
+    run(s, r#"{"command":"insert.table","params":{"rows":2,"cols":2}}"#);
+    let t = state(s)["table"].clone();
+    assert_eq!(t["cellAlign"], "topLeft", "{t}");
+    assert!(t["styles"].as_array().is_some_and(|a| !a.is_empty()), "{t}");
+    assert!(t["columnWidth"].as_f64().is_some_and(|w| w > 0.0), "{t}");
+    assert_eq!(t["columns"], 2, "{t}");
+    assert_eq!(t["align"], "left", "{t}");
+    assert_eq!(t["allowBreak"], true, "{t}");
+    assert!(t["cellMargins"].as_array().is_some_and(|m| m.len() == 4), "{t}");
+    let banded = t["look"]["bandedRows"].as_bool().unwrap_or(false);
+
+    run(s, r#"{"command":"table.cellAlign","params":{"value":"bottomRight"}}"#);
+    run(s, &format!(r#"{{"command":"table.look","params":{{"bandedRows":{}}}}}"#, !banded));
+    run(s, r#"{"command":"table.rowHeight","params":{"height":30,"rule":"exact"}}"#);
+    run(s, r#"{"command":"table.repeatHeader","params":{}}"#);
+    run(s, r#"{"command":"table.altText","params":{"title":"Prices","text":"Prices by year"}}"#);
+    let st = state(s);
+    let t = &st["table"];
+    assert_eq!(t["cellAlign"], "bottomRight", "{t}");
+    assert_eq!(t["look"]["bandedRows"], !banded, "{t}");
+    assert_eq!(t["rowHeight"], 30.0, "{t}");
+    assert_eq!(t["exact"], true, "{t}");
+    let on = st["on"].as_array().cloned().unwrap_or_default();
+    assert!(on.iter().any(|x| x == "table.repeatHeader"), "{st}");
+    assert_eq!(t["altTitle"], "Prices", "{t}");
+    assert_eq!(t["altText"], "Prices by year", "{t}");
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn table_menus_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"insert.table","params":{"rows":2,"cols":2}}"#));
+    let style = call(s, "loki.commandState", None)["result"]["table"]["styles"][0]["id"].clone();
+    let mut reqs = vec![
+        format!(r#"{{"command":"table.style","params":{{"style":{style}}}}}"#),
+        r#"{"command":"table.shading","params":{"color":"FFC000"}}"#.to_string(),
+        r#"{"command":"table.shading","params":{"color":null}}"#.to_string(),
+        r#"{"command":"table.columnWidth","params":{"width":90}}"#.to_string(),
+        r#"{"command":"table.rowHeight","params":{"height":20,"rule":"atLeast"}}"#.to_string(),
+    ];
+    for kind in ["all", "outside", "inside", "top", "bottom", "left", "right", "none"] {
+        reqs.push(format!(r#"{{"command":"table.borders","params":{{"kind":"{kind}"}}}}"#));
+    }
+    for mode in ["contents", "window", "fixed"] {
+        reqs.push(format!(r#"{{"command":"table.autofit","params":{{"mode":"{mode}"}}}}"#));
+    }
+    // Convert to Text removes the table, so it goes last.
+    reqs.push(r#"{"command":"table.toText","params":{"separator":"tab"}}"#.to_string());
+    for req in reqs {
+        let r = call(s, "engine.execute", Some(&req));
+        assert!(r.get("error").is_none(), "{req}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn table_dialogs_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"insert.table","params":{"rows":3,"cols":2}}"#));
+    for req in [
+        r#"{"command":"table.split","params":{"columns":3,"rows":1,"mergeFirst":true}}"#,
+        r#"{"command":"table.sort","params":{"column":0,"descending":true,"header":false}}"#,
+        r#"{"command":"table.formula","params":{"formula":"=SUM(LEFT)"}}"#,
+        r#"{"command":"table.altText","params":{"title":"","text":""}}"#,
+        r#"{"command":"table.cellMargins","params":{"top":0,"left":7.2,"bottom":0,"right":7.2}}"#,
+        r#"{"command":"table.properties","params":{"align":"center","width":300,"indent":0,"rowHeight":20,"rowHeightRule":"atLeast","allowBreak":false,"headerRow":true,"columnWidth":100,"cellWidth":100,"valign":"center"}}"#,
+        r#"{"command":"table.properties","params":{"width":null,"rowHeight":null,"cellWidth":null}}"#,
+    ] {
+        let r = call(s, "engine.execute", Some(req));
+        assert!(r.get("error").is_none(), "{req}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
 fn review_and_references_menus_send_params_the_engine_accepts() {
     let s = loki_session_new();
     call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Hello"}}"#));

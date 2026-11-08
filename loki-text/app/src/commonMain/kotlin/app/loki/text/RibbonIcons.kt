@@ -8,6 +8,30 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.AArrowDown
+import com.composables.icons.lucide.AlignHorizontalDistributeCenter
+import com.composables.icons.lucide.AlignVerticalDistributeCenter
+import com.composables.icons.lucide.BetweenHorizontalEnd
+import com.composables.icons.lucide.BetweenHorizontalStart
+import com.composables.icons.lucide.BetweenVerticalEnd
+import com.composables.icons.lucide.BetweenVerticalStart
+import com.composables.icons.lucide.MoveVertical
+import com.composables.icons.lucide.PilcrowLeft
+import com.composables.icons.lucide.Repeat
+import com.composables.icons.lucide.RotateCwSquare
+import com.composables.icons.lucide.Rows2
+import com.composables.icons.lucide.Rows3
+import com.composables.icons.lucide.SquareDashed
+import com.composables.icons.lucide.SquareMinus
+import com.composables.icons.lucide.SquarePen
+import com.composables.icons.lucide.SquarePlus
+import com.composables.icons.lucide.SquareX
+import com.composables.icons.lucide.Table2
+import com.composables.icons.lucide.TableCellsMerge
+import com.composables.icons.lucide.TableCellsSplit
+import com.composables.icons.lucide.TableProperties
+import com.composables.icons.lucide.TableRowsSplit
+import com.composables.icons.lucide.Trash
+import com.composables.icons.lucide.UnfoldHorizontal
 import com.composables.icons.lucide.FilePlus
 import com.composables.icons.lucide.Menu
 import com.composables.icons.lucide.SaveAll
@@ -204,6 +228,43 @@ private fun iconFor(id: String): ImageVector? = when (id) {
     "insert.removeLink" -> Lucide.Unlink
     "table.quick" -> Lucide.Table
     "table.fromText" -> Lucide.Table
+    "table.insertRowAbove" -> Lucide.BetweenHorizontalStart
+    "table.insertRowBelow" -> Lucide.BetweenHorizontalEnd
+    "table.insertColumnLeft" -> Lucide.BetweenVerticalStart
+    "table.insertColumnRight" -> Lucide.BetweenVerticalEnd
+    "table.deleteRow" -> Lucide.Rows2
+    "table.deleteColumn" -> Lucide.Columns2
+    "table.deleteTable" -> Lucide.Trash
+    "table.deleteCells" -> Lucide.SquareX
+    "table.merge" -> Lucide.TableCellsMerge
+    "table.split" -> Lucide.TableCellsSplit
+    "table.splitTable" -> Lucide.TableRowsSplit
+    "table.distributeRows" -> Lucide.AlignVerticalDistributeCenter
+    "table.distributeColumns" -> Lucide.AlignHorizontalDistributeCenter
+    "table.repeatHeader" -> Lucide.Repeat
+    "table.sort" -> Lucide.ArrowDownAZ
+    "table.toText" -> Lucide.FileText
+    "table.formula" -> Lucide.Sigma
+    "table.selectTable" -> Lucide.Table2
+    "table.selectRow" -> Lucide.Rows3
+    "table.selectColumn" -> Lucide.Columns3
+    "table.selectCell" -> Lucide.Square
+    "table.viewGridlines" -> Lucide.Grid3x3
+    "table.properties" -> Lucide.TableProperties
+    "table.rtl" -> Lucide.PilcrowLeft
+    "table.textDirection" -> Lucide.RotateCwSquare
+    "table.cellMargins" -> Lucide.SquareDashed
+    "table.borderPainter" -> Lucide.Paintbrush
+    "table.newStyle" -> Lucide.SquarePlus
+    "table.modifyStyle" -> Lucide.SquarePen
+    "table.deleteStyle" -> Lucide.SquareMinus
+    "table.altText" -> Lucide.Captions
+    "table.style" -> Lucide.Table
+    "table.shading" -> Lucide.PaintBucket
+    "table.borders" -> Lucide.Frame
+    "table.autofit" -> Lucide.UnfoldHorizontal
+    "app.rowHeight" -> Lucide.MoveVertical
+    "app.columnWidth" -> Lucide.MoveHorizontal
     "insert.dropCap" -> Lucide.Type
     "text.copyright" -> Lucide.Copyright
     "layout.margins" -> Lucide.Frame

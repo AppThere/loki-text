@@ -78,6 +78,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
@@ -103,6 +104,8 @@ class CommandState(
     val layout: LayoutState = LayoutState.EMPTY,
     /** The contextual tabs the selection brings up (Table Layout, Picture Format, …), in ribbon order. */
     val contextual: List<String> = emptyList(),
+    /** The table at the caret, or null outside a table. */
+    val table: TableState? = null,
 ) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
@@ -148,7 +151,71 @@ fun parseCommandState(state: JsonElement): CommandState {
     val disabled = (o["disabled"] as? JsonObject).orEmpty().mapNotNull { (id, why) -> why.jsonPrimitive.contentOrNull?.let { id to it } }.toMap()
     val on = (o["on"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
     val contextual = (o["contextual"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it in CONTEXTUAL_ORDER }
-    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual)
+    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]))
+}
+
+/**
+ * The table at the caret, as the Table Design and Table Layout tabs show it: its style, the Table
+ * Style Options (`table.look` keys), the caret row's set height in points (null when its text sets
+ * it) and whether it is exact, the caret column's width in points, the cell alignment as
+ * `table.cellAlign` names it, and the document's table styles as (id, name).
+ */
+class TableState(
+    val style: String?,
+    val look: Map<String, Boolean>,
+    val rowHeight: Float?,
+    val exact: Boolean,
+    val columnWidth: Float?,
+    val cellAlign: String?,
+    val styles: List<Pair<String, String>>,
+    /** Columns in the table's grid. */
+    val columns: Int = 0,
+    /** `left`, `center` or `right`. */
+    val align: String = "left",
+    /** Preferred table width in points; null is automatic. */
+    val width: Float? = null,
+    val indent: Float? = null,
+    /** Can the caret row break across pages? */
+    val allowBreak: Boolean = true,
+    /** Preferred width of the caret cell in points; null is automatic. */
+    val cellWidth: Float? = null,
+    /** `top`, `center` or `bottom`. */
+    val valign: String = "top",
+    /** Default cell margins in points: top, left, bottom, right. */
+    val cellMargins: List<Float> = listOf(0f, 5.4f, 0f, 5.4f),
+    val altTitle: String = "",
+    val altText: String = "",
+)
+
+fun parseTableState(e: JsonElement?): TableState? {
+    val o = e as? JsonObject ?: return null
+    fun p(k: String) = o[k] as? kotlinx.serialization.json.JsonPrimitive
+    val look = (o["look"] as? JsonObject).orEmpty().mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull?.let { k to it } }.toMap()
+    val styles = (o["styles"] as? JsonArray).orEmpty().mapNotNull { st ->
+        val so = st as? JsonObject ?: return@mapNotNull null
+        val id = (so["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+        id to ((so["name"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: id)
+    }
+    return TableState(
+        style = p("style")?.contentOrNull,
+        look = look,
+        rowHeight = p("rowHeight")?.floatOrNull?.takeIf { it.isFinite() },
+        exact = p("exact")?.booleanOrNull == true,
+        columnWidth = p("columnWidth")?.floatOrNull?.takeIf { it.isFinite() },
+        cellAlign = p("cellAlign")?.contentOrNull,
+        styles = styles,
+        columns = p("columns")?.intOrNull?.coerceAtLeast(0) ?: 0,
+        align = p("align")?.contentOrNull ?: "left",
+        width = p("width")?.floatOrNull?.takeIf { it.isFinite() },
+        indent = p("indent")?.floatOrNull?.takeIf { it.isFinite() },
+        allowBreak = p("allowBreak")?.booleanOrNull != false,
+        cellWidth = p("cellWidth")?.floatOrNull?.takeIf { it.isFinite() },
+        valign = p("valign")?.contentOrNull ?: "top",
+        cellMargins = (o["cellMargins"] as? JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.floatOrNull?.takeIf { f -> f.isFinite() } }
+            ?.takeIf { it.size == 4 } ?: listOf(0f, 5.4f, 0f, 5.4f),
+        altTitle = p("altTitle")?.contentOrNull.orEmpty(),
+        altText = p("altText")?.contentOrNull.orEmpty(),
+    )
 }
 
 /** One ribbon button: a WordCraft command that runs with no parameters. */
@@ -326,22 +393,22 @@ private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, onSelect: (I
 
 /** [CommandIconButton] for a ribbon item, with its state from [state]. */
 @Composable
-private fun StatefulIconButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
+internal fun StatefulIconButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
     CommandIconButton(item.id, item.label, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
 
 /** A large button with the command's name under its icon, with its state from [state]. */
 @Composable
-private fun StatefulBigButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
+internal fun StatefulBigButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
     RibbonButton(item.id, item.label, ButtonSize.Big, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
 
 /** A small button with the command's name beside its icon. */
 @Composable
-private fun StatefulLabeledButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
+internal fun StatefulLabeledButton(item: RibbonItem, state: CommandState, onRun: (String) -> Unit) =
     RibbonButton(item.id, item.label, ButtonSize.Labeled, item.shortcut, state.disabled[item.id], item.id in state.on) { onRun(item.id) }
 
 /** The "more commands" entry of a group, as a labelled button. */
 @Composable
-private fun MoreLabeledButton(onClick: () -> Unit) {
+internal fun MoreLabeledButton(onClick: () -> Unit) {
     TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp)) {
         Icon(Lucide.Ellipsis, contentDescription = null, modifier = Modifier.size(16.dp))
         Text("More", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 6.dp))
@@ -363,7 +430,7 @@ private fun MoreButton(onClick: () -> Unit) {
 
 /** A button that opens a menu of commands. */
 @Composable
-private fun CommandMenu(items: List<RibbonItem>, state: CommandState, onRun: (String) -> Unit, button: @Composable (onClick: () -> Unit) -> Unit) {
+internal fun CommandMenu(items: List<RibbonItem>, state: CommandState, onRun: (String) -> Unit, button: @Composable (onClick: () -> Unit) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         button { open = true }
@@ -449,7 +516,7 @@ fun Ribbon(
                       fun Body() {
                         if (hasCustomGroup(tab.name, g.name)) {
                             // Font and size boxes, colour buttons, a large Paste: controls that take a value.
-                            CustomGroup(tab.name, g.name, env)
+                            CustomGroup(tab.name, g.name, env, g.items)
                         } else if (tab.name == "Home" && g.name == "Styles" && styles.isNotEmpty()) {
                             // The gallery: each style drawn as it looks. The rest of the group is a menu.
                             Row(verticalAlignment = Alignment.CenterVertically) {
