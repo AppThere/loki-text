@@ -100,7 +100,7 @@ private val NARROW_WINDOW = 640.dp
 private const val MAX_WEB_WIDTH_PT = 640f
 
 /** Everything one render publishes together. */
-private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState, val dirty: Boolean = false, val format: FormatState = FormatState.EMPTY)
+private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState, val dirty: Boolean = false, val format: FormatState = FormatState.EMPTY, val path: String? = null)
 
 /** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
 internal class Counts(val words: Int, val pages: Int, val characters: Int)
@@ -213,7 +213,14 @@ private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple(
  * builds on the same three calls: execute, inspect, renderPage.
  */
 @Composable
-fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
+fun App(
+    closeRequest: Int = 0,
+    onClose: () -> Unit = {},
+    /** A document to open at start (a new window opened for a file). */
+    initialPath: String? = null,
+    /** Opens a document (a path, or null for a new one) in a new window; null where the platform has only one. */
+    onNewWindow: ((String?) -> Unit)? = null,
+) = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
@@ -230,8 +237,12 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
     // Bumped when a command may have changed the styles (editing them, opening another file).
     var stylesRevision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
+    // The Font dialog's starting values while it is open.
+    var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     // Unsaved changes, from the engine; and the action (Open, closing the window) waiting on the user's answer.
     var unsaved by remember { mutableStateOf(false) }
+    // The file the document is saved to, or null for one that has none yet.
+    var docPath by remember { mutableStateOf<String?>(null) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var flat by remember { mutableStateOf(false) }
     // Client-side zoom: the pages are simply rendered at a larger or smaller scale.
@@ -258,6 +269,12 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
     // and Paste passes its text in (the engine pastes its own richer copy when the text matches).
     var lastCopied by remember { mutableStateOf<String?>(null) }
     suspend fun runCommand(command: String, params: JsonObject = JsonObject(emptyMap())) {
+        if (command == "format.fontDialog") {
+            // The engine only asks a UI to open it; this UI shows its own dialog from the selection's formatting.
+            val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("format.state") as? JsonObject }.getOrNull() } }
+            fontDialog = fontFormFrom(state ?: JsonObject(emptyMap()))
+            return
+        }
         var p = params
         if (command == "edit.paste") {
             val text = withContext(Dispatchers.Default) { clipboardText() }
@@ -285,6 +302,10 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
 
     LaunchedEffect(Unit) {
         if (installDocumentFonts(engine, engineLock)) revision++
+        if (initialPath != null) {
+            perform { execute("file.open", buildJsonObject { put("path", initialPath) }) }
+            stylesRevision++
+        }
         fontFamilies = engineLock.withLock {
             withContext(Dispatchers.Default) {
                 runCatching { parseFontFamilies(engine.execute("font.list", buildJsonObject { put("all", true) })) }.getOrDefault(emptyList())
@@ -318,13 +339,15 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                 val counts = runCatching { parseCounts(engine.execute("review.wordCount") as JsonObject) }.getOrElse { warnOnce("review.wordCount", it, null) }
                 val cmdState = runCatching { parseCommandState(engine.commandState()) }.getOrElse { warnOnce("loki.commandState", it, CommandState.EMPTY) }
                 val fmt = runCatching { parseFormatState(engine.execute("format.state")) }.getOrDefault(FormatState.EMPTY)
-                val dirty = runCatching { (engine.execute("file.info") as? JsonObject)?.get("dirty")?.jsonPrimitive?.booleanOrNull == true }.getOrDefault(false)
+                val info = runCatching { engine.execute("file.info") as? JsonObject }.getOrNull()
+                val dirty = info?.get("dirty")?.jsonPrimitive?.booleanOrNull == true
+                val path = info?.get("path")?.jsonPrimitive?.contentOrNull
                 val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState, dirty, fmt)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
                 val cap = pageRenderCap(zoom, first.width, first.height)
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, scale) }
-                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty, fmt)
+                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty, fmt, path)
             }
         }
         selection = snap.selection
@@ -333,6 +356,7 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
         commandState = snap.commands
         formatState = snap.format
         unsaved = snap.dirty
+        docPath = snap.path
         pages = snap.pages
     }
 
@@ -360,40 +384,55 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
     fun guarded(action: () -> Unit) { if (unsaved) pendingAction = action else action() }
 
     LaunchedEffect(closeRequest) { if (closeRequest > 0) guarded(onClose) }
-    val quickAccess: @Composable () -> Unit = {
-        for ((label, command, shortcut) in QUICK_ACCESS) {
-            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
-        }
-        CommandIconButton("file.open", "Open", "") {
-            guarded {
-                scope.launch {
-                    val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
-                    perform { execute("file.open", buildJsonObject { put("path", path) }) }
-                    stylesRevision++
-                }
+    // A document is blank when nothing was typed and it has no file; opening another then reuses this window.
+    fun isBlank() = docPath == null && !unsaved && (counts?.characters ?: 0) == 0
+
+    suspend fun openHere(path: String) {
+        perform { execute("file.open", buildJsonObject { put("path", path) }) }
+        stylesRevision++
+    }
+
+    suspend fun runFileMenu(id: String) {
+        when (id) {
+            // New and Open go to a new window unless this one is blank (Open) or the platform has only one.
+            "file.new" -> if (onNewWindow != null) onNewWindow(null) else guarded {
+                scope.launch { perform { execute("file.new") }; stylesRevision++ }
             }
-        }
-        CommandIconButton("file.save", "Save", "Ctrl+S") { scope.launch { saveDocument() } }
-        CommandIconButton("file.saveAs", "Save As", "") {
-            scope.launch {
-                val path = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return@launch
+            "file.open" -> {
+                val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return
+                if (onNewWindow != null && !isBlank()) onNewWindow(path) else guarded { scope.launch { openHere(path) } }
+            }
+            "file.save" -> saveDocument()
+            "file.saveAs" -> {
+                val path = withContext(Dispatchers.Default) { pickFile(save = true) } ?: return
                 perform { execute("file.saveAs", buildJsonObject { put("path", path) }) }
-                    if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
+                if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
             }
-        }
-        CommandIconButton("file.print", "Print", "") {
-            scope.launch {
+            "file.print" -> {
                 // The engine lays the pages out and writes the PDF; the platform prints it.
                 val path = withContext(Dispatchers.Default) { printJobPath() }
                 perform { execute("file.printPdf", buildJsonObject { put("path", path) }) }
                 if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
             }
+            "app.about" -> showAbout = true
         }
-        CommandIconButton("app.about", "About $APP_NAME", "") { showAbout = true }
+    }
+
+    val quickAccess: @Composable () -> Unit = {
+        FileMenuButton { id -> scope.launch { runFileMenu(id) } }
+        for ((label, command, shortcut) in QUICK_ACCESS) {
+            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
+        }
     }
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    fontDialog?.let { start ->
+        FontDialog(start, fontFamilies, onApply = { changes ->
+            fontDialog = null
+            if (changes.isNotEmpty()) scope.launch { runCommand("format.set", buildJsonObject { put("props", changes) }) }
+        }, onDismiss = { fontDialog = null })
+    }
     pendingAction?.let { action ->
         AlertDialog(
             onDismissRequest = { pendingAction = null },
@@ -477,8 +516,8 @@ fun App(closeRequest: Int = 0, onClose: () -> Unit = {}) = MaterialTheme(colorSc
                 .widthIn(min = viewport)
                 .onPreviewKeyEvent { e ->
                     val k = keyCommand(e) ?: return@onPreviewKeyEvent false
-                    // Save may need a file picker, so it goes through the same path as the button.
-                    if (k.command == "file.save") scope.launch { saveDocument() } else scope.launch { runCommand(k.command, k.params) }
+                    // File commands may need a picker or a new window, so they go through the menu's path.
+                    if (k.command.startsWith("file.")) scope.launch { runFileMenu(k.command) } else scope.launch { runCommand(k.command, k.params) }
                     true
                 }
                 .padding(16.dp),

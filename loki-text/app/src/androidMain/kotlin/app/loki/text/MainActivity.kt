@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.graphics.Bitmap
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.result.contract.ActivityResultContracts
@@ -149,13 +150,31 @@ actual fun setClipboardText(text: String) {
     clipboard()?.setPrimaryClip(ClipData.newPlainText("Loki Text", text))
 }
 
+private const val EXTRA_PATH = "app.loki.text.PATH"
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activity = this
         // Edge to edge with a pale top bar: dark status-bar icons so the clock stays readable.
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT))
-        setContent { App() }
+        // A document opened from another window arrives as a path in app storage.
+        val initial = intent?.getStringExtra(EXTRA_PATH)
+        setContent {
+            App(initialPath = initial, onNewWindow = { path ->
+                // Each document gets its own task, so it has its own entry in Recents.
+                val next = Intent(this, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                if (path != null) next.putExtra(EXTRA_PATH, path)
+                startActivity(next)
+            })
+        }
+    }
+
+    // Pickers register on the visible window, not the one created last.
+    override fun onResume() {
+        super.onResume()
+        activity = this
     }
 
     override fun onDestroy() {

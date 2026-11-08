@@ -1,6 +1,8 @@
 package app.loki.text
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,10 +60,25 @@ actual fun setClipboardText(text: String) {
     runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) }
 }
 
+/** One open document window; [path] is the file it opens with, or null for a new document. */
+private class DocWindow(val id: Int, val path: String?)
+
 fun main() = application {
-    // Closing asks about unsaved changes first; App calls exitApplication once that is settled.
-    var closeRequest by remember { mutableStateOf(0) }
-    Window(onCloseRequest = { closeRequest++ }, title = "Loki Text") { App(closeRequest, ::exitApplication) }
+    val windows = remember { mutableStateListOf(DocWindow(0, null)) }
+    var nextId by remember { mutableStateOf(1) }
+    // Each document has its own window, and the application ends with the last one.
+    for (w in windows) key(w.id) {
+        // Closing asks about unsaved changes first; App calls onClose once that is settled.
+        var closeRequest by remember { mutableStateOf(0) }
+        Window(onCloseRequest = { closeRequest++ }, title = "Loki Text") {
+            App(
+                closeRequest,
+                onClose = { windows.remove(w); if (windows.isEmpty()) exitApplication() },
+                initialPath = w.path,
+                onNewWindow = { path -> windows.add(DocWindow(nextId++, path)) },
+            )
+        }
+    }
 }
 
 actual fun previewFontFamily(identity: String, bytes: ByteArray): androidx.compose.ui.text.font.FontFamily? =

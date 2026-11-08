@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.AArrowDown
+import com.composables.icons.lucide.FilePlus
+import com.composables.icons.lucide.Menu
+import com.composables.icons.lucide.SaveAll
 import com.composables.icons.lucide.AArrowUp
 import com.composables.icons.lucide.ALargeSmall
 import com.composables.icons.lucide.Accessibility
@@ -135,7 +138,11 @@ import com.composables.icons.lucide.ZoomOut
 
 private fun iconFor(id: String): ImageVector? = when (id) {
     "file.open" -> Lucide.FolderOpen
-    "file.save", "file.saveAs" -> Lucide.Save
+    "file.new" -> Lucide.FilePlus
+    "file.save" -> Lucide.Save
+    // Save As writes a copy elsewhere, so it gets a different glyph from Save.
+    "file.saveAs" -> Lucide.SaveAll
+    "app.menu" -> Lucide.Menu
     "file.print" -> Lucide.Printer
     // Not an engine command: the About button in the quick-access toolbar.
     "app.about" -> Lucide.Info
