@@ -3,13 +3,11 @@ package app.loki.text
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.utf16CodePoint
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -62,29 +60,9 @@ fun keyCommand(e: KeyEvent): KeyCommand? {
         Key.Enter, Key.NumPadEnter -> return KeyCommand("text.newParagraph")
         Key.Tab -> return KeyCommand(if (e.isShiftPressed) "text.backTab" else "text.tab")
     }
-    // Modifier and lock keys report an "undefined" character (0xFFFF on the JVM), not text.
-    if (e.key in NON_TEXT_KEYS) return null
-    // Printable text. AltGr reports as Ctrl+Alt, so only a lone Alt is treated as a shortcut.
-    val cp = e.utf16CodePoint
-    if (e.isAltPressed && !e.isCtrlPressed || !isPrintable(cp)) return null
-    return KeyCommand("text.insert", buildJsonObject { put("text", codePointToString(cp)) })
+    // Printable text is not a key command: it reaches the document through the focused ImeInput
+    // field, the one path for hardware keys, soft keyboards and IME composition. Inserting it here
+    // as well types every character twice (desktop delivers the key press and the typed character
+    // as separate events, and consuming the press does not stop the field getting the character).
+    return null
 }
-
-private val NON_TEXT_KEYS = setOf(
-    Key.ShiftLeft, Key.ShiftRight, Key.CtrlLeft, Key.CtrlRight, Key.AltLeft, Key.AltRight,
-    Key.MetaLeft, Key.MetaRight, Key.CapsLock, Key.NumLock, Key.ScrollLock,
-    Key.Escape, Key.Insert, Key.Menu,
-)
-
-/** Is [cp] a character to insert: not a control, surrogate, or Unicode non-character? */
-private fun isPrintable(cp: Int): Boolean =
-    cp in 0x20..0x10FFFF && cp != 0x7F && cp !in 0x80..0x9F && cp !in 0xD800..0xDFFF &&
-        cp !in 0xFDD0..0xFDEF && (cp and 0xFFFE) != 0xFFFE
-
-/** The string for one Unicode code point (common code has no `Character.toChars`). */
-private fun codePointToString(cp: Int): String =
-    if (cp < 0x10000) cp.toChar().toString()
-    else {
-        val v = cp - 0x10000
-        charArrayOf((0xD800 + (v shr 10)).toChar(), (0xDC00 + (v and 0x3FF)).toChar()).concatToString()
-    }
