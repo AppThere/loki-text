@@ -32,7 +32,9 @@ if [ "$(uname -m)" = "aarch64" ] && [ "$(uname -s)" = "Linux" ]; then
     for abi in $ABIS; do
         t=$(triple_for "$abi")
         rustup target add "$t"
-        wrapper=$(mktemp)
+        # A fixed path: cc-rs tracks the compiler path, so a fresh temp file each run rebuilt every C crate.
+        mkdir -p target
+        wrapper="$PWD/target/android-clang-$t.sh"
         # The versioned --target goes last: cc-rs adds an unversioned one, clang obeys the last, and NDK
         # headers reject an unversioned triple.
         printf '#!/bin/sh\nexec clang --sysroot=%s/sysroot -resource-dir=%s -fuse-ld=lld "$@" --target=%s%s\n' "$PRE" "$RES" "$t" "$API" > "$wrapper"
@@ -40,7 +42,6 @@ if [ "$(uname -m)" = "aarch64" ] && [ "$(uname -s)" = "Linux" ]; then
         up=$(echo "$t" | tr 'a-z-' 'A-Z_')
         env "CARGO_TARGET_${up}_LINKER=$wrapper" "CC_$(echo "$t" | tr - _)=$wrapper" "AR_$(echo "$t" | tr - _)=$AR" \
             cargo build --release -p loki-ffi --target "$t"
-        rm -f "$wrapper"
         mkdir -p "$OUT/$abi"
         cp "target/$t/release/libloki_ffi.so" "$OUT/$abi/"
     done
