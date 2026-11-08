@@ -222,6 +222,8 @@ fun App(
     initialPath: String? = null,
     /** Opens a document (a path, or null for a new one) in a new window; null where the platform has only one. */
     onNewWindow: ((String?) -> Unit)? = null,
+    /** Set when the app draws the window's title bar (desktop on a JetBrains Runtime); null for a native one. */
+    titleBar: TitleBarConfig? = null,
 ) = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
@@ -573,13 +575,27 @@ fun App(
         else -> SizeClass.Expanded
     }
     Column(Modifier.fillMaxSize()) {
-        if (sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
+        if (titleBar != null) {
+            // The title bar is the top row at every width: menu and Undo/Redo, the document's name, window buttons.
+            Row(
+                Modifier.fillMaxWidth().height(titleBar.height).padding(start = titleBar.leftInset + 8.dp, end = titleBar.rightInset),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(Modifier.titleBarControl(titleBar)) { quickAccess() }
+                Text(
+                    windowTitle(docPath, unsaved),
+                    style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                )
+                titleBar.windowButtons?.let { buttons -> Row(Modifier.titleBarControl(titleBar)) { buttons() } }
+            }
+        } else if (sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
         Ribbon(
             tabs = ribbon,
             styles = styles,
             state = commandState,
             sizeClass = sizeClass,
-            leading = quickAccess,
+            leading = if (titleBar != null) ({}) else quickAccess,
             onApplyStyle = { id -> scope.launch { runCommand("styles.apply", buildJsonObject { put("style", id) }) } },
             onRun = { id -> scope.launch { runCommand(id) } },
             format = formatState,

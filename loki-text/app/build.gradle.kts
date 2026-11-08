@@ -49,6 +49,8 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.jna)
                 implementation(libs.coroutines.swing)
+                // JetBrains Runtime API: a custom title bar when the JVM is a JBR (already on the classpath through Compose).
+                implementation(libs.jbr.api)
             }
         }
         androidMain {
