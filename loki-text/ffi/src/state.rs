@@ -99,6 +99,7 @@ pub fn command_state(sess: &mut Session) -> Value {
         "table": table,
         "picture": picture_state(sess),
         "arrange": arrange_state(sess),
+        "styleAt": style_at(sess),
         "contextual": wordcraft_engine::ribbon::contextual_tabs(sess),
     })
 }
@@ -231,4 +232,16 @@ fn arrange_state(sess: &Session) -> Value {
         Wrap::InFrontOfText => "inFrontOfText",
     };
     json!({"wrap": wrap, "moveWithText": f.v_rel == Anchor::Paragraph})
+}
+
+/// The styles at the caret for the Styles gallery: the paragraph's (its document's default
+/// paragraph style when it names none) and, when the text there has one, the character style.
+fn style_at(sess: &Session) -> Value {
+    let Some(p) = sess.doc.para_at(&sess.sel.focus) else { return Value::Null };
+    let styles = &sess.doc.styles.styles;
+    let default_of = |kind: StyleKind| styles.iter().find(|s| s.kind == kind && s.default).map(|s| s.id.clone());
+    let para = p.props.style.clone().or_else(|| default_of(StyleKind::Paragraph)).unwrap_or_else(|| "Normal".into());
+    // The default character style (Default Paragraph Font) is no style of its own.
+    let chr = p.props_at(sess.sel.focus.off).style.clone().filter(|id| Some(id) != default_of(StyleKind::Character).as_ref());
+    json!({"paragraph": para, "character": chr})
 }

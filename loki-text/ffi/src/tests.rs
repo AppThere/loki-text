@@ -289,6 +289,45 @@ fn picture_format_menus_send_params_the_engine_accepts() {
 }
 
 #[test]
+fn engine_shortcuts_reach_the_commands_people_expect() {
+    // Loki Text takes each chord from the first command (in engine.commands order) that lists it.
+    let s = loki_session_new();
+    let cmds = call(s, "engine.commands", None)["result"].clone();
+    let first = |chord: &str| {
+        cmds.as_array().into_iter().flatten().find_map(|c| {
+            let id = c["id"].as_str()?;
+            let listed = c["shortcut"].as_str()?.split(" / ").any(|x| x.trim() == chord);
+            (listed && !id.starts_with("ui.")).then(|| id.to_string())
+        })
+    };
+    for (chord, id) in [
+        ("Mod+O", "file.open"),
+        ("Mod+N", "file.new"),
+        ("Mod+S", "file.save"),
+        ("Mod+P", "file.print"),
+        ("Mod+Z", "edit.undo"),
+        ("Mod+Y", "edit.redo"),
+        ("Mod+B", "format.bold"),
+    ] {
+        assert_eq!(first(chord).as_deref(), Some(id), "{chord}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn command_state_names_the_style_at_the_caret() {
+    let s = loki_session_new();
+    let style = |s| call(s, "loki.commandState", None)["result"]["styleAt"].clone();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Title"}}"#));
+    assert_eq!(style(s)["paragraph"], "Normal");
+    assert!(style(s)["character"].is_null());
+    let r = call(s, "engine.execute", Some(r#"{"command":"styles.apply","params":{"style":"Heading1"}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    assert_eq!(style(s)["paragraph"], "Heading1");
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
 fn review_and_references_menus_send_params_the_engine_accepts() {
     let s = loki_session_new();
     call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Hello"}}"#));

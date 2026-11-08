@@ -25,6 +25,8 @@ import com.composables.icons.lucide.Menu
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -110,6 +112,10 @@ class CommandState(
     val picture: PictureState? = null,
     /** The selected picture, shape, text box or group, for the Arrange controls; null when none is. */
     val arrange: ArrangeState? = null,
+    /** The paragraph style at the caret (the default one when the paragraph names none). */
+    val styleParagraph: String? = null,
+    /** The character style of the text at the caret, if it has one. */
+    val styleCharacter: String? = null,
 ) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
@@ -155,7 +161,10 @@ fun parseCommandState(state: JsonElement): CommandState {
     val disabled = (o["disabled"] as? JsonObject).orEmpty().mapNotNull { (id, why) -> why.jsonPrimitive.contentOrNull?.let { id to it } }.toMap()
     val on = (o["on"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
     val contextual = (o["contextual"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull }.filter { it in CONTEXTUAL_ORDER }
-    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]), parsePictureState(o["picture"]), parseArrangeState(o["arrange"]))
+    return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]), parsePictureState(o["picture"]), parseArrangeState(o["arrange"]),
+        styleParagraph = ((o["styleAt"] as? JsonObject)?.get("paragraph") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+        styleCharacter = ((o["styleAt"] as? JsonObject)?.get("character") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+    )
 }
 
 /**
@@ -298,6 +307,14 @@ class StylePreview(
     val smallCaps: Boolean,
 )
 
+/**
+ * The gallery style to mark for the caret: its character style when the gallery has it (a
+ * character style in the text wins, as in Word), else its paragraph style; null when neither is in
+ * the gallery.
+ */
+internal fun currentStyle(styles: List<StylePreview>, state: CommandState): String? =
+    listOfNotNull(state.styleCharacter, state.styleParagraph).firstOrNull { id -> styles.any { it.id == id } }
+
 /** The styles shown in the gallery, in the engine's recommended order. */
 fun parseStyles(manage: JsonElement): List<StylePreview> = (manage as? JsonArray).orEmpty().mapNotNull { e ->
     val o = e as? JsonObject ?: return@mapNotNull null
@@ -319,14 +336,15 @@ private fun hexColor(hex: String?): Color? = hex?.takeIf { it.length == 6 }?.toI
 
 /** One style, drawn the way it looks, with its name; click applies it. */
 @Composable
-private fun StyleChip(style: StylePreview, onClick: () -> Unit) {
+private fun StyleChip(style: StylePreview, current: Boolean = false, onClick: () -> Unit) {
     val surface = MaterialTheme.colorScheme.surface
     // A dark style colour would vanish on a dark theme; use the theme's text colour there.
     val color = hexColor(style.colorHex)?.takeIf { abs(it.luminance() - surface.luminance()) > 0.3f } ?: MaterialTheme.colorScheme.onSurface
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(4.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        // The style at the caret is outlined in the accent colour, as Word marks it.
+        border = if (current) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         color = Color.White,
         modifier = Modifier.padding(end = 4.dp, bottom = 4.dp).width(76.dp),
     ) {
@@ -533,9 +551,16 @@ fun Ribbon(
                         } else if (tab.name == "Home" && g.name == "Styles" && styles.isNotEmpty()) {
                             // The gallery: each style drawn as it looks. The rest of the group is a menu.
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // A grid that scrolls vertically, so every style is reachable.
-                                LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.width(80.dp * 4).height(GROUP_CONTENT_HEIGHT)) {
-                                    items(styles) { st -> StyleChip(st) { onApplyStyle(st.id) } }
+                                // A grid that scrolls vertically, so every style is reachable. The style at
+                                // the caret is marked, and scrolled into view when the caret moves to another.
+                                val current = currentStyle(styles, state)
+                                val grid = rememberLazyGridState()
+                                LaunchedEffect(current, styles) {
+                                    val at = styles.indexOfFirst { it.id == current }
+                                    if (at >= 0 && grid.layoutInfo.visibleItemsInfo.none { it.index == at }) grid.animateScrollToItem(at)
+                                }
+                                LazyVerticalGrid(columns = GridCells.Fixed(4), state = grid, modifier = Modifier.width(80.dp * 4).height(GROUP_CONTENT_HEIGHT)) {
+                                    items(styles) { st -> StyleChip(st, st.id == current) { onApplyStyle(st.id) } }
                                 }
                                 CommandMenu(g.items, state, onRun) { openMenu -> MoreButton(openMenu) }
                             }
@@ -586,13 +611,15 @@ private fun VerticalRule() = VerticalDivider(Modifier.height(24.dp).padding(hori
 
 /** The Styles gallery as a button that opens a grid of every style. */
 @Composable
-private fun StylesButton(styles: List<StylePreview>, onApplyStyle: (String) -> Unit) {
+private fun StylesButton(styles: List<StylePreview>, current: String?, onApplyStyle: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
+    // Names the style at the caret, as the full gallery's marked chip does.
+    val label = styles.firstOrNull { it.id == current }?.name ?: "Styles"
     Box {
-        TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Styles", style = MaterialTheme.typography.labelLarge) }
+        TextButton(onClick = { open = true }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             LazyVerticalGrid(GridCells.Fixed(3), Modifier.width(80.dp * 3 + 8.dp).height(240.dp)) {
-                items(styles) { st -> StyleChip(st) { open = false; onApplyStyle(st.id) } }
+                items(styles) { st -> StyleChip(st, st.id == current) { open = false; onApplyStyle(st.id) } }
             }
         }
     }
@@ -632,7 +659,7 @@ private fun SimpleRibbon(
                     SizeField(env.format.size) { sz -> env.onRunWith("format.size", buildJsonObject { put("size", sz) }) }
                 }
             }
-            if (shown.name == "Home" && styles.isNotEmpty()) StylesButton(styles, onApplyStyle)
+            if (shown.name == "Home" && styles.isNotEmpty()) StylesButton(styles, currentStyle(styles, state), onApplyStyle)
             for (g in shown.groups) {
                 val featured = g.items.filter { hasRibbonIcon(it.id) }
                 if (featured.isEmpty()) continue

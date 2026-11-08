@@ -65,6 +65,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.ImageBitmap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -400,8 +403,12 @@ fun App(
         }
     }
 
+    // Every engine command's keyboard shortcuts, by chord.
+    var shortcuts by remember { mutableStateOf<Map<Chord, String>>(emptyMap()) }
     LaunchedEffect(Unit) {
-        ribbon = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseRibbon(engine.commands()) }.getOrDefault(emptyList()) } }
+        val commands = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.commands() }.getOrNull() } }
+        ribbon = commands?.let { runCatching { parseRibbon(it) }.getOrNull() }.orEmpty()
+        shortcuts = commands?.let { runCatching { parseShortcuts(it) }.getOrNull() }.orEmpty()
     }
 
     LaunchedEffect(stylesRevision) {
@@ -514,6 +521,10 @@ fun App(
         }
     }
 
+    // A key's command: file commands that need a picker or a window go through the File menu's path.
+    fun runKey(k: KeyCommand) {
+        scope.launch { if (k.command in FILE_MENU_COMMANDS) runFileMenu(k.command) else runCommand(k.command, k.params) }
+    }
     val fileMenu: @Composable () -> Unit = { FileMenuButton { id -> scope.launch { runFileMenu(id) } } }
     val quickCommands: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
@@ -600,7 +611,9 @@ fun App(
         maxWidth < 900.dp -> SizeClass.Medium
         else -> SizeClass.Expanded
     }
-    Column(Modifier.fillMaxSize()) {
+    // Shortcuts work wherever focus is (the ribbon, the title bar): keys a focused text box doesn't
+    // use come up to here. The page handles its own keys first (see its onPreviewKeyEvent).
+    Column(Modifier.fillMaxSize().onKeyEvent { e -> shortcutCommand(e, shortcuts)?.let { runKey(it); true } ?: false }) {
         if (titleBar != null) {
             // The title bar is the top row at every width: Undo/Redo, the document's name, the menu, window buttons.
             val hits = remember { TitleBarHits() }
@@ -648,6 +661,10 @@ fun App(
             )
         }
         val pageFocus = remember { FocusRequester() }
+        // With a keyboard (desktop), the page takes focus at once so typing and shortcuts work
+        // before the first click. On a touch screen that would pop up the on-screen keyboard.
+        val inputMode = LocalInputModeManager.current
+        LaunchedEffect(pageFocus) { if (inputMode.inputMode == InputMode.Keyboard) runCatching { pageFocus.requestFocus() } }
         val keyboard = LocalSoftwareKeyboardController.current
         // The Navigation pane follows the engine's View › Navigation Pane toggle: beside the page, or above it in a narrow window.
         val navOpen = "view.navigationPane" in commandState.on
@@ -711,9 +728,9 @@ fun App(
                         setTableTool(null)
                         return@onPreviewKeyEvent true
                     }
-                    val k = keyCommand(e) ?: return@onPreviewKeyEvent false
-                    // File commands may need a picker or a new window, so they go through the menu's path.
-                    if (k.command.startsWith("file.")) scope.launch { runFileMenu(k.command) } else scope.launch { runCommand(k.command, k.params) }
+                    // The engine's shortcuts first (Ctrl+O, F7, …), then typing and moving the caret.
+                    val k = shortcutCommand(e, shortcuts) ?: keyCommand(e) ?: return@onPreviewKeyEvent false
+                    runKey(k)
                     true
                 }
                 .padding(16.dp),
