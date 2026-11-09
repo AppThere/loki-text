@@ -3,6 +3,7 @@ package app.loki.text
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +18,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -62,6 +64,9 @@ private fun codePoints(s: String): Int = s.count { !it.isLowSurrogate() }
 
 private fun filler() = TextFieldValue(IME_FILLER, TextRange(IME_FILLER.length))
 
+/** How long typing must pause before the field is cleared back to filler. */
+internal const val IME_IDLE_MS = 600L
+
 /**
  * An invisible text field that owns focus while the page is being edited. Touch devices only show
  * the on-screen keyboard (and run autocorrect, predictions and CJK composition) for a real text
@@ -71,13 +76,23 @@ private fun filler() = TextFieldValue(IME_FILLER, TextRange(IME_FILLER.length))
 @Composable
 fun ImeInput(modifier: Modifier = Modifier, onCommand: (KeyCommand) -> Unit) {
     var value by remember { mutableStateOf(filler()) }
+    // When typing pauses, go back to filler so the field doesn't grow with everything typed. Never mid-composition.
+    LaunchedEffect(value.text, value.composition) {
+        if (value.composition == null && value.text != IME_FILLER) {
+            delay(IME_IDLE_MS)
+            value = filler()
+        }
+    }
     BasicTextField(
         value = value,
         onValueChange = { next ->
             val cmds = imeCommands(value.text, next.text)
             cmds.forEach(onCommand)
-            // While the IME composes, leave the field alone (resetting would cancel the composition).
-            value = if (next.composition == null) filler() else next.copy(selection = TextRange(next.text.length))
+            // Keep exactly what the IME made of the field, and not a reset copy: a keyboard that autocorrects
+            // sends several edits in one go (delete the word, commit the fix, commit the space), each built on
+            // the one before. The field's own text only catches up with a reset a frame later, so comparing
+            // those edits with a reset field read the first edit's deletion twice, deleting text before the word.
+            value = next.copy(selection = TextRange(next.text.length))
         },
         modifier = modifier.size(1.dp).alpha(0f),
         cursorBrush = SolidColor(Color.Transparent),
