@@ -54,9 +54,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("select.all", "Select All", "Home › Editing › Select", select_all).key("Mod+A").pure(),
         CommandSpec::new("select.range", "Select Range", "Navigation", select_range).params(r#"{"anchor": Pos, "focus": Pos}"#).pure(),
         CommandSpec::new("select.word", "Select Word", "Navigation", select_word).pure(),
-        CommandSpec::new("select.grabEnd", "Grab Selection End", "Navigation", grab_end)
-            .params(r#"{"end": "start"|"end"}"#)
-            .pure(),
+        CommandSpec::new("select.grabEnd", "Grab Selection End", "Navigation", grab_end).params(r#"{"end": "start"|"end"}"#).pure(),
         CommandSpec::new("select.sentence", "Select Sentence", "Navigation", select_sentence).pure(),
         CommandSpec::new("select.paragraph", "Select Paragraph", "Navigation", select_paragraph).pure(),
         CommandSpec::new("select.dragUnit", "Extend Selection by Units", "Navigation", drag_unit)
