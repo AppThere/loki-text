@@ -63,6 +63,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.ui.input.pointer.PointerType
@@ -323,6 +324,8 @@ fun App(
     // While two fingers are down the pages are only scaled on screen; the zoom is applied (and the
     // pages re-rendered sharply) when they lift.
     var pinch by remember { mutableStateOf(1f) }
+    // The context menu (right-click, or long-press on a selection or a misspelled word), over a page.
+    var ctxMenu by remember { mutableStateOf<ContextMenuData?>(null) }
     // The floating toolbar hides while a handle or the mouse is moving the selection.
     var handleDragging by remember { mutableStateOf(false) }
     var mouseSelecting by remember { mutableStateOf(false) }
@@ -345,6 +348,33 @@ fun App(
         } catch (e: EngineException) {
             e.message ?: "error"
         }
+    }
+
+    // Picks the picture, shape or text box under a press, if any (a press elsewhere is a caret placement).
+    suspend fun selectObjectAt(page: Int, at: Offset, pxPerPt: Float): Boolean {
+        val picked = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    val r = engine.execute("select.objectAt", buildJsonObject { put("page", page); put("x", at.x / pxPerPt); put("y", at.y / pxPerPt) }) as? JsonObject
+                    r?.get("selected")?.jsonPrimitive?.booleanOrNull == true
+                }.getOrDefault(false)
+            }
+        }
+        if (picked) revision++
+        return picked
+    }
+
+    // What the engine says about the word at the caret, for the context menu.
+    suspend fun hasIssueAtCaret(): Boolean =
+        engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseIssue(engine.execute("review.suggestions")) != null }.getOrDefault(false) } }
+
+    suspend fun openContextMenu(page: Int, at: Offset) {
+        val (issue, synonyms) = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                parseIssue(runCatching { engine.execute("review.suggestions") }.getOrNull()) to parseSynonyms(runCatching { engine.execute("review.thesaurus") }.getOrNull())
+            }
+        }
+        ctxMenu = ContextMenuData(page, at.x, at.y, issue, synonyms)
     }
 
     // Runs a command, bridging the system clipboard: Copy and Cut hand the engine's text to it,
@@ -856,13 +886,45 @@ fun App(
                             }
                         })
                         .then(if (tableTool != null) Modifier else Modifier.pointerInput(i, pxPerPt) {
+                            // Right-click: seen before the tap and drag handlers (Initial pass) and taken, so the
+                            // selection a click inside it would collapse is still there to be copied.
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                if (down.type == PointerType.Mouse && currentEvent.buttons.isSecondaryPressed) {
+                                    down.consume()
+                                    pageFocus.requestFocus()
+                                    scope.launch {
+                                        if (!pointInSelection(selection.rects, i, down.position.x / pxPerPt, down.position.y / pxPerPt)) perform { setCaret(i, down.position, pxPerPt, false) }
+                                        openContextMenu(i, down.position)
+                                    }
+                                }
+                            }
+                        }.pointerInput(i, pxPerPt) {
                             detectTapGestures(
                                 // Long press selects the word under the finger; the handles then adjust it.
                                 onLongPress = { o ->
                                     pageFocus.requestFocus()
-                                    scope.launch { perform { setCaret(i, o, pxPerPt, false); execute("select.word") } }
+                                    scope.launch {
+                                        // On the selection already: its menu. Elsewhere: select the word, and if it is a
+                                        // misspelling offer its fixes at once (the handles and toolbar cover the rest).
+                                        if (selectObjectAt(i, o, pxPerPt)) {
+                                            // An object is picked: its frame has the handles.
+                                        } else if (pointInSelection(selection.rects, i, o.x / pxPerPt, o.y / pxPerPt)) {
+                                            openContextMenu(i, o)
+                                        } else {
+                                            perform { setCaret(i, o, pxPerPt, false); execute("select.word") }
+                                            if (hasIssueAtCaret()) openContextMenu(i, o)
+                                        }
+                                    }
                                 },
-                            ) { o -> pageFocus.requestFocus(); keyboard?.show(); scope.launch { perform { setCaret(i, o, pxPerPt, false) } } }
+                            ) { o ->
+                                pageFocus.requestFocus()
+                                // A picture, shape or text box under the finger is selected (its frame appears); anything else puts the caret there.
+                                scope.launch {
+                                    if (selectObjectAt(i, o, pxPerPt)) keyboard?.hide()
+                                    else { keyboard?.show(); perform { setCaret(i, o, pxPerPt, false) } }
+                                }
+                            }
                         }
                         .pointerInput(i, pxPerPt) {
                             // Dragging selects with a mouse or pen. A finger's drag is left alone so it scrolls.
@@ -884,7 +946,7 @@ fun App(
                         }),
                 )
                 // Selection handles hang below the first and last line; dragging one moves that end.
-                selectionHandles(selection.rects)?.let { (startPt, endPt) ->
+                selectionHandles(if (selection.obj == null) selection.rects else emptyList())?.let { (startPt, endPt) ->
                     for ((end, pt) in listOf(HandleEnd.Start to startPt, HandleEnd.End to endPt)) if (pt.page == i) {
                         SelectionHandle(
                             end, pt, pxPerPt,
@@ -895,12 +957,21 @@ fun App(
                         )
                     }
                 }
+                // The selected object's frame: move, resize and rotate it.
+                selection.obj?.takeIf { it.page == i }?.let { o ->
+                    ObjectFrameOverlay(o, pxPerPt) { id, p -> scope.launch { runCommand(id, p) } }
+                }
+                ctxMenu?.takeIf { it.page == i }?.let { m ->
+                    Box(Modifier.offset { IntOffset(m.x.roundToInt(), m.y.roundToInt()) }) {
+                        ContextMenu(m, commandState, { id, p -> scope.launch { runCommand(id, p) } }, { ctxMenu = null })
+                    }
+                }
                 }
             }
         }
         // The floating toolbar over a selection: above its first visible line, flipping below when
         // there is no room. Hidden while something else is moving the selection or has the screen.
-        val miniShown = selection.rects.isNotEmpty() && pinch == 1f && !handleDragging && !mouseSelecting &&
+        val miniShown = selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
             pageDialog == null && !manageStyles && listLevels == null && listDialog == null
         if (miniShown) {

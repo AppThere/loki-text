@@ -448,3 +448,60 @@ fn chart_smartart_and_outline_menus_send_params_the_engine_accepts() {
     ok("smartArt.colors", r#"{"variant":"colorful"}"#);
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn the_context_menu_engine_calls_take_the_params_the_menu_sends() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    run("text.insert", r#"{"text":"The quick brown fox"}"#);
+    // What the menu asks the engine at the caret: both replies are parsed by the app, so null is a valid answer.
+    for cmd in ["review.suggestions", "review.thesaurus"] {
+        let r = run(cmd, "{}");
+        assert!(r.get("error").is_none(), "{cmd}: {r}");
+    }
+    // The synonym step: select the word, then type over it as raw text.
+    for (cmd, params) in [
+        ("select.word", "{}"),
+        ("text.insert", r#"{"text":"fast","raw":true}"#),
+        // The insert collapsed the selection; Copy needs something selected.
+        ("select.word", "{}"),
+        ("edit.copy", "{}"),
+        ("edit.pasteText", "{}"),
+        ("edit.pasteMerge", "{}"),
+    ] {
+        let r = run(cmd, params);
+        assert!(r.get("error").is_none(), "{cmd} {params}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn a_selected_object_reports_its_frame_and_can_be_picked_by_point() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    let object = |s| call(s, "loki.selection", None)["result"]["object"].clone();
+    // Typed text alone: nothing is an object.
+    run("text.insert", r#"{"text":"Some text"}"#);
+    assert!(object(s).is_null(), "{}", object(s));
+    // A shape just inserted is selected: its frame is reported, in points.
+    let r = run("insert.shape", r#"{"kind":"rectangle","width":120,"height":60}"#);
+    assert!(r.get("error").is_none(), "{r}");
+    let o = object(s);
+    assert_eq!(o["kind"], "shape", "{o}");
+    let (x, y, w, h) = (o["x"].as_f64().unwrap_or(-1.0), o["y"].as_f64().unwrap_or(-1.0), o["w"].as_f64().unwrap_or(0.0), o["h"].as_f64().unwrap_or(0.0));
+    assert!((w - 120.0).abs() < 0.5 && (h - 60.0).abs() < 0.5, "{o}");
+    // Moving the caret away drops the frame; picking the object by a point inside it brings it back.
+    run("select.collapse", r#"{"end":true}"#);
+    assert!(object(s).is_null());
+    let page = o["page"].as_u64().unwrap_or(0);
+    let hit = run("select.objectAt", &format!(r#"{{"page":{page},"x":{},"y":{}}}"#, x + w / 2.0, y + h / 2.0));
+    assert_eq!(hit["result"]["selected"], true, "{hit}");
+    assert_eq!(object(s)["kind"], "shape");
+    // A point far from any object picks nothing, and hostile numbers are errors, not crashes.
+    run("select.collapse", r#"{"end":true}"#);
+    let miss = run("select.objectAt", &format!(r#"{{"page":{page},"x":{},"y":{}}}"#, x + w + 300.0, y + h + 300.0));
+    assert_eq!(miss["result"]["selected"], false, "{miss}");
+    assert!(run("select.objectAt", r#"{"page":0,"x":"a","y":1}"#).get("error").is_some());
+    assert!(run("select.objectAt", r#"{"page":99999999999,"x":1,"y":1}"#).get("error").is_none());
+    unsafe { loki_session_free(s) };
+}

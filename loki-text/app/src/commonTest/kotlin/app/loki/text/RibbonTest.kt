@@ -295,6 +295,125 @@ class RibbonTest {
         assertEquals(null, visibleAnchorRect(emptyList(), view))
     }
 
+    private fun menuLabels(data: ContextMenuData, state: CommandState = CommandState.EMPTY) =
+        contextMenuEntries(data, state).map { e ->
+            when (e) {
+                is MenuEntry.Header -> "# ${e.text}"; is MenuEntry.Note -> "~ ${e.text}"; MenuEntry.Divider -> "-"
+                is MenuEntry.Item -> (if (e.enabled) "" else "x ") + e.label
+            }
+        }
+
+    @Test
+    fun theContextMenuOffersFixesFirstThenTheClipboardAndTheRest() {
+        val plain = menuLabels(ContextMenuData(0, 1f, 1f, null, emptyList()))
+        assertEquals(listOf("Cut", "Copy", "Paste", "Keep Text Only", "Merge Formatting", "-", "Font…", "Paragraph…", "Link…", "New Comment"), plain)
+        val issue = parseIssue(Json.parseToJsonElement("""{"kind":"spelling","message":"x","suggestions":["the","then",""]}"""))
+        val m = menuLabels(ContextMenuData(0, 1f, 1f, issue, listOf("big")))
+        assertEquals(listOf("# Possible spelling mistake", "the", "then", "Ignore All", "Add to Dictionary", "-", "Cut"), m.take(7))
+        assertTrue("# Synonyms" in m && "big" in m)
+        // A grammar issue shows its own message and has no dictionary items; with no fixes it says so.
+        val g = menuLabels(ContextMenuData(0, 1f, 1f, ProofIssue("grammar", "Use a comma", emptyList()), emptyList()))
+        assertEquals(listOf("# Use a comma", "~ (no suggestions)", "-", "Cut"), g.take(4))
+    }
+
+    @Test
+    fun theContextMenuGreysWhatCannotRunAndAddsTableCommandsInATable() {
+        val state = CommandState(mapOf("edit.paste" to "nothing to paste"), emptySet(), contextual = listOf("Table Design", "Table Layout"))
+        val m = menuLabels(ContextMenuData(0, 1f, 1f, null, emptyList()), state)
+        assertTrue("x Paste" in m && "Cut" in m)
+        assertTrue(m.containsAll(listOf("Insert Row Above", "Delete Table", "Merge Cells")))
+        assertTrue("Insert Row Above" !in menuLabels(ContextMenuData(0, 1f, 1f, null, emptyList())))
+    }
+
+    @Test
+    fun theContextMenuParsesTheEnginesRepliesWithoutTrustingThem() {
+        assertEquals(null, parseIssue(null)); assertEquals(null, parseIssue(Json.parseToJsonElement("null"))); assertEquals(null, parseIssue(Json.parseToJsonElement("[1]")))
+        val many = (1..50).joinToString(",") { "\"w$it\"" }
+        assertEquals(8, parseIssue(Json.parseToJsonElement("""{"kind":"spelling","suggestions":[$many]}"""))!!.suggestions.size)
+        assertEquals(listOf("big", "large"), parseSynonyms(Json.parseToJsonElement("""{"synonyms":["big","","large"]}""")))
+        assertEquals(emptyList(), parseSynonyms(Json.parseToJsonElement("""{"synonyms":7}""")))
+    }
+
+    @Test
+    fun aPressInsideTheSelectionIsFoundByPageAndPosition() {
+        val rects = listOf(PageRect(0, 10f, 20f, 30f, 12f), PageRect(1, 50f, 50f, 40f, 12f))
+        assertTrue(pointInSelection(rects, 0, 15f, 25f))
+        assertTrue(!pointInSelection(rects, 0, 15f, 40f))
+        // The same point on another page is not inside the first page's box.
+        assertTrue(!pointInSelection(rects, 1, 15f, 25f) && pointInSelection(rects, 1, 60f, 55f))
+    }
+
+    private fun near(a: Float, b: Float, msg: String = "") = assertTrue(kotlin.math.abs(a - b) < 0.01f, "$msg expected $b but was $a")
+
+    @Test
+    fun resizingKeepsTheFarSideWhereItWas() {
+        val f = FrameRect(100f, 100f, 200f, 100f, 0f)
+        // Right edge out by 50: wider, same left edge.
+        val r = resizeFrame(f, FrameHandle.Right, 50f, 0f, false)
+        near(r.w, 250f); near(r.x, 100f); near(r.h, 100f)
+        // Left edge in by 30 (dragged right by 30 is +30 along the left side's outward... here -30 moves it out):
+        val l = resizeFrame(f, FrameHandle.Left, -30f, 0f, false)
+        near(l.w, 230f); near(l.x, 70f)
+        // Bottom edge down by 20.
+        val b = resizeFrame(f, FrameHandle.Bottom, 0f, 20f, false)
+        near(b.h, 120f); near(b.y, 100f)
+        // A corner that keeps proportions follows the larger change: 300 x 150, top-left unmoved.
+        val c = resizeFrame(f, FrameHandle.BottomRight, 100f, 10f, true)
+        near(c.w, 300f); near(c.h, 150f); near(c.x, 100f); near(c.y, 100f)
+        // The same drag without the lock only changes what was dragged.
+        val free = resizeFrame(f, FrameHandle.BottomRight, 100f, 10f, false)
+        near(free.w, 300f); near(free.h, 110f)
+        // Never below the minimum, and the far (left) edge stays put.
+        val tiny = resizeFrame(f, FrameHandle.Right, -500f, 0f, false)
+        near(tiny.w, 4f); near(tiny.x, 100f)
+        // Not a usable drag: unchanged.
+        assertEquals(f, resizeFrame(f, FrameHandle.Right, Float.NaN, 0f, false))
+    }
+
+    @Test
+    fun aTurnedFrameIsResizedAlongItsOwnAxes() {
+        // Turned a quarter turn clockwise: its right side now faces down the page.
+        val f = FrameRect(100f, 100f, 200f, 100f, 90f)
+        val at = handlePoint(f, FrameHandle.Right)
+        near(at.x, 200f); near(at.y, 250f)
+        // Dragging that side 40 points further down widens the frame by 40 along its own x axis.
+        val r = resizeFrame(f, FrameHandle.Right, 0f, 40f, false)
+        near(r.w, 240f); near(r.h, 100f)
+        // Its far side (the frame's left, the page's top) has not moved: at page (200, 50) before and after.
+        val before = handlePoint(f, FrameHandle.Left); val after = handlePoint(r, FrameHandle.Left)
+        near(before.x, after.x, "far x"); near(before.y, after.y, "far y")
+        near(after.y, 50f)
+    }
+
+    @Test
+    fun theRotationHandleTurnsTheFrameTowardsThePointer() {
+        val f = FrameRect(100f, 100f, 200f, 100f, 0f)
+        near(rotateHandlePoint(f, 20f).y, 80f); near(rotateHandlePoint(f, 20f).x, 200f)
+        near(rotationFor(f, 200f, 50f), 0f)       // straight above
+        near(rotationFor(f, 300f, 150f), 90f)     // to the right
+        near(rotationFor(f, 200f, 250f), 180f)    // below
+        near(rotationFor(f, 100f, 150f), 270f)    // to the left
+        // Close to a multiple of 15 degrees it snaps; further away it does not.
+        val near92 = rotationFor(f, 200f + 100f * kotlin.math.sin(92f * 0.0174533f), 150f - 100f * kotlin.math.cos(92f * 0.0174533f))
+        near(near92, 90f)
+        val at100 = rotationFor(f, 200f + 100f * kotlin.math.sin(100f * 0.0174533f), 150f - 100f * kotlin.math.cos(100f * 0.0174533f))
+        near(at100, 100f)
+        near(rotationFor(f, Float.NaN, 0f), 0f)
+    }
+
+    @Test
+    fun movingAndTheCommandsThatApplyAChange() {
+        val frame = app.loki.text.engine.ObjectFrame(2, 100f, 100f, 200f, 100f, 0f, true, "shape")
+        val moved = moveFrame(frame.rect(), 10f, -5f)
+        near(moved.x, 110f); near(moved.y, 95f)
+        // A move sends only the place; a resize adds the sizes that changed.
+        val move = boundsParams(frame, moved)
+        assertTrue("x" in move && "y" in move && "width" !in move && "height" !in move)
+        assertEquals("2", move["page"].toString())
+        val resize = boundsParams(frame, resizeFrame(frame.rect(), FrameHandle.Right, 50f, 0f, false))
+        assertTrue("width" in resize && "height" !in resize)
+    }
+
     @Test
     fun pinchZoomSettlesInSmallStepsWithinTheLimits() {
         assertEquals(1.5f, settleZoom(1f, 1.52f, 2f), 0.0001f)

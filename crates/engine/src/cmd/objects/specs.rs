@@ -259,6 +259,10 @@ pub fn specs() -> Vec<CommandSpec> {
         .params(r#"{"value": "left|center|right"}"#)
         .when(has_placeable),
         CommandSpec::new("arrange.selectionPane", "Selection Pane", "Layout › Arrange", objects_list).pure(),
+        // A touch or pointer front end picks an object by where it was pressed, as a click does.
+        CommandSpec::new("select.objectAt", "Select Object at", "Navigation", select_object_at)
+            .params(r#"{"page": n, "x": pt, "y": pt, "edge"?: pt}  (selects the picture, shape or text box of the body under that point of page `page`, within `edge` points of its frame (default 5); replies {"selected": bool}. A text box is picked by its border, not its text)"#)
+            .pure(),
         CommandSpec::new("arrange.bounds", "Move or Resize", "Layout › Arrange", bounds)
             .params(r#"{"width"?: pt, "height"?: pt, "x"?: pt, "y"?: pt, "page"?: n, "to"?: Pos}  (x/y: the top-left on page `page` (0-based, default its page); moving an inline object by x/y floats it. to: an In Line with Text object moves to that text position and stays inline, as a drag does)"#)
             .when(has_movable),
@@ -376,4 +380,27 @@ pub fn specs() -> Vec<CommandSpec> {
             _ => Some("select a text box linked to another first"),
         }),
     ]
+}
+
+/// `select.objectAt`: selects the body object under a page point, if there is one.
+fn select_object_at(s: &mut super::Session, v: &serde_json::Value) -> Result<serde_json::Value, CmdError> {
+    let page = p::u64(v, "page").ok_or_else(|| CmdError::Params("`page` required".into()))?;
+    let (Some(x), Some(y)) = (p::f32(v, "x"), p::f32(v, "y")) else { return Err(CmdError::Params("`x` and `y` required".into())) };
+    if !x.is_finite() || !y.is_finite() {
+        return Err(CmdError::Params("`x` and `y` must be numbers".into()));
+    }
+    let edge = p::f32(v, "edge").filter(|e| e.is_finite()).unwrap_or(5.0).clamp(0.0, 50.0);
+    let page = usize::try_from(page).unwrap_or(usize::MAX);
+    let hit = {
+        let l = s.layout();
+        l.object_at_in(page, x, y, edge, wordcraft_doc::StoryRef::Body)
+    };
+    // Only objects in the body's own paragraphs: those in a table cell or a header need their own handling.
+    let Some(o) = hit.filter(|o| o.path.depth() == 0) else { return Ok(json!({"selected": false})) };
+    let pos = o.pos();
+    let end = Pos { off: pos.off + wordcraft_doc::para::OBJ.len_utf8(), ..pos.clone() };
+    s.sel = Selection { anchor: pos, focus: end };
+    s.page_hint = o.page;
+    s.goal_x = None;
+    Ok(json!({"selected": true}))
 }

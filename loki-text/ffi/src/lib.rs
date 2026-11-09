@@ -132,6 +132,9 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
 fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
     let (anchor, focus, hint) = (sess.sel.anchor.clone(), sess.sel.focus.clone(), sess.page_hint);
     let collapsed = sess.sel.is_collapsed();
+    // Read before the layout is borrowed: the selection's ends, and the object it holds (if it is one).
+    let (a, b) = sess.sel.ordered();
+    let picked = wordcraft_engine::cmd::objects::selected(sess);
     let l = sess.layout();
     let caret = l.caret_on(&focus, hint).map(|c| json!({"page": c.page, "x": c.x, "top": c.top, "height": c.height, "width": c.width}));
     let rects: Vec<Value> = if collapsed {
@@ -142,7 +145,28 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
             .map(|(pg, r)| json!({"page": pg, "x": r.x, "y": r.y, "w": r.w, "h": r.h}))
             .collect()
     };
-    json!({"caret": caret, "rects": rects, "pages": l.pages.len()})
+    // The selected picture, shape or text box, when the selection is exactly that object: its frame (page
+    // points, before rotation), the turn about its centre, and whether it floats (an inline one is moved by the text).
+    let object = if a.story == b.story && a.path == b.path && b.off == a.off + wordcraft_doc::para::OBJ.len_utf8() {
+        picked.and_then(|(pos, o)| {
+            let hit = l.object(&pos, hint)?;
+            let kind = if hit.text_box.is_some() {
+                "textBox"
+            } else if matches!(o, wordcraft_doc::para::InlineObject::Image { .. }) {
+                "image"
+            } else if matches!(o, wordcraft_doc::para::InlineObject::Shape { .. }) {
+                "shape"
+            } else {
+                "object"
+            };
+            let r = hit.rect;
+            let finite = [r.x, r.y, r.w, r.h, hit.spin.deg].iter().all(|n| n.is_finite());
+            finite.then(|| json!({"page": hit.page, "x": r.x, "y": r.y, "w": r.w, "h": r.h, "rotation": hit.spin.deg, "floating": hit.floating(), "kind": kind}))
+        })
+    } else {
+        None
+    };
+    json!({"caret": caret, "rects": rects, "pages": l.pages.len(), "object": object})
 }
 
 /// Free a string returned by [`loki_call`]. Null is ignored.

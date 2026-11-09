@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -28,8 +29,14 @@ expect class NativeEngine() : AutoCloseable {
 /** A box in points from a page's top-left. */
 class PageRect(val page: Int, val x: Float, val y: Float, val w: Float, val h: Float)
 
-/** Where to draw the caret and selection; see `selection_geometry` in `ffi/src/lib.rs`. */
-class SelectionGeometry(val caret: PageRect?, val rects: List<PageRect>)
+/**
+ * The selected picture, shape or text box: its frame in page points before rotation, the turn about its
+ * centre in degrees (clockwise), whether it floats (an inline one is placed by the text) and its [kind].
+ */
+class ObjectFrame(val page: Int, val x: Float, val y: Float, val w: Float, val h: Float, val rotation: Float, val floating: Boolean, val kind: String)
+
+/** Where to draw the caret and selection; see `selection_geometry` in `ffi/src/lib.rs`. [obj] is set when the selection is one object. */
+class SelectionGeometry(val caret: PageRect?, val rects: List<PageRect>, val obj: ObjectFrame? = null)
 
 class EngineException(message: String) : Exception(message)
 
@@ -75,7 +82,16 @@ class Engine(private val native: NativeEngine = NativeEngine()) : AutoCloseable 
         )
         val caret = (r["caret"] as? JsonObject)?.let { box(it, "width", "height") }
         val rects = (r["rects"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> box(o, "w", "h") } } ?: emptyList()
-        return SelectionGeometry(caret, rects)
+        val obj = (r["object"] as? JsonObject)?.let { o ->
+            fun f(k: String) = o[k]?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() }
+            val (x, y, w, h) = listOf(f("x"), f("y"), f("w"), f("h"))
+            if (x == null || y == null || w == null || h == null || w <= 0f || h <= 0f) null
+            else ObjectFrame(
+                o["page"]?.jsonPrimitive?.intOrNull ?: 0, x, y, w, h, f("rotation") ?: 0f,
+                o["floating"]?.jsonPrimitive?.booleanOrNull ?: false, o["kind"]?.jsonPrimitive?.contentOrNull ?: "object",
+            )
+        }
+        return SelectionGeometry(caret, rects, obj)
     }
 
     fun renderPage(page: Int, scale: Float): PageBitmap? = native.renderPage(page, scale)
