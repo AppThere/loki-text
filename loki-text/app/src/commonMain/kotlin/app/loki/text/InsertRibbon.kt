@@ -32,7 +32,7 @@ private val PAGE_NUMBERS = listOf(
 private val SYMBOLS = listOf("©", "®", "™", "°", "±", "×", "÷", "≠", "≤", "≥", "€", "£", "¥", "§", "¶", "•", "→", "←", "✓", "…")
 
 /** Shapes the engine draws: label, kind. */
-private val SHAPES = listOf(
+internal val SHAPES = listOf(
     "Rectangle" to "rectangle", "Rounded Rectangle" to "roundedRectangle", "Ellipse" to "ellipse", "Triangle" to "triangle",
     "Diamond" to "diamond", "Line" to "line", "Arrow" to "arrow", "Star" to "star", "Heart" to "heart",
 )

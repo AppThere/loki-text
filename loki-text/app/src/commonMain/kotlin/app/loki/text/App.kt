@@ -54,6 +54,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -151,6 +156,23 @@ private const val PAGE_BYTES_BUDGET = 160L * 1024 * 1024
  * zoom, so text is the same physical size on a phone (density 2.6) as on a desktop (density 1).
  */
 internal fun pagePxPerPt(zoom: Float, density: Float): Float = (PAGE_SCALE * zoom * density.coerceIn(0.5f, 4f)).coerceAtMost(MAX_PAGE_PX_PER_PT)
+
+/**
+ * The highest zoom that still renders within the engine's pixel limit at this screen [density]
+ * (a dense phone screen reaches it sooner than a desktop), between 1 and [MAX_ZOOM].
+ */
+internal fun maxZoomFor(density: Float): Float =
+    (MAX_PAGE_PX_PER_PT / (PAGE_SCALE * density.coerceIn(0.5f, 4f))).coerceIn(1f, MAX_ZOOM)
+
+/**
+ * The zoom after a pinch that scaled the view by [pinch]: in steps of 5%, within the limits. A pinch
+ * that is not a usable number leaves [zoom] as it was.
+ */
+internal fun settleZoom(zoom: Float, pinch: Float, maxZoom: Float): Float {
+    val z = zoom * pinch
+    if (!z.isFinite() || z <= 0f) return zoom
+    return ((z * 20f).roundToInt() / 20f).coerceIn(MIN_ZOOM, maxZoom.coerceAtLeast(MIN_ZOOM))
+}
 
 /** The most pixels per point the engine renders (`loki_render_page` clamps to the same). */
 private const val MAX_PAGE_PX_PER_PT = 6f
@@ -293,6 +315,9 @@ fun App(
     var flat by remember { mutableStateOf(false) }
     // Client-side zoom: the pages are simply rendered at a larger or smaller scale.
     var zoom by remember { mutableStateOf(1f) }
+    // While two fingers are down the pages are only scaled on screen; the zoom is applied (and the
+    // pages re-rendered sharply) when they lift.
+    var pinch by remember { mutableStateOf(1f) }
     val screenDensity = LocalDensity.current.density
     val scale = pagePxPerPt(zoom, screenDensity)
     // From the engine's word count; of the selection when there is one.
@@ -411,6 +436,13 @@ fun App(
         shortcuts = commands?.let { runCatching { parseShortcuts(it) }.getOrNull() }.orEmpty()
     }
 
+    // The Equation tab's structures and symbols don't change while the app runs.
+    var equationGallery by remember { mutableStateOf(EquationGallery.EMPTY) }
+    LaunchedEffect(Unit) {
+        equationGallery = engineLock.withLock {
+            withContext(Dispatchers.Default) { runCatching { parseEquationGallery(engine.execute("equation.gallery")) }.getOrDefault(EquationGallery.EMPTY) }
+        }
+    }
     LaunchedEffect(stylesRevision) {
         styles = engineLock.withLock {
             withContext(Dispatchers.Default) {
@@ -645,6 +677,7 @@ fun App(
             onRunWith = { id, params -> scope.launch { runCommand(id, params) } },
             tableTool = tableTool,
             onTableTool = ::setTableTool,
+            equation = equationGallery,
         )
         findBar?.let { b ->
             FindBar(
@@ -682,7 +715,32 @@ fun App(
         if (navOpen && sizeClass != SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.width(300.dp).fillMaxHeight())
         }
-        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().background(if (flat) Color.White else DESK_COLOR)) {
+        val maxZoom = maxZoomFor(LocalDensity.current.density)
+        val currentZoom by rememberUpdatedState(zoom)
+        BoxWithConstraints(
+            Modifier.weight(1f).fillMaxHeight().background(if (flat) Color.White else DESK_COLOR)
+                // Two fingers zoom; one finger is left alone so it scrolls and taps. Seen before the
+                // pages are (Initial pass) and consumed only while pinching.
+                .pointerInput(maxZoom) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        var pinching = false
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.changes.count { it.pressed } >= 2) {
+                                pinching = true
+                                val z = event.calculateZoom()
+                                if (z.isFinite() && z > 0f) pinch = (pinch * z).coerceIn(MIN_ZOOM / currentZoom, maxZoom / currentZoom)
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                        if (pinching) {
+                            zoom = settleZoom(currentZoom, pinch, maxZoom)
+                            pinch = 1f
+                        }
+                    }
+                },
+        ) {
         val viewport = maxWidth
         val density = LocalDensity.current
         val gutterPx = with(density) { 32.dp.toPx() }
@@ -721,7 +779,9 @@ fun App(
             vScroll.animateScrollTo(target.coerceAtLeast(0))
         }
         Column(
-            Modifier.fillMaxSize().verticalScroll(vScroll).horizontalScroll(rememberScrollState())
+            Modifier.fillMaxSize()
+                .graphicsLayer { scaleX = pinch; scaleY = pinch; transformOrigin = TransformOrigin(0.5f, 0f) }
+                .verticalScroll(vScroll).horizontalScroll(rememberScrollState())
                 .widthIn(min = viewport)
                 .onPreviewKeyEvent { e ->
                     if (tableTool != null && e.key == Key.Escape && e.type == KeyEventType.KeyDown) {
@@ -835,7 +895,7 @@ fun App(
             flat = flat,
             sizeClass = sizeClass,
             zoom = zoom,
-            onZoom = { zoom = it.coerceIn(MIN_ZOOM, MAX_ZOOM) },
+            onZoom = { zoom = it.coerceIn(MIN_ZOOM, maxZoomFor(screenDensity)) },
             onView = { cmd -> scope.launch { runCommand(cmd) } },
         )
     }

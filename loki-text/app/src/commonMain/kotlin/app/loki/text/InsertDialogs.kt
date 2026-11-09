@@ -33,6 +33,8 @@ enum class InsertDialog(val title: String, val command: String, val fields: List
     Picture("Insert Picture", "insert.picture", listOf(DialogField("path", "File", required = true, browse = true), DialogField("alt", "Alt text"), DialogField("width", "Width (pt)"))),
     TextBox("Text Box", "insert.textBox", listOf(DialogField("text", "Text"), DialogField("width", "Width (pt)", "200"), DialogField("height", "Height (pt)", "80"))),
     NewComment("New Comment", "review.newComment", listOf(DialogField("text", "Comment", required = true))),
+    AltText("Alt Text", "object.altText", listOf(DialogField("text", "Description"), DialogField("title", "Title"))),
+    ChartTitle("Chart Title", "chart.title", listOf(DialogField("text", "Title", required = true))),
     DateTime("Date & Time", "insert.dateTime", listOf(DialogField("format", "Format", "M/d/yyyy", required = true))),
 }
 

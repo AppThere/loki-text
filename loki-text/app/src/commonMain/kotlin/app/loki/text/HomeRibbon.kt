@@ -49,6 +49,8 @@ class RibbonEnv(
     val tableTool: String? = null,
     /** Turns a page tool on, or all off with null. */
     val onTableTool: (String?) -> Unit = {},
+    /** What the Equation tab offers: structure galleries and symbol sets. */
+    val equation: EquationGallery = EquationGallery.EMPTY,
 ) {
     fun label(id: String, fallback: String) = items[id]?.label ?: fallback
     fun shortcut(id: String) = items[id]?.shortcut ?: ""
@@ -56,7 +58,7 @@ class RibbonEnv(
 }
 
 /** The groups of the Home tab that [HomeGroup] draws itself, instead of the generic button grid. */
-val HOME_GROUPS = setOf("Clipboard", "Font", "Paragraph")
+val HOME_GROUPS = setOf("Clipboard", "Font", "Paragraph", "Editing")
 
 /** Does [group] of [tab] have controls of its own, drawn by [CustomGroup]? */
 fun hasCustomGroup(tab: String, group: String): Boolean = when (tab) {
@@ -66,6 +68,8 @@ fun hasCustomGroup(tab: String, group: String): Boolean = when (tab) {
     "Table Design" -> group in TABLE_DESIGN_GROUPS
     "Table Layout" -> group in TABLE_LAYOUT_GROUPS
     "Picture Format" -> group in PICTURE_GROUPS
+    "Shape Format" -> group in SHAPE_GROUPS
+    "Equation" -> group in EQUATION_GROUPS
     else -> false
 }
 
@@ -78,6 +82,8 @@ fun CustomGroup(tab: String, group: String, env: RibbonEnv, items: List<RibbonIt
         "Table Design" -> TableGroup(group, env)
         "Table Layout" -> TableLayoutGroup(group, items, env)
         "Picture Format" -> PictureGroup(group, env)
+        "Shape Format" -> ShapeGroup(group, env)
+        "Equation" -> EquationGroup(group, env)
         else -> HomeGroup(group, env)
     }
 }
@@ -109,7 +115,7 @@ fun HomeGroup(name: String, env: RibbonEnv) {
                 Cmd(env, "edit.copy", "Copy", ButtonSize.Labeled)
                 RibbonButton(
                     "app.formatPainter",
-                    if (painting) "Apply Format" else "Format Painter",
+                    if (painting) "Apply" else "Format",
                     ButtonSize.Labeled,
                     disabledReason = env.reason("edit.copyFormat"),
                     checked = painting,
@@ -117,6 +123,18 @@ fun HomeGroup(name: String, env: RibbonEnv) {
                     env.onRun(if (painting) "edit.pasteFormat" else "edit.copyFormat")
                     painting = !painting
                 }
+            }
+        }
+        // Three stacked controls: Find and Select open menus of related commands.
+        "Editing" -> Column {
+            val find = listOf("Find" to "edit.find", "Advanced Find…" to "edit.advancedFind", "Go To…" to "edit.goto")
+            IconMenuButton("edit.find", env.label("edit.find", "Find"), find.map { it.first }, null, env.reason("edit.find"), ButtonSize.Labeled) { i ->
+                find.getOrNull(i)?.second?.let(env.onRun)
+            }
+            Cmd(env, "edit.findReplace", "Replace", ButtonSize.Labeled)
+            val select = listOf("Select All" to "select.all", "Select Paragraph" to "select.paragraph", "Select Sentence" to "select.sentence")
+            IconMenuButton("select.all", "Select", select.map { it.first }, null, env.reason("select.all"), ButtonSize.Labeled) { i ->
+                select.getOrNull(i)?.second?.let(env.onRun)
             }
         }
         "Font" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

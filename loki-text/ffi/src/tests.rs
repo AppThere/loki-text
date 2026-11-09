@@ -362,3 +362,89 @@ fn grabbing_an_end_keeps_the_selection_and_moves_the_other_side() {
     assert!(bad.get("error").is_some(), "{bad}");
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn shape_format_menus_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    let r = run("insert.shape", r#"{"kind":"rectangle"}"#);
+    assert!(r.get("error").is_none(), "{r}");
+    for (cmd, params) in [
+        ("shape.change", r#"{"kind":"roundedRectangle"}"#),
+        ("shape.change", r#"{"kind":"heart"}"#),
+        ("shape.fill", r#"{"color":"FF0000"}"#),
+        ("shape.fill", r#"{"color":null}"#),
+        ("shape.outline", r#"{"color":"000000","width":2.25}"#),
+        ("shape.outline", r#"{"color":null,"width":1.0}"#),
+        ("shape.effects", r#"{"shadow":"offsetBottomRight"}"#),
+        ("shape.effects", r#"{"shadow":null}"#),
+        ("shape.effects", r#"{"glow":10}"#),
+        ("shape.effects", r#"{"softEdge":2.5}"#),
+        ("object.altText", r#"{"text":"A box","title":"Box"}"#),
+    ] {
+        let r = run(cmd, params);
+        assert!(r.get("error").is_none(), "{cmd} {params}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn equation_gallery_templates_insert_into_an_equation() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    let g = run("equation.gallery", "{}");
+    let t = g["result"]["structures"][0]["sections"][0]["templates"][0]["id"].as_str().unwrap_or_default().to_string();
+    assert!(!t.is_empty(), "no template in the gallery: {g}");
+    let ch = g["result"]["symbols"][0]["chars"].as_str().unwrap_or_default().chars().next();
+    assert!(ch.is_some(), "no symbol in the gallery: {g}");
+    let r = run("insert.equation", r#"{"linear":"x"}"#);
+    assert!(r.get("error").is_none(), "{r}");
+    let r = run("equation.insertStructure", &format!(r#"{{"id":"{t}"}}"#));
+    assert!(r.get("error").is_none(), "{t}: {r}");
+    let r = run("equation.insertSymbol", &format!(r#"{{"char":"{}"}}"#, ch.unwrap_or('+')));
+    assert!(r.get("error").is_none(), "{r}");
+    for (cmd, params) in [("equation.convert", r#"{"to":"linear"}"#), ("equation.convert", r#"{"to":"professional"}"#), ("equation.inputFormat", r#"{"format":"latex"}"#)] {
+        let r = run(cmd, params);
+        assert!(r.get("error").is_none(), "{cmd}: {r}");
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn chart_smartart_and_outline_menus_send_params_the_engine_accepts() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    let ok = |cmd: &str, params: &str| {
+        let r = run(cmd, params);
+        assert!(r.get("error").is_none(), "{cmd} {params}: {r}");
+    };
+    // Outline levels: a number, or "body".
+    run("text.insert", r#"{"text":"Heading"}"#);
+    for level in ["1", "3", "\"body\""] {
+        ok("outline.level", &format!(r#"{{"level":{level}}}"#));
+    }
+    // Show Level works in Outline view only.
+    let off = run("outline.showLevel", r#"{"level":2}"#);
+    assert!(off.get("error").is_some(), "showLevel outside Outline view must be refused: {off}");
+    ok("view.outline", "{}");
+    for level in ["2", "\"all\""] {
+        ok("outline.showLevel", &format!(r#"{{"level":{level}}}"#));
+    }
+    ok("view.printLayout", "{}");
+    // A chart: type, title (set and cleared), legend.
+    ok("insert.chart", r#"{"type":"column"}"#);
+    for (cmd, params) in [
+        ("chart.type", r#"{"type":"pie"}"#),
+        ("chart.title", r#"{"text":"Sales"}"#),
+        ("chart.title", r#"{"text":null}"#),
+        ("chart.legend", r#"{"pos":"bottom"}"#),
+        ("chart.legend", r#"{"pos":"none"}"#),
+    ] {
+        ok(cmd, params);
+    }
+    // A SmartArt graphic: layout and colours.
+    ok("insert.smartArt", r#"{"layout":"process"}"#);
+    ok("smartArt.layout", r#"{"layout":"venn"}"#);
+    ok("smartArt.colors", r#"{"variant":"colorful"}"#);
+    unsafe { loki_session_free(s) };
+}

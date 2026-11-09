@@ -200,4 +200,79 @@ class RibbonTest {
         // A box with a non-finite number gives no handles rather than a bad position.
         assertEquals(null, selectionHandles(listOf(PageRect(0, Float.NaN, 0f, 1f, 1f))))
     }
+
+    @Test
+    fun shapeFormatSendsTheColourWithTheOutlineWeight() {
+        // shape.outline replaces the colour whenever it runs, so a weight change must carry one.
+        assertEquals("000000", outlineParams("000000", 2.25f)["color"]?.toString()?.trim('"'))
+        assertTrue("width" in outlineParams(null, 3f))
+        assertEquals("kotlinx.serialization.json.JsonNull", fillParams(null)["color"]!!::class.qualifiedName)
+        assertEquals(72f, outlineParams("000000", 500f)["width"]!!.toString().toFloat())
+        assertEquals("1 pt", weightText(1f)); assertEquals("2.25 pt", weightText(2.25f))
+        assertTrue(hasCustomGroup("Shape Format", "Shape Styles"))
+        assertTrue(!hasCustomGroup("Shape Format", "Drawing Canvas"))
+        assertEquals(SHAPE_EFFECTS.size, SHAPE_EFFECTS.map { it.first }.toSet().size)
+    }
+
+    @Test
+    fun equationGalleryParsesAndSkipsWhatIsMalformed() {
+        val g = parseEquationGallery(Json.parseToJsonElement(
+            """{"structures":[{"id":"fraction","label":"Fraction","sections":[{"name":"F","templates":[{"id":"frac.stacked","label":"Stacked Fraction","linear":"a/b"},{"label":"no id"}]}]},{"id":"empty","label":"E","sections":[]},{"label":"no id"}],
+               "symbols":[{"name":"Basic","chars":"±∞𝔸x"},{"name":"None","chars":""},{"chars":"x"}]}""",
+        ))
+        assertEquals(listOf("fraction"), g.structures.map { it.id })
+        assertEquals(listOf("frac.stacked"), g.structures.single().templates.map { it.id })
+        // The surrogate pair 𝔸 stays one symbol.
+        assertEquals(listOf("±", "∞", "𝔸", "x"), g.symbols.single().chars)
+        assertEquals(0, parseEquationGallery(Json.parseToJsonElement("[1,2]")).structures.size)
+        assertTrue(hasCustomGroup("Equation", "Structures") && !hasCustomGroup("Equation", "Tools"))
+    }
+
+    @Test
+    fun outlineChartAndSmartArtMenusSendValuesTheEngineNames() {
+        assertTrue(hasGroupExtras("Outlining", "Outline Tools") && hasGroupExtras("Chart Design", "Type") && hasGroupExtras("SmartArt Design", "Layouts"))
+        assertTrue(!hasCustomGroup("Chart Design", "Type"))
+        // Levels 1–9 are numbers; "body" and "all" are words.
+        assertEquals("3", levelParams("3")["level"].toString())
+        assertEquals("\"body\"", levelParams("body")["level"].toString())
+        assertEquals(10, OUTLINE_LEVELS.size); assertEquals(10, SHOW_LEVELS.size)
+        assertEquals(listOf("column", "columnStacked", "bar", "barStacked", "line", "area", "pie", "doughnut", "scatter"), CHART_TYPES.map { it.second })
+        assertEquals(8, SMART_ART_LAYOUTS.size); assertEquals(7, SMART_ART_COLORS.size)
+        assertEquals(listOf("text"), InsertDialog.ChartTitle.fields.map { it.key })
+    }
+
+    @Test
+    fun homeGroupsAreOrderedLikeTheUpstreamAppAndLaunchersOpenDialogs() {
+        val names = listOf("Editing", "Styles", "Zzz", "Paragraph", "Font", "Clipboard")
+        val ordered = orderGroups("Home", names.map { RibbonGroup(it, emptyList()) }).map { it.name }
+        assertEquals(listOf("Clipboard", "Font", "Paragraph", "Styles", "Editing", "Zzz"), ordered)
+        // Another tab keeps the engine's order.
+        assertEquals(names, orderGroups("Insert", names.map { RibbonGroup(it, emptyList()) }).map { it.name })
+        assertEquals("format.fontDialog", GROUP_LAUNCHERS["Home" to "Font"])
+        assertEquals(null, GROUP_LAUNCHERS["Home" to "Editing"])
+        assertTrue(hasCustomGroup("Home", "Editing"))
+    }
+
+    @Test
+    fun theTabStripIsShorterWithAMouseThanWithAFinger() {
+        assertEquals(TAB_HEIGHT_POINTER, tabStripHeight(SizeClass.Expanded))
+        assertEquals(TAB_HEIGHT_TOUCH, tabStripHeight(SizeClass.Medium))
+        assertEquals(TAB_HEIGHT_TOUCH, tabStripHeight(SizeClass.Compact))
+        // Never below the WCAG 2.2 floor of 24, and the touch height is not the smaller one.
+        assertTrue(TAB_HEIGHT_POINTER.value >= 24f && TAB_HEIGHT_TOUCH > TAB_HEIGHT_POINTER)
+    }
+
+    @Test
+    fun pinchZoomSettlesInSmallStepsWithinTheLimits() {
+        assertEquals(1.5f, settleZoom(1f, 1.52f, 2f), 0.0001f)
+        assertEquals(2f, settleZoom(1.5f, 3f, 2f))
+        assertEquals(0.5f, settleZoom(1f, 0.1f, 2f))
+        // Not a usable pinch: the zoom stays.
+        assertEquals(1.25f, settleZoom(1.25f, Float.NaN, 2f))
+        assertEquals(1.25f, settleZoom(1.25f, 0f, 2f))
+        // A dense phone reaches the render limit before the desktop's 200%; a desktop does not.
+        assertTrue(maxZoomFor(2.625f) in 1f..1.6f)
+        assertEquals(2f, maxZoomFor(1f))
+        assertTrue(maxZoomFor(0f) >= 1f && maxZoomFor(100f) >= 1f)
+    }
 }

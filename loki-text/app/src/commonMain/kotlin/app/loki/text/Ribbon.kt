@@ -56,6 +56,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import com.composables.icons.lucide.ArrowDownRight
 import com.composables.icons.lucide.Ellipsis
 import com.composables.icons.lucide.Lucide
 import androidx.compose.material3.PlainTooltip
@@ -75,6 +76,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -265,6 +267,31 @@ internal fun runsWithoutParams(params: String): Boolean {
     return !Regex("\"\\w+\":").containsMatchIn(p)
 }
 
+/**
+ * The Home tab's groups in the order people expect (the engine lists them by first command):
+ * the clipboard, then text, then paragraphs, styles, and editing last. Groups it does not name keep
+ * their place after these.
+ */
+internal val HOME_GROUP_ORDER = listOf("Clipboard", "Font", "Paragraph", "Styles", "Editing")
+
+/** [groups] of [tab] in the order that tab's layout wants; the sort is stable, so other tabs are unchanged. */
+internal fun orderGroups(tab: String, groups: List<RibbonGroup>): List<RibbonGroup> {
+    if (tab != "Home") return groups
+    return groups.sortedBy { g -> HOME_GROUP_ORDER.indexOf(g.name).let { if (it < 0) HOME_GROUP_ORDER.size else it } }
+}
+
+/**
+ * The small corner control of a group that opens its dialog or pane, as (tab, group) to command. The
+ * app handles each command by opening its own dialog.
+ */
+internal val GROUP_LAUNCHERS = mapOf(
+    ("Home" to "Font") to "format.fontDialog",
+    ("Home" to "Paragraph") to "para.dialog",
+    ("Home" to "Styles") to "styles.manage",
+    ("Layout" to "Page Setup") to "layout.pageSetup",
+    ("Layout" to "Paragraph") to "para.dialog",
+)
+
 /** Builds the ribbon from `engine.commands`: `location` is `Tab › Group[ › …]`. */
 fun parseRibbon(commands: JsonElement): List<RibbonTab> {
     val byTab = LinkedHashMap<String, LinkedHashMap<String, MutableList<RibbonItem>>>()
@@ -286,7 +313,7 @@ fun parseRibbon(commands: JsonElement): List<RibbonTab> {
         byTab.getOrPut(tab) { LinkedHashMap() }.getOrPut(group) { mutableListOf() }.add(RibbonItem(id, str("label").ifEmpty { id }, str("shortcut")))
     }
     return (TAB_ORDER + CONTEXTUAL_ORDER).mapNotNull { name ->
-        byTab[name]?.let { groups -> RibbonTab(name, withAppGroups(name, groups.map { (g, items) -> RibbonGroup(g, items) })) }
+        byTab[name]?.let { groups -> RibbonTab(name, orderGroups(name, withAppGroups(name, groups.map { (g, items) -> RibbonGroup(g, items) }))) }
     }
 }
 
@@ -394,9 +421,22 @@ fun CommandIconButton(
     }
 }
 
+/** Height of the tab strip with a mouse or trackpad (a desktop window), close to a desktop app's. */
+internal val TAB_HEIGHT_POINTER = 32.dp
+
+/**
+ * Height of the tab strip in phone and tablet windows, where fingers hit it. Below the 48 dp that
+ * Material recommends, but above the 24 px floor of WCAG 2.2; the strip scrolls sideways, so a
+ * miss costs a second tap, not a wrong command.
+ */
+internal val TAB_HEIGHT_TOUCH = 40.dp
+
+/** The tab strip's height for a window of [sizeClass]. */
+internal fun tabStripHeight(sizeClass: SizeClass) = if (sizeClass == SizeClass.Expanded) TAB_HEIGHT_POINTER else TAB_HEIGHT_TOUCH
+
 /** The ribbon's tab bar: white labels on [BarBlue], a white bar under the selected tab. */
 @Composable
-private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, height: Dp, onSelect: (Int) -> Unit) {
     ScrollableTabRow(
         selectedTabIndex = selectedIndex,
         edgePadding = 0.dp,
@@ -408,13 +448,17 @@ private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, onSelect: (I
         divider = {},
     ) {
         tabs.forEachIndexed { i, t ->
+            // The content form of Tab has no built-in 48 dp minimum, so the height is ours to set.
             Tab(
                 selected = i == selectedIndex,
                 onClick = { onSelect(i) },
                 selectedContentColor = Color.White,
                 unselectedContentColor = Color.White.copy(alpha = 0.78f),
-                text = { Text(t.name, style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium) },
-            )
+            ) {
+                Box(Modifier.height(height).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                    Text(t.name, style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
+                }
+            }
         }
     }
 }
@@ -514,6 +558,8 @@ fun Ribbon(
     /** The page tool that is on (Draw Table, Eraser), and how to switch it. */
     tableTool: String? = null,
     onTableTool: (String?) -> Unit = {},
+    /** The structures and symbols the Equation tab offers. */
+    equation: EquationGallery = EquationGallery.EMPTY,
 ) {
     val shown = remember(tabs, state.contextual) { visibleTabs(tabs, state) }
     if (shown.isEmpty()) return
@@ -521,8 +567,8 @@ fun Ribbon(
     var selectedName by remember { mutableStateOf(shown.first().name) }
     val tab = shown.firstOrNull { it.name == selectedName } ?: shown.first()
     val previews = rememberPreviewFonts()
-    val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool) {
-        RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool)
+    val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation) {
+        RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation)
     }
     if (sizeClass != SizeClass.Expanded) {
         SimpleRibbon(shown, tab, { selectedName = shown.getOrNull(it)?.name ?: selectedName }, styles, onApplyStyle, onRun, state, leading, env)
@@ -530,7 +576,7 @@ fun Ribbon(
     }
     Column(Modifier.fillMaxWidth()) {
         // The row's own divider stops at the last tab; a divider of our own spans the whole width.
-        RibbonTabRow(shown, shown.indexOf(tab)) { selectedName = shown.getOrNull(it)?.name ?: selectedName }
+        RibbonTabRow(shown, shown.indexOf(tab), tabStripHeight(sizeClass)) { selectedName = shown.getOrNull(it)?.name ?: selectedName }
         HorizontalDivider()
         ScrollRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             tab.groups.forEachIndexed { gi, g ->
@@ -595,7 +641,20 @@ fun Ribbon(
                       }
                       if (extras) Row(verticalAlignment = Alignment.CenterVertically) { Body(); GroupExtras(tab.name, g.name, env) } else Body()
                     }
-                    Text(g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                    val launcher = GROUP_LAUNCHERS[tab.name to g.name]
+                    Box(Modifier.height(GROUP_NAME_HEIGHT)) {
+                        Text(g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, modifier = Modifier.align(Alignment.Center))
+                        // The corner control opens the group's own dialog or pane.
+                        if (launcher != null) {
+                            val why = state.disabled[launcher]
+                            Icon(
+                                Lucide.ArrowDownRight,
+                                contentDescription = "${g.name} options",
+                                tint = MaterialTheme.colorScheme.outline.copy(alpha = if (why == null) 1f else 0.4f),
+                                modifier = Modifier.align(Alignment.CenterEnd).size(GROUP_NAME_HEIGHT).clickable(enabled = why == null) { onRun(launcher) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -645,7 +704,7 @@ private fun SimpleRibbon(
     var showAll by remember { mutableStateOf(false) }
     val shown = tab
     Column(Modifier.fillMaxWidth()) {
-        RibbonTabRow(tabs, tabs.indexOf(tab), onSelect)
+        RibbonTabRow(tabs, tabs.indexOf(tab), TAB_HEIGHT_TOUCH, onSelect)
         HorizontalDivider()
         ScrollRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
             leading()
@@ -784,7 +843,7 @@ fun parsePictureState(e: JsonElement?): PictureState? {
  * Groups the app adds to a tab the engine lists elsewhere, as (tab, group, the group it goes
  * before): Picture Format gets Layout's Arrange controls, as Word shows them there too.
  */
-internal val APP_GROUPS = listOf(Triple("Picture Format", "Arrange", "Size"))
+internal val APP_GROUPS = listOf(Triple("Picture Format", "Arrange", "Size"), Triple("Shape Format", "Arrange", "Accessibility"))
 
 /** [groups] of [tab] with its [APP_GROUPS] added (empty: the app draws them), each before its neighbour or last. */
 internal fun withAppGroups(tab: String, groups: List<RibbonGroup>): List<RibbonGroup> {
