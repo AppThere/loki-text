@@ -90,7 +90,7 @@ fun CustomGroup(tab: String, group: String, env: RibbonEnv, items: List<RibbonIt
 
 /** One command as a button; [size] is how it is drawn. */
 @Composable
-private fun Cmd(env: RibbonEnv, id: String, fallback: String, size: ButtonSize, params: JsonObject? = null) {
+internal fun Cmd(env: RibbonEnv, id: String, fallback: String, size: ButtonSize, params: JsonObject? = null) {
     RibbonButton(
         iconId = id,
         label = env.label(id, fallback),

@@ -63,6 +63,8 @@ fun SelectionHandle(
     pxPerPt: Float,
     onStart: (HandleEnd) -> Unit,
     onDrag: (HandleEnd, Offset) -> Unit,
+    /** Runs when the finger lifts or the drag is cancelled. */
+    onEnd: () -> Unit = {},
 ) {
     val density = LocalDensity.current
     val target = with(density) { TOUCH_TARGET.roundToPx() }
@@ -88,6 +90,8 @@ fun SelectionHandle(
                         finger += amount
                         onDrag(end, finger)
                     },
+                    onDragEnd = { onEnd() },
+                    onDragCancel = { onEnd() },
                 )
             },
     ) {

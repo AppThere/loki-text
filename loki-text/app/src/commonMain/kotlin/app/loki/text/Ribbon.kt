@@ -77,6 +77,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -434,6 +436,26 @@ internal val TAB_HEIGHT_TOUCH = 40.dp
 /** The tab strip's height for a window of [sizeClass]. */
 internal fun tabStripHeight(sizeClass: SizeClass) = if (sizeClass == SizeClass.Expanded) TAB_HEIGHT_POINTER else TAB_HEIGHT_TOUCH
 
+/**
+ * A group: its [content] with the [footer] row (the name, and the corner control) under it. The
+ * footer is as wide as the group, whichever is wider, content or name, so the corner control sits
+ * at the group's right edge. Content is centred over the footer when the name is the wider.
+ */
+@Composable
+private fun GroupFrame(modifier: Modifier = Modifier, content: @Composable () -> Unit, footer: @Composable () -> Unit) {
+    Layout(content = { Box { content() }; Box { footer() } }, modifier = modifier) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val body = measurables[0].measure(loose)
+        val foot = measurables[1]
+        val width = maxOf(body.width, foot.maxIntrinsicWidth(Int.MAX_VALUE))
+        val footPlaceable = foot.measure(Constraints.fixedWidth(width))
+        layout(width, body.height + footPlaceable.height) {
+            body.placeRelative((width - body.width) / 2, 0)
+            footPlaceable.placeRelative(0, body.height)
+        }
+    }
+}
+
 /** The ribbon's tab bar: white labels on [BarBlue], a white bar under the selected tab. */
 @Composable
 private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, height: Dp, onSelect: (Int) -> Unit) {
@@ -571,7 +593,7 @@ fun Ribbon(
         RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation)
     }
     if (sizeClass != SizeClass.Expanded) {
-        SimpleRibbon(shown, tab, { selectedName = shown.getOrNull(it)?.name ?: selectedName }, styles, onApplyStyle, onRun, state, leading, env)
+        SimpleRibbon(shown, tab, { selectedName = shown.getOrNull(it)?.name ?: selectedName }, styles, onApplyStyle, onRun, state, leading, env, hideFont = sizeClass == SizeClass.Compact)
         return
     }
     Column(Modifier.fillMaxWidth()) {
@@ -584,7 +606,7 @@ fun Ribbon(
                 if (gi > 0) VerticalDivider(Modifier.height(GROUP_CONTENT_HEIGHT + GROUP_NAME_HEIGHT), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
                 val featured = g.items.filter { hasRibbonIcon(it.id) }
                 val rest = g.items - featured.toSet()
-                Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                GroupFrame(Modifier.padding(horizontal = 6.dp), content = {
                     // Every group's content gets the same height, so the names below line up.
                     Box(Modifier.height(GROUP_CONTENT_HEIGHT), contentAlignment = if (hasCustomGroup(tab.name, g.name)) Alignment.Center else Alignment.TopCenter) {
                       // Controls that take a value sit beside the group's ordinary buttons.
@@ -641,9 +663,14 @@ fun Ribbon(
                       }
                       if (extras) Row(verticalAlignment = Alignment.CenterVertically) { Body(); GroupExtras(tab.name, g.name, env) } else Body()
                     }
+                }, footer = {
                     val launcher = GROUP_LAUNCHERS[tab.name to g.name]
                     Box(Modifier.height(GROUP_NAME_HEIGHT)) {
-                        Text(g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, modifier = Modifier.align(Alignment.Center))
+                        // The room either side keeps the name clear of the corner control, so the group is never narrower than both.
+                        Text(
+                            g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1,
+                            modifier = Modifier.align(Alignment.Center).padding(horizontal = if (launcher != null) GROUP_NAME_HEIGHT else 0.dp),
+                        )
                         // The corner control opens the group's own dialog or pane.
                         if (launcher != null) {
                             val why = state.disabled[launcher]
@@ -655,7 +682,7 @@ fun Ribbon(
                             )
                         }
                     }
-                }
+                })
             }
         }
         HorizontalDivider()
@@ -700,6 +727,8 @@ private fun SimpleRibbon(
     state: CommandState,
     leading: @Composable () -> Unit,
     env: RibbonEnv,
+    /** The Font group's controls live in the floating toolbar over a selection instead (small screens). */
+    hideFont: Boolean = false,
 ) {
     var showAll by remember { mutableStateOf(false) }
     val shown = tab
@@ -710,7 +739,7 @@ private fun SimpleRibbon(
             leading()
             VerticalRule()
             IconButton(onClick = { showAll = true }, modifier = Modifier.size(32.dp)) { Icon(Lucide.Menu, contentDescription = "All commands", modifier = Modifier.size(18.dp)) }
-            if (shown.name == "Home") {
+            if (shown.name == "Home" && !hideFont) {
                 // Font and size, as on the full ribbon.
                 Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     DropdownField(env.format.font.orEmpty(), 130.dp, env.fonts, "Font", env.previews) { f -> env.onRunWith("format.font", buildJsonObject { put("name", f) }) }
@@ -720,6 +749,7 @@ private fun SimpleRibbon(
             }
             if (shown.name == "Home" && styles.isNotEmpty()) StylesButton(styles, currentStyle(styles, state), onApplyStyle)
             for (g in shown.groups) {
+                if (hideFont && shown.name == "Home" && g.name == "Font") continue
                 val featured = g.items.filter { hasRibbonIcon(it.id) }
                 if (featured.isEmpty()) continue
                 VerticalRule()

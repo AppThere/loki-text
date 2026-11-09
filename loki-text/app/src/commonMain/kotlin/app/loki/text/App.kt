@@ -53,6 +53,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.graphics.TransformOrigin
@@ -318,6 +323,12 @@ fun App(
     // While two fingers are down the pages are only scaled on screen; the zoom is applied (and the
     // pages re-rendered sharply) when they lift.
     var pinch by remember { mutableStateOf(1f) }
+    // The floating toolbar hides while a handle or the mouse is moving the selection.
+    var handleDragging by remember { mutableStateOf(false) }
+    var mouseSelecting by remember { mutableStateOf(false) }
+    // Where each page and the page area sit on screen, to place the floating toolbar over the selection.
+    val pageOrigin = remember { mutableStateMapOf<Int, Offset>() }
+    var viewportOrigin by remember { mutableStateOf(Offset.Zero) }
     val screenDensity = LocalDensity.current.density
     val scale = pagePxPerPt(zoom, screenDensity)
     // From the engine's word count; of the selection when there is one.
@@ -716,9 +727,11 @@ fun App(
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.width(300.dp).fillMaxHeight())
         }
         val maxZoom = maxZoomFor(LocalDensity.current.density)
+        val previewFonts = rememberPreviewFonts()
         val currentZoom by rememberUpdatedState(zoom)
         BoxWithConstraints(
             Modifier.weight(1f).fillMaxHeight().background(if (flat) Color.White else DESK_COLOR)
+                .onGloballyPositioned { viewportOrigin = it.positionInRoot() }
                 // Two fingers zoom; one finger is left alone so it scrolls and taps. Seen before the
                 // pages are (Initial pass) and consumed only while pinching.
                 .pointerInput(maxZoom) {
@@ -805,7 +818,7 @@ fun App(
                 // Kept per page index, not per bitmap, so a new image doesn't reset it for a frame.
                 var shown by remember(i) { mutableStateOf(IntSize.Zero) }
                 val pxPerPt = if (shown.width > 0) shown.width * scale / bitmap.width else scale
-                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt }) {
+                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt; pageOrigin[i] = it.positionInRoot() }) {
                 Image(
                     bitmap,
                     contentDescription = "Page ${i + 1}",
@@ -860,11 +873,13 @@ fun App(
                                 drag(down.id) { change ->
                                     if (!started) {
                                         started = true
+                                        mouseSelecting = true
                                         scope.launch { perform { setCaret(i, down.position, pxPerPt, false) } }
                                     }
                                     change.consume()
                                     scope.launch { perform { setCaret(i, change.position, pxPerPt, true) } }
                                 }
+                                mouseSelecting = false
                             }
                         }),
                 )
@@ -874,12 +889,41 @@ fun App(
                         SelectionHandle(
                             end, pt, pxPerPt,
                             // The far end stays put; this end follows the finger.
-                            onStart = { e -> scope.launch { perform { execute("select.grabEnd", buildJsonObject { put("end", if (e == HandleEnd.Start) "start" else "end") }) } } },
+                            onEnd = { handleDragging = false },
+                            onStart = { e -> handleDragging = true; scope.launch { perform { execute("select.grabEnd", buildJsonObject { put("end", if (e == HandleEnd.Start) "start" else "end") }) } } },
                             onDrag = { _, pos -> scope.launch { perform { setCaret(i, pos, pxPerPt, true) } } },
                         )
                     }
                 }
                 }
+            }
+        }
+        // The floating toolbar over a selection: above its first visible line, flipping below when
+        // there is no room. Hidden while something else is moving the selection or has the screen.
+        val miniShown = selection.rects.isNotEmpty() && pinch == 1f && !handleDragging && !mouseSelecting &&
+            commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
+            pageDialog == null && !manageStyles && listLevels == null && listDialog == null
+        if (miniShown) {
+            val miniEnv = remember(commandState, formatState, fontFamilies) {
+                RibbonEnv(emptyMap(), commandState, formatState, fontFamilies, previewFonts, { id -> scope.launch { runCommand(id) } }, { id, p -> scope.launch { runCommand(id, p) } })
+            }
+            val rectsPx = selection.rects.mapNotNull { r ->
+                val origin = pageOrigin[r.page] ?: return@mapNotNull null
+                val k = pageGeo[r.page]?.second ?: return@mapNotNull null
+                val left = origin.x + r.x * k - viewportOrigin.x
+                val top = origin.y + r.y * k - viewportOrigin.y
+                Rect(left, top, left + r.w * k, top + r.h * k)
+            }
+            val anchor = visibleAnchorRect(rectsPx, Rect(0f, 0f, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()))
+            var barSize by remember { mutableStateOf(IntSize(1, 1)) }
+            val at = anchor?.let {
+                miniToolbarOffset(
+                    it.top, it.bottom, it.left, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat(),
+                    barSize.width.toFloat(), barSize.height.toFloat(), MINI_BAR_GAP_DP * density.density, MINI_BAR_INSET_DP * density.density,
+                )
+            }
+            if (at != null) {
+                MiniToolbar(miniEnv, Modifier.align(Alignment.TopStart).offset { IntOffset(at.x.roundToInt(), at.y.roundToInt()) }.onSizeChanged { barSize = it })
             }
         }
         }

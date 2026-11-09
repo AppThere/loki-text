@@ -263,6 +263,39 @@ class RibbonTest {
     }
 
     @Test
+    fun theMiniToolbarSitsAboveTheSelectionAndFlipsBelowWhenTight() {
+        val bar = 300f to 80f
+        fun at(top: Float, bottom: Float, left: Float, w: Float = 800f, h: Float = 600f) =
+            miniToolbarOffset(top, bottom, left, w, h, bar.first, bar.second, 8f, 4f)!!
+        // Room above: it goes above the line, centred on the start of the selection.
+        val above = at(300f, 320f, 400f)
+        assertEquals(300f - 8f - 80f, above.y); assertEquals(404f - 150f, above.x)
+        // No room above: below the line.
+        assertEquals(60f + 8f, at(40f, 60f, 400f).y)
+        // Kept inside the viewport sideways.
+        assertEquals(0f, at(300f, 320f, 5f).x); assertEquals(800f - 300f, at(300f, 320f, 795f).x)
+        // Neither fits: pushed inside rather than off screen.
+        val tight = at(30f, 50f, 100f, h = 100f)
+        assertTrue(tight.y in 0f..20f)
+        assertEquals(null, miniToolbarOffset(Float.NaN, 1f, 1f, 800f, 600f, 300f, 80f, 8f, 4f))
+        assertEquals(null, miniToolbarOffset(1f, 2f, 1f, 0f, 600f, 300f, 80f, 8f, 4f))
+    }
+
+    @Test
+    fun theMiniToolbarAnchorsToTheTopmostVisibleSelectionBox() {
+        val view = androidx.compose.ui.geometry.Rect(0f, 0f, 400f, 600f)
+        fun r(l: Float, t: Float, rr: Float, b: Float) = androidx.compose.ui.geometry.Rect(l, t, rr, b)
+        // A box scrolled above the viewport is skipped; one cut by the top edge is cut down to what shows.
+        val a = visibleAnchorRect(listOf(r(0f, -100f, 50f, -50f), r(0f, -10f, 50f, 20f), r(0f, 100f, 50f, 120f)), view)!!
+        assertEquals(0f, a.top); assertEquals(20f, a.bottom)
+        // A sliver on the edge, or nothing visible, gives no anchor.
+        assertEquals(null, visibleAnchorRect(listOf(r(0f, -20f, 50f, 0.5f)), view))
+        assertEquals(null, visibleAnchorRect(listOf(r(0f, 700f, 50f, 720f)), view))
+        assertEquals(null, visibleAnchorRect(listOf(r(Float.NaN, 0f, 1f, 1f)), view))
+        assertEquals(null, visibleAnchorRect(emptyList(), view))
+    }
+
+    @Test
     fun pinchZoomSettlesInSmallStepsWithinTheLimits() {
         assertEquals(1.5f, settleZoom(1f, 1.52f, 2f), 0.0001f)
         assertEquals(2f, settleZoom(1.5f, 3f, 2f))
