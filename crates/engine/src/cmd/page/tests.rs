@@ -374,6 +374,9 @@ fn line_numbering_options() {
 /// there breaks the word.
 #[test]
 fn hyphenation_options_and_manual_hyphenation() {
+    if crate::tests::no_language_data("hyphenation_options_and_manual_hyphenation") {
+        return;
+    }
     let mut s =
         Session::new(wordcraft_doc::Document::from_text(&"a extraordinarily be uncharacteristic of responsibilities the considerations ".repeat(12)));
     let r = s.run("layout.hyphenation", &json!({"zone": 36, "caps": false, "limit": 3})).unwrap();
@@ -429,4 +432,33 @@ fn page_number_format_keeps_or_clears_the_start() {
     let back = s.run("layout.pageNumberFormat", &json!({"format": "decimal", "start": 1})).unwrap();
     assert_eq!(back["pageNumFormat"], "decimal");
     assert_eq!(back["pageNumStart"], 1);
+}
+
+/// `layout.pageLayout` is Page Setup's OK: everything lands together, or nothing does.
+#[test]
+fn page_layout_applies_together_or_not_at_all() {
+    let mut s = doc();
+    let r = s.run("layout.pageLayout", &json!({"width": 595.0, "height": 842.0, "landscape": true, "top": 36.0, "bottom": 36.0, "left": 54.0, "right": 54.0, "gutter": 10.0, "valign": "center"})).unwrap();
+    assert_eq!((r["pageW"].as_f64(), r["pageH"].as_f64()), (Some(842.0), Some(595.0)));
+    assert_eq!(r["landscape"], true);
+    assert_eq!((r["marginTop"].as_f64(), r["marginLeft"].as_f64(), r["gutter"].as_f64()), (Some(36.0), Some(54.0), Some(10.0)));
+    assert_eq!(r["valign"], "center");
+    // One undo step reverts all of it.
+    s.run("edit.undo", &json!({})).unwrap();
+    assert_eq!(sect(&s).page_w, 612.0);
+    assert!(!sect(&s).landscape);
+    // Margins that leave no room refuse the whole call; hostile numbers never panic.
+    let before = sect(&s);
+    for p in [
+        json!({"left": 5000.0}),
+        json!({"height": 20.0, "top": 600.0}),
+        json!({"width": "x"}),
+        json!({"top": 1e300}),
+        json!({"left": -5.0, "right": -5.0, "width": 1e40}),
+    ] {
+        let _ = s.run("layout.pageLayout", &p);
+    }
+    assert!(sect(&s).page_w.is_finite() && sect(&s).margin_left >= 0.0);
+    assert!(s.run("layout.pageLayout", &json!({"left": 5000.0})).is_err());
+    assert_eq!(sect(&s).page_h, before.page_h);
 }

@@ -1,4 +1,4 @@
-use super::*;
+use super::{Document, Path, Pos, StoryRef, Stroke, Tokens, Ui, WordApp, json, regular, semibold, vec2};
 
 /// Draws the Navigation pane: search box and tabs, page list, find results and heading outline.
 pub(super) fn nav(app: &mut WordApp, ui: &mut Ui) {
@@ -124,35 +124,9 @@ pub(super) fn visible_headings(levels: &[u8], collapsed: &[bool]) -> Vec<bool> {
 }
 
 /// The body's headings (paragraphs with an outline level) in document order, as (path, level,
-/// text). A numbered heading starts with the number it shows (`2.1 Method`), as in Word.
+/// text); the engine's `nav.headings` reads the same list.
 pub(super) fn nav_headings(doc: &Document) -> Vec<(Path, u8, String)> {
-    // Every numbered paragraph advances the list counters, headings or not.
-    let mut counters = Counters::default();
-    let mut items = Vec::new();
-    for path in doc.para_paths(StoryRef::Body) {
-        let Some(p) = doc.para(StoryRef::Body, &path) else { continue };
-        let rp = doc.styles.resolve_para(&p.props);
-        let number = p
-            .props
-            .numbering
-            .or(rp.numbering)
-            .filter(|n| n.num != 0)
-            .and_then(|n| counters.next_label(&doc.numbering, n.num, n.level))
-            .filter(|(label, def)| !label.is_empty() && !matches!(def.format, NumFormat::Bullet | NumFormat::None));
-        if let Some(lv) = rp.outline_level {
-            let txt = p.plain_text().trim().to_string();
-            if txt.is_empty() || rp.style.starts_with("TOC") {
-                continue;
-            }
-            let txt = match number {
-                Some((label, def)) if def.suffix == LevelSuffix::Nothing => format!("{label}{txt}"),
-                Some((label, _)) => format!("{label} {txt}"),
-                None => txt,
-            };
-            items.push((path, lv, txt));
-        }
-    }
-    items
+    wordcraft_engine::cmd::nav::headings(doc)
 }
 
 /// Constrain each heading to the available pane width so long document text cannot

@@ -1,0 +1,3 @@
+headers = loki.h
+package = app.loki.text.native
+headerFilter = loki.h
