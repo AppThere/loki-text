@@ -1,6 +1,7 @@
 package app.loki.text
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -99,7 +100,8 @@ internal fun AppTheme(content: @Composable (choice: String, setChoice: (String) 
     }
     val colors = if (dark) LokiDarkColors else LokiColors
     MaterialTheme(colorScheme = colors, typography = typographyWith(uiFontFamily())) {
-        CompositionLocalProvider(LocalBaseColors provides colors) {
+        // The window is a plain background, not a Surface, so the content colour is set here: icons and text follow the theme.
+        CompositionLocalProvider(LocalBaseColors provides colors, LocalContentColor provides colors.onBackground) {
             content(choice, { c -> if (c == "system" || c == "light" || c == "dark") choice = c }, dark)
         }
     }

@@ -151,7 +151,7 @@ private fun classify(name: String, optional: Boolean, typeText: String): ParamFi
 
 private val KEY = Regex("^\\s*\"([^\"]+)\"\\s*(\\?)?\\s*(?::\\s*(.*))?$", RegexOption.DOT_MATCHES_ALL)
 private val KEY_GROUP = Regex("^\\s*((?:\"\\w+\"\\s*\\|\\s*)+\"\\w+\")\\s*(\\?)?\\s*:\\s*(.*)$", RegexOption.DOT_MATCHES_ALL)
-private val NEXT_KEY = Regex("\\|\\s*\"(\\w+)\"\\s*(\\?)?\\s*:")
+private val NEXT_KEY = Regex("^\\s*\"(\\w+)\"\\s*(\\?)?\\s*:(.*)$", RegexOption.DOT_MATCHES_ALL)
 
 /**
  * Reads a command's params doc (`{"size": pt, "name"?: string} (notes)`) into a form. The docs are
@@ -182,15 +182,20 @@ fun parseParamForm(doc: String): ParamForm {
         var optional = m.groupValues[2] == "?"
         // `"delta": pt | "percent": number` — one of several keys; none is required on its own.
         val more = ArrayList<Pair<String, String>>()
-        val nexts = NEXT_KEY.findAll(type).toList()
-        if (nexts.isNotEmpty()) {
+        // Only at the top level: `{"top"|"right": {…}}` inside a value is that value's own shape.
+        val parts = splitTopLevel(type, '|')
+        val firstKey = parts.indexOfFirst { NEXT_KEY.matches(it) }
+        if (firstKey > 0) {
             optional = true
-            var end = type.length
-            for (n in nexts.reversed()) {
-                more.add(0, n.groupValues[1] to type.substring(n.range.last + 1, end))
-                end = n.range.first
+            type = parts.take(firstKey).joinToString("|")
+            var at = firstKey
+            while (at < parts.size) {
+                val m2 = NEXT_KEY.find(parts[at]) ?: break
+                var end = at + 1
+                while (end < parts.size && !NEXT_KEY.matches(parts[end])) end++
+                more += m2.groupValues[1] to (listOf(m2.groupValues[3]) + parts.subList(at + 1, end)).joinToString("|")
+                at = end
             }
-            type = type.substring(0, end)
         }
         if (fields.none { it.name == name }) fields += classify(name, optional, type)
         for ((n, t) in more) if (fields.none { it.name == n }) fields += classify(n, true, t)

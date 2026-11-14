@@ -856,7 +856,10 @@ internal fun AllCommandsDialog(
                     val q = query.trim()
                     val hits = if (q.isEmpty()) listed.filter { it.tab.ifEmpty { "Other" } == section } else listed.filter { matchesQuery(it, q) }
                     // Grouped under the place each is found: the group on a tab, the whole path in a search.
-                    for ((place, group) in hits.groupBy { if (q.isEmpty()) it.path.drop(1).joinToString(" › ").ifEmpty { it.tab } else it.location }) {
+                    val places = hits.groupBy { if (q.isEmpty()) it.path.drop(1).joinToString(" › ").ifEmpty { it.tab } else it.location }
+                    // Home's groups in the ribbon's order (the engine lists them by first command); the sort is stable.
+                    val ordered = if (q.isEmpty() && section == "Home") places.entries.sortedBy { e -> HOME_GROUP_ORDER.indexOf(e.key.substringBefore(" › ")).let { if (it < 0) HOME_GROUP_ORDER.size else it } } else places.entries
+                    for ((place, group) in ordered) {
                         out += CommandRow(place, null)
                         group.mapTo(out) { CommandRow(null, it) }
                     }

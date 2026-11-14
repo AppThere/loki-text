@@ -44,8 +44,7 @@ assets or iconography; add a row to `ATTRIBUTION.md` for every asset file.
 
 ## Status
 
-Walking skeleton: insert text, Bold and a rendered page 1. Not yet built on a machine with the
-Android/iOS toolchains, and Gradle plugin versions in `gradle/libs.versions.toml` should be bumped
-to current releases. Next: caret and selection from `document.inspect`/hit testing, pointer input
-(`ui.*` methods need an attached UI; add engine hit-test calls), ribbon from `engine.commands`,
-file open/save through platform pickers, and IME.
+Every engine command is reachable at every window size: see [`docs/parity.md`](docs/parity.md) for
+how that is measured, what the app draws itself (zoom, dark pages, ruler, panes, ink) and the gaps
+that remain. Built and tested on JVM desktop; Android builds with `scripts/build-android.sh` on a
+machine with the SDK; iOS is scaffolded and has never been built.

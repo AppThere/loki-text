@@ -111,8 +111,9 @@ the caret is for the new document and the page for the old one.
 
 * keeps the main tabs in a fixed `TAB_ORDER`, then the contextual tabs (`CONTEXTUAL_ORDER`) that
   `loki.commandState` says the selection brings up;
-* drops `ui.*` commands (they act on a window this front end doesn't have) and commands that need a
-  value (`runsWithoutParams` inspects the params doc: a required key reads `"name":`, optional `"name"?:`);
+* drops `ui.*` commands (they act on a window this front end doesn't have) and marks commands that need a
+  value (`runsWithoutParams` reads the params doc: a required key reads `"name":`, optional `"name"?:`),
+  which open a hand-built control or the generated command form;
 * groups items by tab and group, preserving engine order.
 
 Buttons with a known icon are drawn as icon buttons; a group with none becomes a menu of command names, so
@@ -142,7 +143,7 @@ also handles split-screen, rotation and Chromebook window resizing):
 
 | Class | Width | Ribbon | Chrome |
 |---|---|---|---|
-| Compact | < 600 dp | `SimpleRibbon`: tab row + ONE scrolling row of icons (quick-access buttons lead the row); an "all commands" list holds the rest | page count as `1/3`; no zoom controls |
+| Compact | < 600 dp | `SimpleRibbon`: tab row + ONE scrolling row: icons, a button per group that opens its value controls, menus for the rest (quick-access buttons and the all-commands magnifier lead the row) | page count as `1/3`; zoom is a menu under the percentage |
 | Medium | 600–900 dp | same `SimpleRibbon` | full page count, zoom controls, Print/Web buttons |
 | Expanded | ≥ 900 dp | full grouped ribbon: tab bar, scrolling row of groups, group names, separators, Styles gallery; quick-access buttons on their own row above | adds the character count to the status bar |
 
@@ -263,13 +264,17 @@ On x86_64 it uses `cargo-ndk`.
 
 ## 8. Known gaps in Loki Text (don't assume they're solved)
 
+See [`parity.md`](parity.md): it has the measured coverage, the list of pointer gestures not built,
+and what the desktop front end does that this one does not. Two lessons from closing the gap that
+apply to any Craft app:
+
+* **Generate the form too, not only the ribbon.** A params doc is enough to build a usable form
+  (`CommandParams.kt`), so a command that needs a value never has to wait for a hand-built control.
+  Keep a test that reads the engine's real command list and fails when a command has no way to it.
+* **The headless renderer draws plain content.** View settings the desktop front end paints itself
+  (dark pages, gridlines, rulers, zoom fits, panes) have to be drawn by this one from `view.state`,
+  and the engine's requests to its front end (`loki.uiRequests`) have to be answered.
 * iOS target is scaffolded, never built (needs macOS; `UIDocumentPickerViewController` and `UIPasteboard`
   are TODOs in `iosMain`). No Xcode host project exists.
-* Contextual tabs with their own controls: Table Design, Table Layout (with Draw Table and Eraser as page
-  tools) and Picture Format. Shape Format, SmartArt Design, Chart Design, Equation and Outlining still show
-  only the engine's parameterless commands. Arrange (Position, Wrap Text, Align, Rotate) is one group shared by
-  Layout and Picture Format; the app adds it to Picture Format (`APP_GROUPS`).
-* Some commands that need a value still have no control; they are left off the ribbon (`runsWithoutParams`).
-* No dark theme.
 * `loki.commandState` is computed for every command on every snapshot; fine at Word's scale, measure before
   copying it to an app with thousands of commands.

@@ -1085,7 +1085,7 @@ fun App(
             val penInk = MaterialTheme.colorScheme.primary
             val pageFilter = if (viewState.darkPages) DARK_PAGE_FILTER else paperTint(paperColor)?.let { hex -> formColor(hex) }?.let { ColorFilter.tint(it, BlendMode.Multiply) }
             val caretColor = if (viewState.darkPages) Color.White else Color.Black
-            val gridInk = (if (viewState.darkPages) Color.White else Color(0xFF5B7FA6)).copy(alpha = 0.28f)
+            val gridInk = if (viewState.darkPages) Color.White.copy(alpha = 0.13f) else Color(0xFF5B7FA6).copy(alpha = 0.28f)
             pages.forEachIndexed { i, bitmap ->
                 // Image scales the bitmap down to fit the window width, so the points-to-pixels
                 // factor is measured from the displayed size rather than assumed to be PAGE_SCALE.

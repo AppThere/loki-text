@@ -79,8 +79,19 @@ internal val TYPING_COMMANDS = setOf(
     "text.insert", "text.typeCode", "equation.type", "equation.move", "equation.deleteSurrounding", "equation.edit",
 )
 
+/**
+ * Commands that only read the state this app already shows (the ribbon's toggles, the panes, the
+ * galleries): running one from a menu would change nothing and show nothing new.
+ */
+internal val STATE_READERS = setOf(
+    "view.state", "format.state", "para.state", "outline.state", "readAloud.status", "nav.headings", "nav.search",
+    "equation.gallery", "equation.get", "equation.structureActions", "edit.clipboardItems", "styles.list", "link.targets",
+    "fields.selected", "review.suggestions",
+)
+
 /** Should [c] appear in menus and the all-commands list? */
-internal fun isListed(c: CommandInfo): Boolean = c.id !in POINTER_GESTURES && c.id !in POINTER_GAPS && c.id !in TYPING_COMMANDS
+internal fun isListed(c: CommandInfo): Boolean =
+    c.id !in POINTER_GESTURES && c.id !in POINTER_GAPS && c.id !in TYPING_COMMANDS && c.id !in STATE_READERS
 
 /** The places outside the ribbon's tabs, in the order the all-commands list shows them after the tabs. */
 internal val OTHER_PLACES = listOf("File", "Quick Access Toolbar", "Editing", "Navigation", "Reading", "Status Bar", "Title Bar", "Zotero", "Agents")

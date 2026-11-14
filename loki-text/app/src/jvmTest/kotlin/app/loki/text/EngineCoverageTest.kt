@@ -33,9 +33,11 @@ class EngineCoverageTest {
         val sections = catalogSections(commands)
         // The all-commands list has a section for wherever a command lives.
         for (c in listed) assertTrue(c.tab.ifEmpty { "Other" } in sections, "${c.id} is in no section (${c.location})")
-        // Whatever is not listed is typed, or a pointer gesture: one this app has, or a named gap.
+        // Whatever is not listed is typed, read by the app itself, or a pointer gesture: one this app has, or a named gap.
         val unlisted = commands.filterNot(::isListed).map { it.id }.toSet()
-        assertEquals(unlisted, (POINTER_GESTURES + POINTER_GAPS + TYPING_COMMANDS).intersect(ids))
+        assertEquals(unlisted, (POINTER_GESTURES + POINTER_GAPS + TYPING_COMMANDS + STATE_READERS).intersect(ids))
+        // A state reader is only hidden when the app does read it.
+        assertEquals(emptyList(), (STATE_READERS - ids).sorted())
         assertEquals(POINTER_GAPS, POINTER_GAPS.intersect(ids), "a gap names a command the engine no longer has")
         assertTrue(POINTER_GAPS.size <= 10, "the list of unreachable gestures may only shrink")
     }
