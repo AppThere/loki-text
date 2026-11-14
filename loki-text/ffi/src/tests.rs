@@ -505,3 +505,38 @@ fn a_selected_object_reports_its_frame_and_can_be_picked_by_point() {
     assert!(run("select.objectAt", r#"{"page":99999999999,"x":1,"y":1}"#).get("error").is_none());
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn a_header_or_footer_is_entered_by_point_and_left_again() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    let hf = |s| call(s, "loki.selection", None)["result"]["hf"].clone();
+    let tabs = |s| call(s, "loki.commandState", None)["result"]["contextual"].clone();
+    let has_tab = |s| tabs(s).as_array().is_some_and(|a| a.iter().any(|t| t == "Header & Footer"));
+    run("text.insert", r#"{"text":"Body text"}"#);
+    run("view.printLayout", "{}");
+    assert!(hf(s).is_null() && !has_tab(s));
+    // Above the body: the header, created if the page had none; the ribbon gets its tab.
+    let r = run("hf.enterAt", r#"{"page":0,"x":100,"y":20}"#);
+    assert_eq!(r["result"]["entered"], "header", "{r}");
+    assert_eq!(hf(s), "header");
+    assert!(has_tab(s), "{}", tabs(s));
+    // Closing puts the caret back in the body and drops the tab.
+    let r = run("insert.closeHeader", "{}");
+    assert!(r.get("error").is_none(), "{r}");
+    assert!(hf(s).is_null() && !has_tab(s));
+    // Below the body: the footer.
+    let r = run("hf.enterAt", r#"{"page":0,"x":100,"y":780}"#);
+    assert_eq!(r["result"]["entered"], "footer", "{r}");
+    assert_eq!(hf(s), "footer");
+    run("insert.closeHeader", "{}");
+    // In the body, or in a view with no margins, nothing is entered.
+    assert!(run("hf.enterAt", r#"{"page":0,"x":100,"y":300}"#)["result"]["entered"].is_null());
+    run("view.webLayout", "{}");
+    assert!(run("hf.enterAt", r#"{"page":0,"x":100,"y":20}"#)["result"]["entered"].is_null());
+    assert!(hf(s).is_null());
+    // Hostile input is an error or a no-op, never a crash.
+    assert!(run("hf.enterAt", r#"{"page":0,"x":"a","y":1}"#).get("error").is_some());
+    assert!(run("hf.enterAt", r#"{"page":99999999999,"x":1,"y":1}"#).get("error").is_none());
+    unsafe { loki_session_free(s) };
+}

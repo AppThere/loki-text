@@ -135,6 +135,15 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
     // Read before the layout is borrowed: the selection's ends, and the object it holds (if it is one).
     let (a, b) = sess.sel.ordered();
     let picked = wordcraft_engine::cmd::objects::selected(sess);
+    // Whether the caret is in a page's header or footer ("header" / "footer"), else null.
+    let hf = match focus.story {
+        wordcraft_doc::StoryRef::Part(id) => sess.doc.parts.get(&id).and_then(|p| match p.kind {
+            wordcraft_doc::PartKind::Header => Some("header"),
+            wordcraft_doc::PartKind::Footer => Some("footer"),
+            _ => None,
+        }),
+        wordcraft_doc::StoryRef::Body => None,
+    };
     let l = sess.layout();
     let caret = l.caret_on(&focus, hint).map(|c| json!({"page": c.page, "x": c.x, "top": c.top, "height": c.height, "width": c.width}));
     let rects: Vec<Value> = if collapsed {
@@ -166,7 +175,7 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
     } else {
         None
     };
-    json!({"caret": caret, "rects": rects, "pages": l.pages.len(), "object": object})
+    json!({"caret": caret, "rects": rects, "pages": l.pages.len(), "object": object, "hf": hf})
 }
 
 /// Free a string returned by [`loki_call`]. Null is ignored.

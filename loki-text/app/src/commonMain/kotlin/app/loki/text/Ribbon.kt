@@ -250,7 +250,7 @@ private val TAB_ORDER = listOf("Home", "Insert", "Draw", "Design", "Layout", "Re
  * [visibleTabs] shows the ones the engine says the selection brings up (`CommandState.contextual`).
  */
 internal val CONTEXTUAL_ORDER = listOf(
-    "Table Design", "Table Layout", "Picture Format", "Shape Format", "SmartArt Design", "Chart Design", "Equation", "Outlining",
+    "Table Design", "Table Layout", "Picture Format", "Shape Format", "SmartArt Design", "Chart Design", "Equation", "Outlining", "Header & Footer",
 )
 
 /** [tabs] with the contextual tabs the selection doesn't bring up left out. */
@@ -587,6 +587,9 @@ fun Ribbon(
     if (shown.isEmpty()) return
     // Selected by name: a contextual tab can vanish with the selection, which falls back to the first tab.
     var selectedName by remember { mutableStateOf(shown.first().name) }
+    // Entering a header or footer brings up its tab, as Word does; the other contextual tabs wait to be chosen.
+    val inHeaderFooter = "Header & Footer" in state.contextual
+    LaunchedEffect(inHeaderFooter) { if (inHeaderFooter) selectedName = "Header & Footer" }
     val tab = shown.firstOrNull { it.name == selectedName } ?: shown.first()
     val previews = rememberPreviewFonts()
     val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation) {

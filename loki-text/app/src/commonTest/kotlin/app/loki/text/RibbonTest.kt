@@ -1,6 +1,8 @@
 package app.loki.text
 
+import androidx.compose.ui.geometry.Offset
 import app.loki.text.engine.PageRect
+import app.loki.text.engine.parseSelectionGeometry
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -412,6 +414,31 @@ class RibbonTest {
         assertEquals("2", move["page"].toString())
         val resize = boundsParams(frame, resizeFrame(frame.rect(), FrameHandle.Right, 50f, 0f, false))
         assertTrue("width" in resize && "height" !in resize)
+    }
+
+    @Test
+    fun aDoubleTapIsTwoCloseTapsInQuickSuccession() {
+        val a = Offset(100f, 100f)
+        assertTrue(isDoubleTap(200, a, Offset(110f, 95f), 40f))
+        // Too slow, too far on either axis, or a clock that went backwards: not a double tap.
+        assertTrue(!isDoubleTap(400, a, a, 40f))
+        assertTrue(!isDoubleTap(100, a, Offset(160f, 100f), 40f))
+        assertTrue(!isDoubleTap(100, a, Offset(100f, 160f), 40f))
+        assertTrue(!isDoubleTap(-5, a, a, 40f))
+    }
+
+    @Test
+    fun theSelectionReplyTellsWhichStoryTheCaretIsIn() {
+        fun hf(json: String) = parseSelectionGeometry(Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject).hf
+        assertEquals("header", hf("""{"caret":null,"rects":[],"hf":"header"}"""))
+        assertEquals("footer", hf("""{"hf":"footer"}"""))
+        assertEquals(null, hf("""{"hf":null}"""))
+        assertEquals(null, hf("""{"hf":"sidebar"}"""))
+        assertEquals(null, hf("""{}"""))
+        // The tab shows only while the engine says a header or footer is being edited.
+        assertTrue("Header & Footer" in CONTEXTUAL_ORDER)
+        val state = parseCommandState(Json.parseToJsonElement("""{"disabled":{},"on":[],"contextual":["Header & Footer"]}"""))
+        assertEquals(listOf("Header & Footer"), state.contextual)
     }
 
     @Test

@@ -35,8 +35,32 @@ class PageRect(val page: Int, val x: Float, val y: Float, val w: Float, val h: F
  */
 class ObjectFrame(val page: Int, val x: Float, val y: Float, val w: Float, val h: Float, val rotation: Float, val floating: Boolean, val kind: String)
 
-/** Where to draw the caret and selection; see `selection_geometry` in `ffi/src/lib.rs`. [obj] is set when the selection is one object. */
-class SelectionGeometry(val caret: PageRect?, val rects: List<PageRect>, val obj: ObjectFrame? = null)
+/** Where to draw the caret and selection; see `selection_geometry` in `ffi/src/lib.rs`. [obj] is set when the selection is one object, [hf] ("header" or "footer") when the caret is in one. */
+class SelectionGeometry(val caret: PageRect?, val rects: List<PageRect>, val obj: ObjectFrame? = null, val hf: String? = null)
+
+/** Parses `loki.selection`; boxes that are not usable numbers are left out. */
+fun parseSelectionGeometry(r: JsonObject): SelectionGeometry {
+    fun box(o: JsonObject, w: String, h: String) = PageRect(
+        o["page"]?.jsonPrimitive?.intOrNull ?: 0,
+        o["x"]?.jsonPrimitive?.floatOrNull ?: 0f,
+        o[if (w == "width") "top" else "y"]?.jsonPrimitive?.floatOrNull ?: 0f,
+        o[w]?.jsonPrimitive?.floatOrNull ?: 0f,
+        o[h]?.jsonPrimitive?.floatOrNull ?: 0f,
+    )
+    val caret = (r["caret"] as? JsonObject)?.let { box(it, "width", "height") }
+    val rects = (r["rects"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> box(o, "w", "h") } } ?: emptyList()
+    val obj = (r["object"] as? JsonObject)?.let { o ->
+        fun f(k: String) = o[k]?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() }
+        val (x, y, w, h) = listOf(f("x"), f("y"), f("w"), f("h"))
+        if (x == null || y == null || w == null || h == null || w <= 0f || h <= 0f) null
+        else ObjectFrame(
+            o["page"]?.jsonPrimitive?.intOrNull ?: 0, x, y, w, h, f("rotation") ?: 0f,
+            o["floating"]?.jsonPrimitive?.booleanOrNull ?: false, o["kind"]?.jsonPrimitive?.contentOrNull ?: "object",
+        )
+    }
+    val hf = r["hf"]?.jsonPrimitive?.contentOrNull?.takeIf { it == "header" || it == "footer" }
+    return SelectionGeometry(caret, rects, obj, hf)
+}
 
 class EngineException(message: String) : Exception(message)
 
@@ -71,28 +95,7 @@ class Engine(private val native: NativeEngine = NativeEngine()) : AutoCloseable 
     }
 
     /** Caret and selection boxes, or empty geometry when the reply is malformed. */
-    fun selection(): SelectionGeometry {
-        val r = call("loki.selection").jsonObject
-        fun box(o: JsonObject, w: String, h: String) = PageRect(
-            o["page"]?.jsonPrimitive?.intOrNull ?: 0,
-            o["x"]?.jsonPrimitive?.floatOrNull ?: 0f,
-            o[if (w == "width") "top" else "y"]?.jsonPrimitive?.floatOrNull ?: 0f,
-            o[w]?.jsonPrimitive?.floatOrNull ?: 0f,
-            o[h]?.jsonPrimitive?.floatOrNull ?: 0f,
-        )
-        val caret = (r["caret"] as? JsonObject)?.let { box(it, "width", "height") }
-        val rects = (r["rects"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> box(o, "w", "h") } } ?: emptyList()
-        val obj = (r["object"] as? JsonObject)?.let { o ->
-            fun f(k: String) = o[k]?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() }
-            val (x, y, w, h) = listOf(f("x"), f("y"), f("w"), f("h"))
-            if (x == null || y == null || w == null || h == null || w <= 0f || h <= 0f) null
-            else ObjectFrame(
-                o["page"]?.jsonPrimitive?.intOrNull ?: 0, x, y, w, h, f("rotation") ?: 0f,
-                o["floating"]?.jsonPrimitive?.booleanOrNull ?: false, o["kind"]?.jsonPrimitive?.contentOrNull ?: "object",
-            )
-        }
-        return SelectionGeometry(caret, rects, obj)
-    }
+    fun selection(): SelectionGeometry = parseSelectionGeometry(call("loki.selection").jsonObject)
 
     fun renderPage(page: Int, scale: Float): PageBitmap? = native.renderPage(page, scale)
 

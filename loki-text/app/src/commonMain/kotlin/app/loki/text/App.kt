@@ -8,6 +8,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ZoomIn
 import com.composables.icons.lucide.ZoomOut
 import kotlin.math.roundToInt
+import kotlin.time.TimeSource
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
@@ -324,6 +325,10 @@ fun App(
     // While two fingers are down the pages are only scaled on screen; the zoom is applied (and the
     // pages re-rendered sharply) when they lift.
     var pinch by remember { mutableStateOf(1f) }
+    // The last tap on a page, to tell a double tap from two single ones.
+    var lastTapMark by remember { mutableStateOf<TimeSource.Monotonic.ValueTimeMark?>(null) }
+    var lastTapAt by remember { mutableStateOf(Offset.Zero) }
+    val tapSlopPx = with(LocalDensity.current) { 40.dp.toPx() }
     // The context menu (right-click, or long-press on a selection or a misspelled word), over a page.
     var ctxMenu by remember { mutableStateOf<ContextMenuData?>(null) }
     // The floating toolbar hides while a handle or the mouse is moving the selection.
@@ -362,6 +367,20 @@ fun App(
         }
         if (picked) revision++
         return picked
+    }
+
+    // Enters the header or footer under a double tap (Print Layout only), and leaves it again from the body.
+    suspend fun enterHeaderFooterAt(page: Int, at: Offset, pxPerPt: Float): Boolean {
+        val entered = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    val r = engine.execute("hf.enterAt", buildJsonObject { put("page", page); put("x", at.x / pxPerPt); put("y", at.y / pxPerPt) }) as? JsonObject
+                    r?.get("entered")?.jsonPrimitive?.contentOrNull != null
+                }.getOrDefault(false)
+            }
+        }
+        if (entered) revision++
+        return entered
     }
 
     // What the engine says about the word at the caret, for the context menu.
@@ -919,8 +938,15 @@ fun App(
                                 },
                             ) { o ->
                                 pageFocus.requestFocus()
+                                // A second tap close to the first: in a header or footer area it edits that one; in the body, while one
+                                // is being edited, it goes back to the body.
+                                val twice = lastTapMark?.let { isDoubleTap(it.elapsedNow().inWholeMilliseconds, lastTapAt, o, tapSlopPx) } == true
+                                lastTapMark = if (twice) null else TimeSource.Monotonic.markNow()
+                                lastTapAt = o
                                 // A picture, shape or text box under the finger is selected (its frame appears); anything else puts the caret there.
                                 scope.launch {
+                                    if (twice && enterHeaderFooterAt(i, o, pxPerPt)) return@launch
+                                    if (twice && selection.hf != null) { perform { execute("insert.closeHeader"); setCaret(i, o, pxPerPt, false) }; return@launch }
                                     if (selectObjectAt(i, o, pxPerPt)) keyboard?.hide()
                                     else { keyboard?.show(); perform { setCaret(i, o, pxPerPt, false) } }
                                 }
@@ -968,6 +994,9 @@ fun App(
                 }
                 }
             }
+        }
+        selection.hf?.let { kind ->
+            HeaderFooterBar(kind, { scope.launch { runCommand("insert.closeHeader") } }, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
         }
         // The floating toolbar over a selection: above its first visible line, flipping below when
         // there is no room. Hidden while something else is moving the selection or has the screen.

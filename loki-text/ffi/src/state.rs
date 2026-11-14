@@ -100,7 +100,7 @@ pub fn command_state(sess: &mut Session) -> Value {
         "picture": picture_state(sess),
         "arrange": arrange_state(sess),
         "styleAt": style_at(sess),
-        "contextual": wordcraft_engine::ribbon::contextual_tabs(sess),
+        "contextual": contextual(sess),
     })
 }
 
@@ -244,4 +244,14 @@ fn style_at(sess: &Session) -> Value {
     // The default character style (Default Paragraph Font) is no style of its own.
     let chr = p.props_at(sess.sel.focus.off).style.clone().filter(|id| Some(id) != default_of(StyleKind::Character).as_ref());
     json!({"paragraph": para, "character": chr})
+}
+
+/// The contextual tabs the selection brings up: the engine's, and Header & Footer while one is being edited
+/// (the egui app draws that tab on its own, so the engine's list leaves it out).
+fn contextual(sess: &Session) -> Vec<&'static str> {
+    let mut tabs = wordcraft_engine::ribbon::contextual_tabs(sess);
+    if sess.in_header_footer() {
+        tabs.push("Header & Footer");
+    }
+    tabs
 }
