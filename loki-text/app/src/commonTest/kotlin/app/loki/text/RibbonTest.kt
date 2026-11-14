@@ -25,22 +25,36 @@ class RibbonTest {
     }
 
     @Test
-    fun commandsThatNeedAValueGetNoButton() {
+    fun commandsThatNeedAValueOpenAFormInsteadOfRunning() {
         assertFalse(runsWithoutParams("{\"size\": number}"))
         assertFalse(runsWithoutParams("{\"a\": 1} | {\"b\": 2}"))
         val tabs = parseRibbon(commands(Triple("format.size", "Home › Font", "{\"size\": number}")))
-        assertTrue(ids(tabs).isEmpty())
+        // On the ribbon, so it is reachable, and marked so a click asks for the value first.
+        val item = tabs.single().groups.single().items.single()
+        assertTrue(item.needsInput)
+        assertEquals("format.size…", item.menuLabel)
     }
 
-    /** These have only optional keys but still fail without input, so they must stay off the ribbon. */
+    /** These have only optional keys but still fail without input, so a click must ask first. */
     @Test
-    fun needsInputCommandsAreExcludedEvenWithOptionalParams() {
+    fun commandsWithRulesInProseAlsoNeedInput() {
         val tabs = parseRibbon(commands(
             Triple("format.font", "Home › Font", "{\"name\"?: string, \"eastAsia\"?: string}"),
             Triple("references.citation", "References › Citations", "{\"tag\"?: string, \"source\"?: string}"),
             Triple("format.bold", "Home › Font", "{}"),
         ))
-        assertEquals(listOf("format.bold"), ids(tabs))
+        val items = tabs.flatMap { t -> t.groups.flatMap { it.items } }
+        assertEquals(listOf("format.font", "references.citation"), items.filter { it.needsInput }.map { it.id })
+        assertEquals(listOf("format.bold"), items.filter { !it.needsInput }.map { it.id })
+    }
+
+    @Test
+    fun commandsThePointerDrivesAreNotMenuEntries() {
+        val tabs = parseRibbon(commands(
+            Triple("table.resizeDrag", "Table Layout › Cell Size", "{\"page\": n, \"x\": pt, \"y\": pt, \"toX\": pt, \"toY\": pt}"),
+            Triple("table.autoFit", "Table Layout › Cell Size", "{}"),
+        ))
+        assertEquals(listOf("table.autoFit"), ids(tabs))
     }
 
     @Test
@@ -445,7 +459,7 @@ class RibbonTest {
     fun pinchZoomSettlesInSmallStepsWithinTheLimits() {
         assertEquals(1.5f, settleZoom(1f, 1.52f, 2f), 0.0001f)
         assertEquals(2f, settleZoom(1.5f, 3f, 2f))
-        assertEquals(0.5f, settleZoom(1f, 0.1f, 2f))
+        assertEquals(0.25f, settleZoom(1f, 0.1f, 2f))
         // Not a usable pinch: the zoom stays.
         assertEquals(1.25f, settleZoom(1.25f, Float.NaN, 2f))
         assertEquals(1.25f, settleZoom(1.25f, 0f, 2f))

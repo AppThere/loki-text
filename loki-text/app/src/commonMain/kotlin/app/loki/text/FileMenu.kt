@@ -21,22 +21,38 @@ import com.composables.icons.lucide.Menu
 /** One entry of the File menu: the command id (which picks the icon), its label and shortcut. */
 internal class FileMenuItem(val id: String, val label: String, val shortcut: String = "")
 
-/** The File menu's entries in order; a null is a divider. */
+/**
+ * The File menu's entries in order; a null is a divider. `file.*` and `review.*` ids are engine
+ * commands (the ones that write a file ask where first; the rest report, or open their form);
+ * `app.*` ids are this app's own: the theme, the all-commands list, About.
+ */
 internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("file.new", "New", "Ctrl+N"),
     FileMenuItem("file.open", "Open…", "Ctrl+O"),
     null,
     FileMenuItem("file.save", "Save", "Ctrl+S"),
     FileMenuItem("file.saveAs", "Save As…"),
+    FileMenuItem("file.saveTemplate", "Save as Template…"),
     null,
-    FileMenuItem("file.print", "Print…"),
+    FileMenuItem("file.exportPdf", "Export PDF…"),
+    FileMenuItem("file.exportPng", "Export Page as PNG…"),
+    FileMenuItem("file.print", "Print…", "Ctrl+P"),
     null,
+    FileMenuItem("file.info", "Info"),
+    FileMenuItem("file.properties", "Properties…"),
+    FileMenuItem("file.options", "Options…"),
+    null,
+    FileMenuItem("app.theme.system", "Theme: System"),
+    FileMenuItem("app.theme.light", "Theme: Light"),
+    FileMenuItem("app.theme.dark", "Theme: Dark"),
+    null,
+    FileMenuItem("app.commands", "All Commands…"),
     FileMenuItem("app.about", "About $APP_NAME"),
 )
 
 /** The menu button in the top panel; [onRun] gets the chosen entry's id. */
 @Composable
-internal fun FileMenuButton(onRun: (String) -> Unit) {
+internal fun FileMenuButton(checked: String? = null, onRun: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp)) {
         Icon(Lucide.Menu, contentDescription = "Menu", modifier = Modifier.size(18.dp))
@@ -44,8 +60,8 @@ internal fun FileMenuButton(onRun: (String) -> Unit) {
             for (item in FILE_MENU) {
                 if (item == null) { HorizontalDivider(); continue }
                 DropdownMenuItem(
-                    text = { Text(item.label) },
-                    leadingIcon = { RibbonIcon(item.id) },
+                    text = { Text((if (item.id == checked) "✓ " else "") + item.label) },
+                    leadingIcon = { if (hasRibbonIcon(item.id)) RibbonIcon(item.id) },
                     trailingIcon = if (item.shortcut.isEmpty()) null else {
                         { Text(displayShortcut(item.shortcut), style = MaterialTheme.typography.labelSmall) }
                     },

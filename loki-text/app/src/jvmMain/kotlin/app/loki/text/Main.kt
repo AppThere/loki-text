@@ -39,8 +39,9 @@ import org.jetbrains.skia.ImageInfo
 actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBitmap =
     Image.makeRaster(ImageInfo(width, height, ColorType.RGBA_8888, ColorAlphaType.UNPREMUL), rgba, width * 4).toComposeImageBitmap()
 
-actual fun pickFile(save: Boolean): String? {
+actual fun pickFile(save: Boolean, suggestedName: String): String? {
     val dialog = FileDialog(null as Frame?, if (save) "Save As" else "Open", if (save) FileDialog.SAVE else FileDialog.LOAD)
+    if (save && suggestedName.isNotBlank()) dialog.file = suggestedName
     dialog.isVisible = true
     val name = dialog.file ?: return null
     return java.io.File(dialog.directory ?: "", name).path

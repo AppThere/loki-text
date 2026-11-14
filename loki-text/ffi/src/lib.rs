@@ -104,6 +104,12 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(_) => err("internal error (panic caught) reading command state"),
         };
     }
+    if method == "loki.uiRequests" {
+        // What commands asked the front end to do since the last call (open a dialog or a picker,
+        // switch the interface theme, close the window), oldest first. Reading them clears them.
+        let requests = std::mem::take(&mut session.inner.session.ui_requests);
+        return reply(json!({"ok": true, "result": requests}));
+    }
     if method == "loki.viewport" {
         // Reflowing views (Web Layout, Read Mode) wrap to the window; the engine keeps these
         // transient numbers on the session's view and offers no command to set them.

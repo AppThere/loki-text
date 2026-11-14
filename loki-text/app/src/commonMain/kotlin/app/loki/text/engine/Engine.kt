@@ -94,6 +94,12 @@ class Engine(private val native: NativeEngine = NativeEngine()) : AutoCloseable 
         call("loki.viewport", buildJsonObject { put("width", widthPt); put("height", heightPt) })
     }
 
+    /**
+     * What commands asked the front end to do since the last call (`{"open": "exportPdf"}`,
+     * `{"interfaceTheme": "dark"}`, `{"close": true}`), oldest first; reading them clears them.
+     */
+    fun uiRequests(): List<JsonObject> = (call("loki.uiRequests") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+
     /** Caret and selection boxes, or empty geometry when the reply is malformed. */
     fun selection(): SelectionGeometry = parseSelectionGeometry(call("loki.selection").jsonObject)
 

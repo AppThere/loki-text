@@ -47,6 +47,19 @@ private val pendingSaves = HashMap<String, Uri>()
 
 private const val DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+/** The media type of a file to create, from its extension; a document when it has none this app writes. */
+private fun mimeFor(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    "pdf" -> "application/pdf"
+    "png" -> "image/png"
+    "dotx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+    "odt" -> "application/vnd.oasis.opendocument.text"
+    "rtf" -> "application/rtf"
+    "txt" -> "text/plain"
+    "md" -> "text/markdown"
+    "html", "htm" -> "text/html"
+    else -> DOCX
+}
+
 private fun ContentResolver.displayName(uri: Uri): String? =
     query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
         if (c.moveToFirst()) c.getString(0) else null
@@ -62,14 +75,16 @@ private fun safeName(name: String?, fallback: String) =
  * in app storage and [publishFile] copies it to the chosen place once the engine has written it.
  * Blocks until the picker closes; call off the UI thread.
  */
-actual fun pickFile(save: Boolean): String? {
+actual fun pickFile(save: Boolean, suggestedName: String): String? {
     val host = activity ?: return null
     val result = CompletableFuture<Uri?>()
     host.runOnUiThread {
         val registry = host.activityResultRegistry
         val key = "loki-pick-${System.nanoTime()}"
         if (save) {
-            registry.register(key, ActivityResultContracts.CreateDocument(DOCX)) { uri: Uri? -> result.complete(uri) }.launch("Untitled.docx")
+            // The picker names and types the new file from what is being written (a document, a PDF, a picture).
+            val name = safeName(suggestedName, "Untitled.docx")
+            registry.register(key, ActivityResultContracts.CreateDocument(mimeFor(name))) { uri: Uri? -> result.complete(uri) }.launch(name)
         } else {
             registry.register(key, ActivityResultContracts.OpenDocument()) { uri: Uri? -> result.complete(uri) }.launch(arrayOf("*/*"))
         }
@@ -78,7 +93,8 @@ actual fun pickFile(save: Boolean): String? {
     val resolver = host.contentResolver
     val dir = File(host.cacheDir, if (save) "save" else "open").apply { mkdirs() }
     var name = safeName(resolver.displayName(uri), "document.docx")
-    if (save && '.' !in name) name += ".docx"
+    // A provider may drop the extension; the engine picks the format from it.
+    if (save && '.' !in name) name += "." + suggestedName.substringAfterLast('.', "docx").ifEmpty { "docx" }
     val file = File(dir, name)
     return try {
         if (save) {

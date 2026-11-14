@@ -331,11 +331,9 @@ fn command_state_names_the_style_at_the_caret() {
 fn review_and_references_menus_send_params_the_engine_accepts() {
     let s = loki_session_new();
     call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Hello"}}"#));
-    for (cmd, params) in [
-        ("readAloud.speed", r#"{"value":1.25}"#),
-        ("references.toc", r#"{"levels":3}"#),
-        ("review.newComment", r#"{"text":"Check this"}"#),
-    ] {
+    for (cmd, params) in
+        [("readAloud.speed", r#"{"value":1.25}"#), ("references.toc", r#"{"levels":3}"#), ("review.newComment", r#"{"text":"Check this"}"#)]
+    {
         let req = format!(r#"{{"command":"{cmd}","params":{params}}}"#);
         let r = call(s, "engine.execute", Some(&req));
         assert!(r.get("error").is_none(), "{cmd}: {r}");
@@ -403,7 +401,11 @@ fn equation_gallery_templates_insert_into_an_equation() {
     assert!(r.get("error").is_none(), "{t}: {r}");
     let r = run("equation.insertSymbol", &format!(r#"{{"char":"{}"}}"#, ch.unwrap_or('+')));
     assert!(r.get("error").is_none(), "{r}");
-    for (cmd, params) in [("equation.convert", r#"{"to":"linear"}"#), ("equation.convert", r#"{"to":"professional"}"#), ("equation.inputFormat", r#"{"format":"latex"}"#)] {
+    for (cmd, params) in [
+        ("equation.convert", r#"{"to":"linear"}"#),
+        ("equation.convert", r#"{"to":"professional"}"#),
+        ("equation.inputFormat", r#"{"format":"latex"}"#),
+    ] {
         let r = run(cmd, params);
         assert!(r.get("error").is_none(), "{cmd}: {r}");
     }
@@ -488,7 +490,8 @@ fn a_selected_object_reports_its_frame_and_can_be_picked_by_point() {
     assert!(r.get("error").is_none(), "{r}");
     let o = object(s);
     assert_eq!(o["kind"], "shape", "{o}");
-    let (x, y, w, h) = (o["x"].as_f64().unwrap_or(-1.0), o["y"].as_f64().unwrap_or(-1.0), o["w"].as_f64().unwrap_or(0.0), o["h"].as_f64().unwrap_or(0.0));
+    let (x, y, w, h) =
+        (o["x"].as_f64().unwrap_or(-1.0), o["y"].as_f64().unwrap_or(-1.0), o["w"].as_f64().unwrap_or(0.0), o["h"].as_f64().unwrap_or(0.0));
     assert!((w - 120.0).abs() < 0.5 && (h - 60.0).abs() < 0.5, "{o}");
     // Moving the caret away drops the frame; picking the object by a point inside it brings it back.
     run("select.collapse", r#"{"end":true}"#);
@@ -538,5 +541,39 @@ fn a_header_or_footer_is_entered_by_point_and_left_again() {
     // Hostile input is an error or a no-op, never a crash.
     assert!(run("hf.enterAt", r#"{"page":0,"x":"a","y":1}"#).get("error").is_some());
     assert!(run("hf.enterAt", r#"{"page":99999999999,"x":1,"y":1}"#).get("error").is_none());
+    unsafe { loki_session_free(s) };
+}
+
+/// The engine's command list as the Kotlin tests read it (`app/src/jvmTest/resources`). They check
+/// that every command is reachable from the Compose UI against this copy, so it must follow the engine.
+#[test]
+fn kotlin_command_fixture_follows_the_engine() {
+    let s = loki_session_new();
+    let cmds = call(s, "engine.commands", None)["result"].clone();
+    unsafe { loki_session_free(s) };
+    let lines: Vec<String> = cmds.as_array().into_iter().flatten().map(|c| serde_json::to_string(c).unwrap()).collect();
+    let now = format!("[\n{}\n]\n", lines.join(",\n"));
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/src/jvmTest/resources/engine-commands.json");
+    if std::env::var_os("LOKI_UPDATE_FIXTURES").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &now).unwrap();
+    }
+    let saved = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        saved == now,
+        "engine.commands changed: run `LOKI_UPDATE_FIXTURES=1 cargo test -p loki-ffi kotlin_command_fixture`, then `gradle :app:jvmTest`"
+    );
+}
+
+#[test]
+fn ui_requests_are_handed_over_once() {
+    let s = loki_session_new();
+    call(s, "loki.uiRequests", None);
+    let r = call(s, "engine.execute", Some(r#"{"command":"view.interfaceTheme","params":{"value":"dark"}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    call(s, "engine.execute", Some(r#"{"command":"file.exportPdf","params":{}}"#));
+    let got = call(s, "loki.uiRequests", None)["result"].clone();
+    assert_eq!(got, serde_json::json!([{"interfaceTheme": "dark"}, {"open": "exportPdf"}]));
+    assert_eq!(call(s, "loki.uiRequests", None)["result"], serde_json::json!([]));
     unsafe { loki_session_free(s) };
 }

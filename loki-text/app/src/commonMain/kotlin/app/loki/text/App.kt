@@ -101,6 +101,20 @@ import androidx.compose.ui.unit.dp
 import app.loki.text.engine.Engine
 import app.loki.text.engine.EngineException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import com.composables.icons.lucide.Search
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -117,6 +131,17 @@ expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 
 /** The desk the pages sit on. */
 private val DESK_COLOR = Color(0xFFCCD6E3)
+private val DESK_COLOR_DARK = Color(0xFF10151B)
+
+/** The colour of the paper as shown: black for dark pages, the paper tint when one is set, else white. */
+private fun pagePaper(darkPages: Boolean, paper: String?): Color = if (darkPages) Color.Black else paperTint(paper)?.let { formColor(it) } ?: Color.White
+
+/** The commands the File menu writes a file with, and the extension each one's file gets. */
+private val EXPORT_EXTENSIONS = mapOf("file.exportPdf" to ".pdf", "file.exportPng" to ".png", "file.saveTemplate" to ".dotx")
+private val EXPORTS = EXPORT_EXTENSIONS.keys
+
+/** Commands a pane runs only to read, which leave the document as it was. */
+private val PANE_READS = setOf("nav.headings", "nav.search", "review.comments", "styles.list", "edit.clipboardItems", "review.changes", "file.accessibility", "styles.inspect", "arrange.selectionPane")
 
 /** Narrower than this, a page (8.5 in) doesn't fit with its margins, and the text reflows instead. */
 private val NARROW_WINDOW = 640.dp
@@ -125,7 +150,13 @@ private val NARROW_WINDOW = 640.dp
 private const val MAX_WEB_WIDTH_PT = 640f
 
 /** Everything one render publishes together. */
-private class Snapshot(val selection: SelectionGeometry, val pages: List<ImageBitmap>, val flat: Boolean, val counts: Counts?, val commands: CommandState, val dirty: Boolean = false, val format: FormatState = FormatState.EMPTY, val path: String? = null)
+private class Snapshot(
+    val selection: SelectionGeometry, val pages: List<ImageBitmap>, val view: ViewState, val zoom: Float, val counts: Counts?, val commands: CommandState,
+    val dirty: Boolean = false, val format: FormatState = FormatState.EMPTY, val path: String? = null,
+    /** The first page's size in points, for the zoom that fits it to the window. */
+    val pagePt: Size? = null,
+    val ruler: RulerInfo? = null,
+)
 
 /** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
 internal class Counts(val words: Int, val pages: Int, val characters: Int)
@@ -147,7 +178,8 @@ private fun <T> warnOnce(what: String, e: Throwable, fallback: T): T {
     return fallback
 }
 
-private const val MIN_ZOOM = 0.5f
+/** Low enough that One Page fits a whole sheet on a phone. */
+private const val MIN_ZOOM = 0.25f
 private const val MAX_ZOOM = 2f
 
 private const val MAX_PAGES = 50
@@ -215,12 +247,45 @@ private fun DrawScope.drawPenStroke(st: PenStroke, pxPerPt: Float, ink: Color) {
     else drawRect(ink, topLeft = Offset(minOf(a.x, b.x), minOf(a.y, b.y)), size = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y)), style = dash)
 }
 
-private fun DrawScope.drawSelection(sel: SelectionGeometry, page: Int, scale: Float) {
+/** The ink being drawn: the pen's own colour and width for a pen, a dashed loop for the lasso. */
+private fun DrawScope.drawInkPreview(tool: InkTool, points: List<Offset>, pxPerPt: Float, accent: Color) {
+    if (points.size < 2 || !tool.draws && tool.name != "lasso") return
+    val path = Path().apply {
+        moveTo(points[0].x, points[0].y)
+        for (pt in points.drop(1)) lineTo(pt.x, pt.y)
+    }
+    if (tool.name == "lasso") {
+        drawPath(path, accent, style = Stroke(width = 1.5f * density, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * density, 4f * density))))
+    } else {
+        val ink = Color(tool.red, tool.green, tool.blue, if (tool.name == "highlighter") 110 else 255)
+        drawPath(path, ink, style = Stroke(width = (tool.width * pxPerPt).coerceAtLeast(1f), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** Drawing gridlines over a page (View › Gridlines): a line every eighth of an inch, as the default drawing grid. */
+private fun DrawScope.drawGridlines(pxPerPt: Float, ink: Color) {
+    val step = 9f * pxPerPt
+    if (step < 3f) return
+    var x = step
+    while (x < size.width) { drawLine(ink, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f); x += step }
+    var y = step
+    while (y < size.height) { drawLine(ink, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f); y += step }
+}
+
+/** Dark pages: lightness inverted and the hue turned back, so white paper is black and colours keep their hue. */
+private val DARK_PAGE_FILTER = ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+    0.574f, -1.43f, -0.144f, 0f, 255f,
+    -0.426f, -0.43f, -0.144f, 0f, 255f,
+    -0.426f, -1.43f, 0.856f, 0f, 255f,
+    0f, 0f, 0f, 1f, 0f,
+)))
+
+private fun DrawScope.drawSelection(sel: SelectionGeometry, page: Int, scale: Float, caretColor: Color = Color.Black) {
     for (r in sel.rects) if (r.page == page) {
         drawRect(Color(0x553390FF), Offset(r.x * scale, r.y * scale), Size(r.w * scale, r.h * scale))
     }
     sel.caret?.takeIf { it.page == page }?.let { c ->
-        drawRect(Color.Black, Offset(c.x * scale, c.y * scale), Size(maxOf(c.w * scale, 1.5f), c.h * scale))
+        drawRect(caretColor, Offset(c.x * scale, c.y * scale), Size(maxOf(c.w * scale, 1.5f), c.h * scale))
     }
 }
 
@@ -228,7 +293,7 @@ private fun DrawScope.drawSelection(sel: SelectionGeometry, page: Int, scale: Fl
  * Asks the user for a file path: an existing file to open, or (when [save]) a destination.
  * Null when cancelled or when the platform has no picker yet. Blocks; call off the UI thread.
  */
-expect fun pickFile(save: Boolean): String?
+expect fun pickFile(save: Boolean, suggestedName: String = ""): String?
 
 /** Clipboards round-trip text with different line endings and trailing newlines; ignore those. */
 private fun sameClipboardText(a: String, b: String) =
@@ -273,7 +338,7 @@ fun App(
     onNewWindow: ((String?) -> Unit)? = null,
     /** Set when the app draws the window's title bar (desktop on a JetBrains Runtime); null for a native one. */
     titleBar: TitleBarConfig? = null,
-) = MaterialTheme(colorScheme = LokiColors, typography = typographyWith(uiFontFamily())) {
+) = AppTheme { themeChoice, setTheme, darkTheme ->
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
@@ -319,9 +384,33 @@ fun App(
     // The file the document is saved to, or null for one that has none yet.
     var docPath by remember { mutableStateOf<String?>(null) }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var flat by remember { mutableStateOf(false) }
-    // Client-side zoom: the pages are simply rendered at a larger or smaller scale.
+    // How the engine says the document is shown (view, zoom, dark pages, ruler, panes); refreshed with every render.
+    var viewState by remember { mutableStateOf(ViewState.DEFAULT) }
+    val flat = viewState.flat
+    // The zoom the pages on screen were rendered at. The engine holds the zoom (View › Zoom, the status
+    // bar and a pinch all set it there); each render reads it back.
     var zoom by remember { mutableStateOf(1f) }
+    // A pinch has ended and its zoom is on the way: the pages stay scaled on screen until they are re-rendered.
+    var pinchPending by remember { mutableStateOf(false) }
+    // The first page's size in points and the page area's size in pixels, for Page Width and One Page.
+    var pagePt by remember { mutableStateOf<Size?>(null) }
+    var viewportPx by remember { mutableStateOf(IntSize.Zero) }
+    var rulerInfo by remember { mutableStateOf<RulerInfo?>(null) }
+    // Every engine command, for the all-commands list and the command form; and what is open of each.
+    var catalog by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
+    val catalogById = remember(catalog) { catalog.associateBy { it.id } }
+    var showCommands by remember { mutableStateOf<String?>(null) }
+    var commandForm by remember { mutableStateOf<CommandInfo?>(null) }
+    var commandResult by remember { mutableStateOf<Pair<CommandInfo, JsonElement?>?>(null) }
+    // Panes the engine keeps no open flag for (Reviewing, Selection).
+    var localPanes by remember { mutableStateOf<Set<PaneKind>>(emptySet()) }
+    // The colour laid over the page (View › Screen Paper Color, and Read Mode's page colour), by the engine's name.
+    var paperColor by remember { mutableStateOf<String?>(null) }
+    // The stroke a Draw tab tool is making on a page, in pixels of that page.
+    var inkPage by remember { mutableStateOf(-1) }
+    val inkPoints = remember { mutableStateListOf<Offset>() }
+    // What commands ask of the window (open a picker, change the theme, close), handled in order.
+    val uiRequests = remember { Channel<JsonObject>(Channel.UNLIMITED) }
     // While two fingers are down the pages are only scaled on screen; the zoom is applied (and the
     // pages re-rendered sharply) when they lift.
     var pinch by remember { mutableStateOf(1f) }
@@ -345,9 +434,16 @@ fun App(
     // Engine calls block, so they run off the UI thread. The native session is not thread-safe,
     // so every call (edits, geometry, rendering) goes through this lock, in the order issued.
     val engineLock = remember { Mutex() }
-    suspend fun perform(block: Engine.() -> Unit) {
+    suspend fun perform(requests: Boolean = true, block: Engine.() -> Unit) {
         status = try {
-            engineLock.withLock { withContext(Dispatchers.Default) { engine.block() } }
+            val asked = engineLock.withLock {
+                withContext(Dispatchers.Default) {
+                    engine.block()
+                    // Always read, so a request this caller handles itself is not left for the next command.
+                    runCatching { engine.uiRequests() }.getOrDefault(emptyList())
+                }
+            }
+            if (requests) asked.forEach { uiRequests.trySend(it) }
             revision++
             ""
         } catch (e: EngineException) {
@@ -431,6 +527,9 @@ fun App(
         }
         if (params.isEmpty() && command in setOf("para.defineBullet", "para.defineNumber", "para.setNumberingValue")) { listDialog = command; return }
         if (command == "review.comments") { runCommand("view.commentsPane"); return }
+        // Panes the engine only lists the contents of: this app keeps them open or closed.
+        if (bare) LOCAL_PANES[command]?.let { pane -> localPanes = if (pane in localPanes) localPanes - pane else localPanes + pane; return }
+        if (command == "tools.search" && bare) { showCommands = ""; return }
         if (command == "styles.manage") { manageStyles = true; return }
         if (command == "styles.create" && params["name"] == null) { newStyleBase = null; newStyleOpen = true; return }
         if (command == "styles.modify" && params["style"] == null) {
@@ -464,6 +563,9 @@ fun App(
         }
         perform {
             val r = execute(command, p)
+            // The engine's renderer draws plain paper; the colour laid over it is this app's to remember.
+            if (command == "view.paperColor") paperColor = (r as? JsonObject)?.get("paperColor")?.jsonPrimitive?.contentOrNull
+            if (command == "view.readPageColor") paperColor = p["value"]?.jsonPrimitive?.contentOrNull
             if (command == "edit.copy" || command == "edit.cut") {
                 val text = (r as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull
                 if (!text.isNullOrEmpty()) {
@@ -472,7 +574,29 @@ fun App(
                 }
             }
         }
-        if (command.startsWith("styles.") || command.startsWith("file.")) stylesRevision++
+        if (command.startsWith("styles.") || command.startsWith("file.") || command.startsWith("design.")) stylesRevision++
+    }
+
+    // Sets the zoom where it lives, in the engine; the next render reads it back and draws at it.
+    suspend fun setZoom(z: Float) {
+        runCommand("view.zoom", buildJsonObject { put("value", (z * 100).roundToInt().coerceIn(10, 500)) })
+        if (status.isNotEmpty()) { pinch = 1f; pinchPending = false }
+    }
+
+    // Runs [c] with [params] for a form or a menu and returns why it failed (null when it ran). An answer
+    // worth reading is shown; a file the command wrote is handed to the place the person picked.
+    suspend fun executeFromUi(c: CommandInfo, params: JsonObject, showResult: Boolean = true): String? {
+        var result: JsonElement? = null
+        perform {
+            result = execute(c.id, params)
+            if (c.id == "view.paperColor") paperColor = (result as? JsonObject)?.get("paperColor")?.jsonPrimitive?.contentOrNull
+            if (c.id == "view.readPageColor") paperColor = params["value"]?.jsonPrimitive?.contentOrNull
+        }
+        if (status.isNotEmpty()) return status.also { status = "" }
+        if (c.id.startsWith("styles.") || c.id.startsWith("file.") || c.id.startsWith("design.") || c.id.startsWith("tools.")) stylesRevision++
+        if (writesFile(c.id)) (params["path"] as? JsonPrimitive)?.contentOrNull?.let { path -> withContext(Dispatchers.Default) { runCatching { publishFile(path) } } }
+        if (showResult && showsResult(c, result)) commandResult = c to result
+        return null
     }
 
     LaunchedEffect(Unit) {
@@ -493,6 +617,7 @@ fun App(
     LaunchedEffect(Unit) {
         val commands = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.commands() }.getOrNull() } }
         ribbon = commands?.let { runCatching { parseRibbon(it) }.getOrNull() }.orEmpty()
+        catalog = runCatching { parseCommands(commands) }.getOrDefault(emptyList())
         shortcuts = commands?.let { runCatching { parseShortcuts(it) }.getOrNull() }.orEmpty()
     }
 
@@ -520,33 +645,49 @@ fun App(
         }
     }
 
-    LaunchedEffect(revision, zoom) {
+    // Page Width and One Page: the zoom that fits the first page to the page area, to two decimals so
+    // a pixel of jitter in the window's size doesn't re-render.
+    val fitTarget = pagePt?.takeIf { viewState.fit.isNotEmpty() }?.let { pg ->
+        val gutter = 32f * screenDensity
+        fitZoom(viewState.fit, pg.width, pg.height, viewportPx.width - gutter, viewportPx.height - gutter, PAGE_SCALE * screenDensity.coerceIn(0.5f, 4f))
+            ?.let { ((it * 100f).roundToInt() / 100f).coerceIn(MIN_ZOOM, maxZoomFor(screenDensity)) }
+    }
+    LaunchedEffect(revision, fitTarget) {
         // Geometry and pixels come from the same engine state and are published together, so the
         // caret is never drawn over a page image from before the edit.
+        val shownZoom = zoom
         val snap = engineLock.withLock {
             withContext(Dispatchers.Default) {
                 val sel = runCatching { engine.selection() }.getOrDefault(SelectionGeometry(null, emptyList()))
                 // Web Layout, Draft and Outline are one continuous column, not sheets of paper.
-                val flat = runCatching {
-                    val v = engine.execute("view.state") as JsonObject
-                    v["mode"]?.jsonPrimitive?.contentOrNull != "print" && v["readMode"]?.jsonPrimitive?.booleanOrNull != true
-                }.getOrDefault(false)
+                val view = runCatching { parseViewState(engine.execute("view.state")) }.getOrElse { warnOnce("view.state", it, ViewState.DEFAULT) }
+                // The engine holds the zoom; a fit (Page Width, One Page) is worked out from the window.
+                val z = (if (view.fit.isNotEmpty()) fitTarget ?: shownZoom else view.zoom).coerceIn(MIN_ZOOM, maxZoomFor(screenDensity))
+                val renderScale = pagePxPerPt(z, screenDensity)
                 val counts = runCatching { parseCounts(engine.execute("review.wordCount") as JsonObject) }.getOrElse { warnOnce("review.wordCount", it, null) }
                 val cmdState = runCatching { parseCommandState(engine.commandState()) }.getOrElse { warnOnce("loki.commandState", it, CommandState.EMPTY) }
                 val fmt = runCatching { parseFormatState(engine.execute("format.state")) }.getOrDefault(FormatState.EMPTY)
                 val info = runCatching { engine.execute("file.info") as? JsonObject }.getOrNull()
                 val dirty = info?.get("dirty")?.jsonPrimitive?.booleanOrNull == true
                 val path = info?.get("path")?.jsonPrimitive?.contentOrNull
-                val first = engine.renderPage(0, scale) ?: return@withContext Snapshot(sel, emptyList(), flat, counts, cmdState, dirty, fmt)
+                val ruler = if (view.ruler && !view.flat) runCatching { parseRulerInfo(engine.execute("layout.section")) }.getOrNull() else null
+                val first = engine.renderPage(0, renderScale) ?: return@withContext Snapshot(sel, emptyList(), view, z, counts, cmdState, dirty, fmt)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
-                val cap = pageRenderCap(zoom, first.width, first.height)
-                val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, scale) }
-                Snapshot(sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, flat, counts, cmdState, dirty, fmt, path)
+                val cap = pageRenderCap(z, first.width, first.height)
+                val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, renderScale) }
+                Snapshot(
+                    sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, view, z, counts, cmdState, dirty, fmt, path,
+                    pagePt = Size(first.width / renderScale, first.height / renderScale), ruler = ruler,
+                )
             }
         }
         selection = snap.selection
-        flat = snap.flat
+        viewState = snap.view
+        zoom = snap.zoom
+        if (pinchPending) { pinch = 1f; pinchPending = false }
+        snap.pagePt?.let { pagePt = it }
+        rulerInfo = snap.ruler
         counts = snap.counts
         commandState = snap.commands
         formatState = snap.format
@@ -562,7 +703,8 @@ fun App(
     // (and published, on platforms that need it); false when the user cancelled or it failed.
     suspend fun saveDocument(): Boolean {
         var saved: String? = null
-        perform {
+        // Save asks for a place itself, so the engine's request for one is not also acted on.
+        perform(requests = false) {
             val r = execute("file.save") as? JsonObject
             if (r?.get("saved")?.jsonPrimitive?.booleanOrNull == true) saved = r["path"]?.jsonPrimitive?.contentOrNull
         }
@@ -585,6 +727,27 @@ fun App(
     suspend fun openHere(path: String) {
         perform { execute("file.open", buildJsonObject { put("path", path) }) }
         stylesRevision++
+    }
+
+    // Runs a command picked from the ribbon, a menu or the all-commands list. One the app has its own
+    // dialog or pane for goes there; one that needs values opens its form; one that only reports
+    // shows what it answered.
+    suspend fun runFromUi(id: String) {
+        val c = catalogById[id]
+        when {
+            c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
+            c.needsInput -> commandForm = c
+            !c.mutates -> executeFromUi(c, JsonObject(emptyMap()))?.let { status = it }
+            else -> runCommand(id)
+        }
+    }
+
+    // Asks where to write, then has the engine write there (Export PDF, Export PNG, Save as Template).
+    suspend fun exportTo(id: String) {
+        val c = catalogById[id] ?: return
+        val name = (docPath?.substringAfterLast('/')?.substringAfterLast('\\')?.substringBeforeLast('.') ?: "Document") + (EXPORT_EXTENSIONS[id] ?: "")
+        val path = withContext(Dispatchers.Default) { pickFile(save = true, suggestedName = name) } ?: return
+        executeFromUi(c, buildJsonObject { put("path", path) }, showResult = false)?.let { status = it }
     }
 
     suspend fun runFileMenu(id: String) {
@@ -610,23 +773,66 @@ fun App(
                 if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
             }
             "app.about" -> showAbout = true
+            "app.commands" -> showCommands = ""
+            "app.theme.system", "app.theme.light", "app.theme.dark" -> setTheme(id.substringAfterLast('.'))
+            in EXPORTS -> exportTo(id)
+            else -> runFromUi(id)
         }
     }
+
+    // What a command asked of the window: a picker, a dialog of this app's, the form of the command
+    // that takes the values, the theme, or closing.
+    suspend fun handleUiRequest(r: JsonObject) {
+        fun text(k: String) = (r[k] as? JsonPrimitive)?.contentOrNull
+        if ((r["close"] as? JsonPrimitive)?.booleanOrNull == true) { guarded(onClose); return }
+        text("interfaceTheme")?.let { setTheme(it); return }
+        if (text("toggle") == "interfaceTheme") { setTheme(if (darkTheme) "light" else "dark"); return }
+        when (val open = text("open") ?: return) {
+            "saveAs" -> runFileMenu("file.saveAs")
+            "print" -> runFileMenu("file.print")
+            "openFile" -> runFileMenu("file.open")
+            "exportPdf" -> exportTo("file.exportPdf")
+            "exportPng" -> exportTo("file.exportPng")
+            "newWindow" -> if (onNewWindow != null) onNewWindow(null) else status = "This device shows one document at a time"
+            "commands" -> showCommands = ""
+            "find" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.Find)
+            "replace" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.Replace)
+            "goto" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.GoTo)
+            else -> (REQUEST_DIALOGS[open])?.let { id -> if (id in APP_DIALOGS) runCommand(id) else catalogById[id]?.let { commandForm = it } }
+        }
+    }
+    // A command from the ribbon, a menu, a pane or the all-commands list.
+    suspend fun runAny(id: String) { if (id in FILE_MENU_COMMANDS) runFileMenu(id) else runFromUi(id) }
+    LaunchedEffect(Unit) { for (r in uiRequests) runCatching { handleUiRequest(r) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it } }
 
     // A key's command: file commands that need a picker or a window go through the File menu's path.
     fun runKey(k: KeyCommand) {
         scope.launch { if (k.command in FILE_MENU_COMMANDS) runFileMenu(k.command) else runCommand(k.command, k.params) }
     }
-    val fileMenu: @Composable () -> Unit = { FileMenuButton { id -> scope.launch { runFileMenu(id) } } }
+    val fileMenu: @Composable () -> Unit = { FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } }
     val quickCommands: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
             CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
         }
+        // Every command by name, at every window size: the way to what the ribbon has no room for.
+        IconButton(onClick = { showCommands = "" }, modifier = Modifier.size(32.dp)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
     }
     val quickAccess: @Composable () -> Unit = { fileMenu(); quickCommands() }
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    showCommands?.let { section ->
+        AllCommandsDialog(
+            catalog, section.ifEmpty { null }, commandState,
+            onRun = { id -> scope.launch { runAny(id) } },
+            onOptions = { id -> commandForm = catalogById[id] },
+            onDismiss = { showCommands = null },
+        )
+    }
+    commandForm?.let { c -> CommandFormDialog(c, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }) }
+    commandResult?.let { (c, result) ->
+        ResultDialog(c, result, onChange = if (c.hasParams) ({ commandResult = null; commandForm = c }) else null, onDismiss = { commandResult = null })
+    }
     listLevels?.let { start ->
         DefineListDialog(
             start,
@@ -731,7 +937,7 @@ fun App(
             sizeClass = sizeClass,
             leading = if (titleBar != null) ({}) else quickAccess,
             onApplyStyle = { id -> scope.launch { runCommand("styles.apply", buildJsonObject { put("style", id) }) } },
-            onRun = { id -> scope.launch { runCommand(id) } },
+            onRun = { id -> scope.launch { runAny(id) } },
             format = formatState,
             fonts = fontFamilies,
             onRunWith = { id, params -> scope.launch { runCommand(id, params) } },
@@ -767,9 +973,15 @@ fun App(
         if (navOpen && sizeClass == SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.fillMaxWidth().height(240.dp))
         }
-        val commentsOpen = "view.commentsPane" in commandState.on
-        if (commentsOpen && sizeClass == SizeClass.Compact) {
-            CommentsPane(revision, navRun, { scope.launch { runCommand("view.commentsPane") } }, Modifier.fillMaxWidth().height(240.dp))
+        // The other task panes share one place: beside the page, or above it in a narrow window.
+        val openPanes = viewState.panes + PaneKind.entries.filter { it in localPanes }
+        val closePane: (PaneKind) -> Unit = { k -> if (k.flag == null) localPanes = localPanes - k else scope.launch { runCommand(k.toggle) } }
+        val paneRun: suspend (String, JsonObject) -> Result<JsonElement?> = { cmd, p ->
+            runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd !in PANE_READS) revision++ }
+        }
+        val paneUi: (String) -> Unit = { id -> scope.launch { runAny(id) } }
+        if (openPanes.isNotEmpty() && sizeClass == SizeClass.Compact) {
+            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.fillMaxWidth().height(260.dp))
         }
         Row(Modifier.weight(1f).fillMaxWidth()) {
         if (navOpen && sizeClass != SizeClass.Compact) {
@@ -779,7 +991,7 @@ fun App(
         val previewFonts = rememberPreviewFonts()
         val currentZoom by rememberUpdatedState(zoom)
         BoxWithConstraints(
-            Modifier.weight(1f).fillMaxHeight().background(if (flat) Color.White else DESK_COLOR)
+            Modifier.weight(1f).fillMaxHeight().background(if (flat) pagePaper(viewState.darkPages, paperColor) else if (darkTheme) DESK_COLOR_DARK else DESK_COLOR)
                 .onGloballyPositioned { viewportOrigin = it.positionInRoot() }
                 // Two fingers zoom; one finger is left alone so it scrolls and taps. Seen before the
                 // pages are (Initial pass) and consumed only while pinching.
@@ -797,14 +1009,19 @@ fun App(
                             }
                         } while (event.changes.any { it.pressed })
                         if (pinching) {
-                            zoom = settleZoom(currentZoom, pinch, maxZoom)
-                            pinch = 1f
+                            // The engine holds the zoom: the pages stay scaled on screen until they come back re-rendered.
+                            val target = settleZoom(currentZoom, pinch, maxZoom)
+                            if (target == currentZoom) pinch = 1f else { pinchPending = true; scope.launch { setZoom(target) } }
                         }
                     }
                 },
         ) {
         val viewport = maxWidth
         val density = LocalDensity.current
+        val areaPx = IntSize(constraints.maxWidth, constraints.maxHeight)
+        LaunchedEffect(areaPx) { viewportPx = areaPx }
+        val rulerShown = rulerInfo != null && viewState.ruler && !flat
+        val inkTool = viewState.ink
         val gutterPx = with(density) { 32.dp.toPx() }
         val widthPt = ((constraints.maxWidth - gutterPx) / scale).coerceAtMost(MAX_WEB_WIDTH_PT)
         val heightPt = constraints.maxHeight / scale
@@ -850,17 +1067,25 @@ fun App(
                         setTableTool(null)
                         return@onPreviewKeyEvent true
                     }
+                    if (inkTool != null && e.key == Key.Escape && e.type == KeyEventType.KeyDown) {
+                        // Puts the pen down, as the Draw tab's Select does.
+                        scope.launch { runCommand("draw.select") }
+                        return@onPreviewKeyEvent true
+                    }
                     // The engine's shortcuts first (Ctrl+O, F7, …), then typing and moving the caret.
                     val k = shortcutCommand(e, shortcuts) ?: keyCommand(e) ?: return@onPreviewKeyEvent false
                     runKey(k)
                     true
                 }
-                .padding(16.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = if (rulerShown) 16.dp + RULER_HEIGHT else 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The page is a bitmap, so this hidden input is what the on-screen keyboard and IME talk to.
             ImeInput(Modifier.focusRequester(pageFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
             val penInk = MaterialTheme.colorScheme.primary
+            val pageFilter = if (viewState.darkPages) DARK_PAGE_FILTER else paperTint(paperColor)?.let { hex -> formColor(hex) }?.let { ColorFilter.tint(it, BlendMode.Multiply) }
+            val caretColor = if (viewState.darkPages) Color.White else Color.Black
+            val gridInk = (if (viewState.darkPages) Color.White else Color(0xFF5B7FA6)).copy(alpha = 0.28f)
             pages.forEachIndexed { i, bitmap ->
                 // Image scales the bitmap down to fit the window width, so the points-to-pixels
                 // factor is measured from the displayed size rather than assumed to be PAGE_SCALE.
@@ -871,6 +1096,7 @@ fun App(
                 Image(
                     bitmap,
                     contentDescription = "Page ${i + 1}",
+                    colorFilter = pageFilter,
                     // Full size: a window narrower than the page scrolls sideways instead of shrinking it.
                     modifier = Modifier
                         .size(with(density) { bitmap.width.toDp() }, with(density) { bitmap.height.toDp() })
@@ -878,9 +1104,32 @@ fun App(
                         .onSizeChanged { shown = it }
                         .drawWithContent {
                             drawContent()
-                            drawSelection(selection, i, pxPerPt)
+                            if (viewState.gridlines && !flat) drawGridlines(pxPerPt, gridInk)
+                            drawSelection(selection, i, pxPerPt, caretColor)
                             penStroke?.takeIf { it.page == i }?.let { drawPenStroke(it, pxPerPt, penInk) }
+                            if (inkTool != null && inkPage == i) drawInkPreview(inkTool, inkPoints, pxPerPt, penInk)
                         }
+                        .then(if (inkTool == null || tableTool != null) Modifier else Modifier.pointerHoverIcon(PointerIcon.Crosshair).pointerInput(i, pxPerPt, inkTool.name) {
+                            // A Draw tab tool: every press is ink, an erasure or a lasso loop (a finger's too), and the caret stays put.
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                inkPage = i
+                                inkPoints.clear()
+                                inkPoints.add(down.position)
+                                drag(down.id) { change ->
+                                    change.consume()
+                                    if (inkPoints.size < MAX_INK_POINTS) inkPoints.add(change.position)
+                                }
+                                val cmd = inkCommand(inkTool, i, inkPoints.map { it.x / pxPerPt to it.y / pxPerPt })
+                                scope.launch {
+                                    if (cmd != null) runCommand(cmd.first, cmd.second)
+                                    // The preview stays until the page with the ink on it is back.
+                                    inkPoints.clear()
+                                    inkPage = -1
+                                }
+                            }
+                        })
                         .then(if (tableTool == null) Modifier else Modifier.pointerHoverIcon(PointerIcon.Crosshair).pointerInput(i, pxPerPt, tableTool) {
                             // A page tool: every press is a stroke (a finger's too), and the caret stays put.
                             val tool = tableTool ?: return@pointerInput
@@ -904,7 +1153,7 @@ fun App(
                                 }
                             }
                         })
-                        .then(if (tableTool != null) Modifier else Modifier.pointerInput(i, pxPerPt) {
+                        .then(if (tableTool != null || inkTool != null) Modifier else Modifier.pointerInput(i, pxPerPt) {
                             // Right-click: seen before the tap and drag handlers (Initial pass) and taken, so the
                             // selection a click inside it would collapse is still there to be copied.
                             awaitEachGesture {
@@ -995,14 +1244,18 @@ fun App(
                 }
             }
         }
+        if (rulerShown) rulerInfo?.let { info ->
+            val left = (pageOrigin[0]?.x ?: 0f) - viewportOrigin.x
+            HorizontalRuler(info, commandState.layout, left, scale * pinch, Modifier.align(Alignment.TopStart))
+        }
         selection.hf?.let { kind ->
-            HeaderFooterBar(kind, { scope.launch { runCommand("insert.closeHeader") } }, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+            HeaderFooterBar(kind, { scope.launch { runCommand("insert.closeHeader") } }, Modifier.align(Alignment.TopCenter).padding(top = if (rulerShown) 8.dp + RULER_HEIGHT else 8.dp))
         }
         // The floating toolbar over a selection: above its first visible line, flipping below when
         // there is no room. Hidden while something else is moving the selection or has the screen.
         val miniShown = selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
-            pageDialog == null && !manageStyles && listLevels == null && listDialog == null
+            pageDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
         if (miniShown) {
             val miniEnv = remember(commandState, formatState, fontFamilies) {
                 RibbonEnv(emptyMap(), commandState, formatState, fontFamilies, previewFonts, { id -> scope.launch { runCommand(id) } }, { id, p -> scope.launch { runCommand(id, p) } })
@@ -1027,8 +1280,8 @@ fun App(
             }
         }
         }
-        if (commentsOpen && sizeClass != SizeClass.Compact) {
-            CommentsPane(revision, navRun, { scope.launch { runCommand("view.commentsPane") } }, Modifier.width(320.dp).fillMaxHeight())
+        if (openPanes.isNotEmpty() && sizeClass != SizeClass.Compact) {
+            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.width(320.dp).fillMaxHeight())
         }
         }
         StatusBar(
@@ -1039,7 +1292,7 @@ fun App(
             flat = flat,
             sizeClass = sizeClass,
             zoom = zoom,
-            onZoom = { zoom = it.coerceIn(MIN_ZOOM, maxZoomFor(screenDensity)) },
+            onZoom = { z -> scope.launch { setZoom(z.coerceIn(MIN_ZOOM, maxZoomFor(screenDensity))) } },
             onView = { cmd -> scope.launch { runCommand(cmd) } },
         )
     }
@@ -1079,6 +1332,24 @@ private fun StatusBar(
                 }
             }.joinToString("   ·   ")
             Text(text, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        }
+        if (sizeClass == SizeClass.Compact) {
+            // No room for the three zoom controls: the percentage opens them as a menu.
+            var zoomMenu by remember { mutableStateOf(false) }
+            Box {
+                TextButton(onClick = { zoomMenu = true }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp)) {
+                    Text("${(zoom * 100).roundToInt()}%", style = small)
+                }
+                MaterialTheme(colorScheme = LocalBaseColors.current) {
+                    DropdownMenu(expanded = zoomMenu, onDismissRequest = { zoomMenu = false }) {
+                        DropdownMenuItem(text = { Text("Zoom in") }, onClick = { zoomMenu = false; onView("view.zoomIn") })
+                        DropdownMenuItem(text = { Text("Zoom out") }, onClick = { zoomMenu = false; onView("view.zoomOut") })
+                        DropdownMenuItem(text = { Text("100%") }, onClick = { zoomMenu = false; onView("view.zoom100") })
+                        DropdownMenuItem(text = { Text("Page width") }, onClick = { zoomMenu = false; onView("view.pageWidth") })
+                        DropdownMenuItem(text = { Text("One page") }, onClick = { zoomMenu = false; onView("view.onePage") })
+                    }
+                }
+            }
         }
         if (sizeClass != SizeClass.Compact) {
             val step = 0.1f
