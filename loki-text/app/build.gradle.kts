@@ -29,6 +29,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":kit"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

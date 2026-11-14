@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import kotlinx.serialization.json.Json
 import java.io.File
 import kotlin.test.Test
@@ -28,50 +30,20 @@ class EngineCoverageTest {
     }
 
     @Test
-    fun everyCommandIsListedOrDrivenByAGesture() {
-        val listed = commands.filter(::isListed)
-        val sections = catalogSections(commands)
-        // The all-commands list has a section for wherever a command lives.
-        for (c in listed) assertTrue(c.tab.ifEmpty { "Other" } in sections, "${c.id} is in no section (${c.location})")
-        // Whatever is not listed is typed, read by the app itself, or a pointer gesture: one this app has, or a named gap.
-        val unlisted = commands.filterNot(::isListed).map { it.id }.toSet()
-        assertEquals(unlisted, (POINTER_GESTURES + POINTER_GAPS + TYPING_COMMANDS + STATE_READERS).intersect(ids))
-        // A state reader is only hidden when the app does read it.
-        assertEquals(emptyList(), (STATE_READERS - ids).sorted())
-        assertEquals(POINTER_GAPS, POINTER_GAPS.intersect(ids), "a gap names a command the engine no longer has")
-        assertTrue(POINTER_GAPS.size <= 10, "the list of unreachable gestures may only shrink")
-    }
-
-    @Test
-    fun everyCommandOnARibbonTabIsOnTheRibbon() {
-        val expected = commands.filter { isListed(it) && (it.tab in TAB_ORDER || it.tab in CONTEXTUAL_ORDER) }.map { it.id }.toSet()
-        assertEquals(expected, onRibbon)
-        // No tab or group is left with nothing in it unless the app draws that group itself.
-        for (t in ribbon) for (g in t.groups) assertTrue(g.items.isNotEmpty() || hasCustomGroup(t.name, g.name), "${t.name} › ${g.name} is empty")
-    }
-
-    @Test
-    fun everyCommandThatNeedsValuesHasAFormWithFields() {
-        // The raw JSON box is a last resort: a command that needs input must get real controls.
-        val bare = commands.filter { isListed(it) && it.needsInput && it.id !in APP_DIALOGS && parseParamForm(it.params).fields.isEmpty() }.map { it.id }
-        assertEquals(emptyList(), bare)
-        for (c in commands) {
-            val form = parseParamForm(c.params)
-            assertEquals(form.fields.map { it.name }.distinct(), form.fields.map { it.name }, "${c.id} has a field twice")
-            // Every choice has something to choose.
-            for (f in form.fields) if (f.kind == FieldKind.Choice) assertTrue(f.options.isNotEmpty(), "${c.id}.${f.name}")
-            // A form with nothing filled in is either sendable or says what is missing; it never throws.
-            buildParams(form, emptyMap())
-        }
-    }
-
-    @Test
-    fun whatTheAppNamesTheEngineHas() {
-        val named = APP_DIALOGS + CLIPBOARD_COMMANDS + REQUEST_DIALOGS.values + POINTER_GESTURES + TYPING_COMMANDS + QUIET_RESULTS +
+    fun everyCommandHasAWayToIt() {
+        // Every command id one of the app's own tables mentions must be the engine's.
+        val named = APP_DIALOGS + CLIPBOARD_COMMANDS + REQUEST_DIALOGS.values + QUIET_RESULTS +
             PaneKind.entries.map { it.toggle } + PaneKind.entries.mapNotNull(::paneSource) +
             FILE_MENU.mapNotNull { it?.id }.filterNot { it.startsWith("app.") } +
-            GROUP_LAUNCHERS.values + NEEDS_INPUT
-        assertEquals(emptyList(), named.filterNot { it in ids }.distinct().sorted(), "the app names commands the engine does not have")
+            GROUP_LAUNCHERS.values + NEEDS_INPUT + PARAM_DOCS.keys
+        // The list of unreachable gestures may only shrink: lower this number as they are built.
+        val problems = coverageProblems(raw, LOKI_PROFILE, ribbon, ::hasCustomGroup, named, APP_DIALOGS, maxGaps = 10)
+        assertEquals(emptyList(), problems, problems.joinToString("\n"))
+    }
+
+    @Test
+    fun aFormWithNothingFilledInNeverThrows() {
+        for (c in commands) buildParams(parseParamForm(c.params), emptyMap())
     }
 
     @Test

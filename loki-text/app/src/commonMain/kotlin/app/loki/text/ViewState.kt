@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -112,25 +114,6 @@ fun parseViewState(e: JsonElement?): ViewState {
         panes = PaneKind.entries.filter { k -> k.flag != null && flag(k.flag) },
         ink = parseInkTool(o["draw"]),
     )
-}
-
-/**
- * The zoom that fits a page of [pageW] × [pageH] points into a viewport of [viewW] × [viewH]
- * pixels for the engine's [fit] (`pageWidth`, `onePage`, `multiplePages`), given [pxPerPtAt100]
- * pixels per point at 100%. Null when [fit] names no fit or the sizes are not usable.
- */
-fun fitZoom(fit: String, pageW: Float, pageH: Float, viewW: Float, viewH: Float, pxPerPtAt100: Float): Float? {
-    if (!(pageW > 0f && pageH > 0f && viewW > 0f && viewH > 0f && pxPerPtAt100 > 0f)) return null
-    val byWidth = viewW / (pageW * pxPerPtAt100)
-    val byHeight = viewH / (pageH * pxPerPtAt100)
-    val z = when (fit) {
-        "pageWidth" -> byWidth
-        "onePage" -> minOf(byWidth, byHeight)
-        // Two pages abreast would need a second column of pages; one row of them at half width reads the same.
-        "multiplePages" -> minOf(byWidth, byHeight) / 2f
-        else -> return null
-    }
-    return z.takeIf { it.isFinite() && it > 0f }
 }
 
 /** The tint a paper colour (`view.paperColor`, `view.readPageColor`) lays over the page, as `RRGGBB`; null for none. */

@@ -1,4 +1,4 @@
-package app.loki.text
+package app.loki.kit
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -136,11 +136,13 @@ class CommandParamsTest {
         assertTrue(isInformative(json("""{"words": 3, "pages": 1, "lines": 2}""")))
         assertTrue(isInformative(json("""{"issues": []}""")))
         assertTrue(isInformative(json("[]")))
+        val profile = CommandProfile(tabs = listOf("Review"), quietResults = setOf("view.state"), quietPrefixes = listOf("draw."))
         val count = CommandInfo("review.wordCount", "Word Count", "Review › Proofing", "{}", "", mutates = false)
-        assertTrue(showsResult(count, json("""{"words": 3, "pages": 1, "lines": 2}""")))
-        // A command that changes the document reports through the page, not a dialog.
-        assertFalse(showsResult(CommandInfo("x.y", "X", "Home", "{}", "", mutates = true), json("""{"a": 1, "b": 2, "c": 3}""")))
-        assertFalse(showsResult(CommandInfo("view.state", "State", "View", "{}", "", mutates = false), json("""{"a": 1, "b": 2, "c": 3}""")))
+        assertTrue(profile.showsResult(count, json("""{"words": 3, "pages": 1, "lines": 2}""")))
+        // A command that changes the document reports through the surface, not a dialog.
+        assertFalse(profile.showsResult(CommandInfo("x.y", "X", "Home", "{}", "", mutates = true), json("""{"a": 1, "b": 2, "c": 3}""")))
+        assertFalse(profile.showsResult(CommandInfo("view.state", "State", "View", "{}", "", mutates = false), json("""{"a": 1, "b": 2, "c": 3}""")))
+        assertFalse(profile.showsResult(CommandInfo("draw.pen", "Pen", "Draw", "{}", "", mutates = false), json("""{"a": 1, "b": 2, "c": 3}""")))
     }
 
     @Test
@@ -156,22 +158,111 @@ class CommandParamsTest {
         assertTrue(big.size <= 401 && big.last().value == "… and more")
     }
 
+    private val profile = CommandProfile(
+        tabs = listOf("Home", "View"), contextualTabs = listOf("Table Layout"), otherPlaces = listOf("File"),
+        needsInput = setOf("format.font"), paramDocs = mapOf("design.themeColors" to """{"name": "Craft|Studio"}"""),
+        pointerGestures = setOf("caret.set"), pointerGaps = setOf("table.resizeDrag"), typing = setOf("text.insert"), stateReaders = setOf("view.state"),
+    )
+    private fun commands(vararg c: Triple<String, String, String>) = Json.parseToJsonElement(
+        c.joinToString(prefix = "[", postfix = "]") { (id, loc, params) ->
+            """{"id":"$id","label":"$id","location":"$loc","shortcut":"","params":${Json.encodeToString(kotlinx.serialization.serializer<String>(), params)}}"""
+        },
+    )
+
     @Test
     fun theAllCommandsListCoversEveryPlaceAndSearchesNamesPlacesAndIds() {
         fun c(id: String, loc: String, params: String = "{}") = CommandInfo(id, id.substringAfter('.'), loc, params, "", true)
         val all = listOf(c("format.bold", "Home › Font"), c("file.exportPdf", "File › Export", """{"path": string}"""), c("caret.set", "Navigation"), c("x.new", "Somewhere New"), c("view.zoom", "View › Zoom"))
         // The ribbon's tabs in order, then File and the rest, then a place this app has never heard of; a pointer command is not listed.
-        assertEquals(listOf("Home", "View", "File", "Somewhere New"), catalogSections(all))
+        assertEquals(listOf("Home", "View", "File", "Somewhere New"), catalogSections(all, profile))
         assertTrue(matchesQuery(all[1], "export pdf"))
         assertTrue(matchesQuery(all[1], "FILE"))
         assertTrue(matchesQuery(all[1], "file.exportPdf"))
         assertFalse(matchesQuery(all[1], "export png"))
         assertTrue(all[1].needsInput && all[1].hasParams)
         assertFalse(all[0].needsInput || all[0].hasParams)
-        val parsed = parseCommands(json("""[{"id":"ui.dark","label":"Dark"},{"id":"a.b","label":"","location":"Home › G","params":"{}","shortcut":"","mutates":false},7,{"label":"no id"}]"""))
+        val parsed = parseCommands(json("""[{"id":"ui.dark","label":"Dark"},{"id":"a.b","label":"","location":"Home › G","params":"{}","shortcut":"","mutates":false},7,{"label":"no id"}]"""), profile)
         assertEquals(listOf("a.b"), parsed.map { it.id })
         assertEquals("a.b", parsed.single().label)
         assertFalse(parsed.single().mutates)
-        assertTrue(parseCommands(null).isEmpty())
+        assertTrue(parseCommands(null, profile).isEmpty())
+    }
+
+    @Test
+    fun theProfileDecidesWhatNeedsInputAndSuppliesMissingDocs() {
+        val parsed = parseCommands(commands(
+            Triple("format.font", "Home › Font", "{\"name\"?: string}"),
+            Triple("design.themeColors", "Home › Design", "{}"),
+            Triple("format.bold", "Home › Font", "{}"),
+            Triple("nav.headings", "View › Show", "(no params) → {\"headings\": [{\"level\": 1-9}]}"),
+            Triple("font.missing", "View › Show", "{} → {\"missing\": [{\"font\": string}]}"),
+        ), profile).associateBy { it.id }
+        // A rule in prose, known only to the profile; and a doc the profile supplies.
+        assertTrue(parsed.getValue("format.font").needsInput)
+        assertTrue(parsed.getValue("design.themeColors").needsInput)
+        assertEquals(listOf("name"), parseParamForm(parsed.getValue("design.themeColors").params).fields.map { it.name })
+        assertFalse(parsed.getValue("format.bold").needsInput)
+        // What a doc says the command returns is not input.
+        assertFalse(parsed.getValue("nav.headings").needsInput || parsed.getValue("nav.headings").hasParams)
+        assertFalse(parsed.getValue("font.missing").needsInput)
+    }
+
+    @Test
+    fun theRibbonHoldsEveryListedCommandOfItsTabs() {
+        val json = commands(
+            Triple("format.size", "Home › Font", "{\"size\": number}"), Triple("format.bold", "Home › Font", "{}"),
+            Triple("table.resizeDrag", "Table Layout › Cell Size", "{\"x\": pt}"), Triple("caret.set", "Table Layout › Draw", "{\"x\": pt}"),
+            Triple("file.info", "File", "{}"), Triple("ui.dark", "View", "{}"),
+        )
+        val tabs = parseRibbon(json, profile)
+        assertEquals(listOf("Home"), tabs.map { it.name })
+        val items = tabs.single().groups.single().items
+        assertEquals(listOf("format.size…", "format.bold"), items.map { it.menuLabel })
+        // A group whose commands are all gestures is dropped unless the app draws it.
+        val kept = parseRibbon(json, profile) { tab, group -> tab == "Table Layout" && group == "Cell Size" }
+        assertEquals(listOf("Home", "Table Layout"), kept.map { it.name })
+        assertTrue(kept.last().groups.single().items.isEmpty())
+        assertEquals("Ctrl+O", displayShortcut("Mod+O / Mod+F12"))
+    }
+
+    @Test
+    fun theCoverageCheckNamesWhatHasNoWay() {
+        val json = commands(
+            Triple("format.bold", "Home › Font", "{}"), Triple("caret.set", "Navigation", "{\"x\": pt}"), Triple("table.resizeDrag", "Table Layout › Cell Size", "{\"x\": pt}"),
+            Triple("text.insert", "Editing", "{\"text\": string}"), Triple("view.state", "View", "{}"), Triple("odd.one", "Home › Odd", "{} | {}"),
+        )
+        val ribbon = parseRibbon(json, profile)
+        assertEquals(emptyList(), coverageProblems(json, profile, ribbon, { _, _ -> false }, listOf("format.bold"), setOf("odd.one"), maxGaps = 1))
+        // Each kind of problem is reported in words.
+        val problems = coverageProblems(json, profile, ribbon.map { RibbonTab(it.name, it.groups + RibbonGroup("Empty", emptyList())) }, { _, _ -> false }, listOf("gone.away"), emptySet(), maxGaps = 0)
+        assertTrue(problems.any { "odd.one needs input" in it }, problems.toString())
+        assertTrue(problems.any { "gone.away" in it })
+        assertTrue(problems.any { "may only shrink" in it })
+        assertTrue(problems.any { "Home › Empty is empty" in it })
+        // A profile that names a command the engine dropped is told so.
+        val stale = CommandProfile(tabs = listOf("Home"), stateReaders = setOf("old.state"))
+        assertTrue(coverageProblems(json, stale, parseRibbon(json, stale), { _, _ -> false }, emptyList(), setOf("odd.one"), 0).any { "old.state" in it })
+        // A command on a tab that the app's ribbon leaves out.
+        assertTrue(coverageProblems(json, profile, emptyList(), { _, _ -> false }, emptyList(), setOf("odd.one"), 1).any { "format.bold is on tab Home but not on the ribbon" in it })
+    }
+
+    @Test
+    fun fitsAreWorkedOutFromTheContentAndTheWindow() {
+        assertEquals(1f, fitZoom("pageWidth", 612f, 792f, 918f, 594f, 1.5f)!!, 0.001f)
+        assertEquals(0.5f, fitZoom("whole", 612f, 792f, 918f, 594f, 1.5f)!!, 0.001f)
+        assertNull(fitZoom("", 612f, 792f, 918f, 594f, 1.5f))
+        assertNull(fitZoom("width", 0f, 792f, 918f, 594f, 1.5f))
+    }
+
+    @Test
+    fun aReplyThatIsNotJsonIsAnEngineErrorNotACrash() {
+        class Fake(val reply: String) : EngineTransport {
+            override fun callRaw(method: String, paramsJson: String?) = reply
+            override fun close() {}
+        }
+        assertEquals("x", (EngineClient(Fake("""{"ok":true,"result":"x"}""")).call("m") as JsonPrimitive).content)
+        assertEquals("no", runCatching { EngineClient(Fake("""{"ok":false,"error":"no"}""")).call("m") }.exceptionOrNull()?.message)
+        for (bad in listOf("", "not json", "[1]", "7", "{\"ok\":")) assertTrue(runCatching { EngineClient(Fake(bad)).call("m") }.exceptionOrNull() is EngineException, bad)
+        assertEquals(1, EngineClient(Fake("""{"ok":true,"result":[{"open":"x"},7]}""")).uiRequests().size)
     }
 }

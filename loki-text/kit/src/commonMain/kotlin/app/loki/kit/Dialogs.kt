@@ -1,4 +1,4 @@
-package app.loki.text
+package app.loki.kit
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -54,7 +54,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /** Colours the form offers for a colour field: our own small palette, as `RRGGBB`. */
-internal val FORM_COLORS = listOf(
+val FORM_COLORS = listOf(
     "000000", "595959", "A6A6A6", "FFFFFF", "C00000", "E97132", "FFC000", "4EA72E", "0F9ED5", "004F93", "7030A0", "D63384",
 )
 
@@ -64,7 +64,7 @@ internal val FORM_COLORS = listOf(
  * are in reach on a short screen (a phone in landscape, or with the keyboard up).
  */
 @Composable
-internal fun SheetDialog(
+fun SheetDialog(
     title: String,
     subtitle: String = "",
     onDismiss: () -> Unit,
@@ -91,18 +91,26 @@ internal fun SheetDialog(
 }
 
 /** `RRGGBB` as a colour, or null. */
-internal fun formColor(hex: String): Color? =
+fun formColor(hex: String): Color? =
     hex.trim().removePrefix("#").takeIf { it.length == 6 }?.toIntOrNull(16)?.let { Color(0xFF000000.toInt() or it) }
 
 /**
  * The form for a command that needs values: one control per parameter of its params doc, a box
  * for raw JSON when the doc's shape is beyond the form, and the doc's own notes. [run] executes
  * the command and returns why it failed, or null; the form stays open on a failure so the values
- * can be corrected.
+ * can be corrected. The platform's file picker comes in as [pickFile], so the kit needs none.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun CommandFormDialog(command: CommandInfo, run: suspend (JsonObject) -> String?, onDismiss: () -> Unit) {
+fun CommandFormDialog(
+    command: CommandInfo,
+    /** Asks the person for a file: one to read, or (with `save`) a place to write. Null when cancelled. May block; it is called off the UI thread. */
+    pickFile: (save: Boolean) -> String?,
+    /** Does this command write the file its path names, rather than read it? */
+    writesFile: (id: String) -> Boolean,
+    run: suspend (JsonObject) -> String?,
+    onDismiss: () -> Unit,
+) {
     val form = remember(command.id) { parseParamForm(command.params) }
     val values = remember(command.id) { mutableStateMapOf<String, String>() }
     var raw by remember(command.id) { mutableStateOf("") }
@@ -154,7 +162,7 @@ internal fun CommandFormDialog(command: CommandInfo, run: suspend (JsonObject) -
                                 )
                                 if (f.kind == FieldKind.Path) TextButton({
                                     scope.launch {
-                                        val picked = withContext(Dispatchers.Default) { pickFile(save = writesFile(command.id)) }
+                                        val picked = withContext(Dispatchers.Default) { pickFile(writesFile(command.id)) }
                                         if (picked != null) set(picked)
                                     }
                                 }) { Text("Browse…") }
@@ -197,9 +205,6 @@ private fun placeholder(f: ParamField): String = when (f.kind) {
     else -> ""
 }
 
-/** Does a command write the file its `path` names (so the picker asks where to save), rather than read it? */
-internal fun writesFile(id: String): Boolean = id.startsWith("file.export") || id.startsWith("file.save") || id == "file.printPdf"
-
 @Composable
 private fun ColorDot(color: Color?, selected: Boolean = false, onClick: (() -> Unit)? = null) {
     Surface(
@@ -216,7 +221,7 @@ private fun ColorDot(color: Color?, selected: Boolean = false, onClick: (() -> U
  * command with parameters is how those settings are changed.
  */
 @Composable
-internal fun ResultDialog(command: CommandInfo, result: JsonElement?, onChange: (() -> Unit)?, onDismiss: () -> Unit) {
+fun ResultDialog(command: CommandInfo, result: JsonElement?, onChange: (() -> Unit)?, onDismiss: () -> Unit) {
     val lines = remember(result) { describeResult(result) }
     SheetDialog(
         command.label, command.location, onDismiss,

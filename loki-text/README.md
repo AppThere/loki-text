@@ -21,6 +21,8 @@ cinterop, `app/src/nativeInterop`). New engine features reach the UI with no bin
   needs it). Depends on `../crates/*` by path. Panics are caught at the boundary.
 - `app/`: the Gradle KMP module. `commonMain` has the UI and `Engine`; `jvmMain`, `androidMain`,
   `iosMain` have the entry points, image conversion and (iOS) the native binding.
+- `kit/`: Loki Kit, the engine-agnostic part (command model, generated forms, all-commands list,
+  coverage check, screenshot runner) that other Craft front ends depend on. See `kit/README.md`.
 - `scripts/`: build the Rust library per target.
 
 ## Run

@@ -99,6 +99,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import app.loki.text.engine.SelectionGeometry
 import androidx.compose.ui.unit.dp
 import app.loki.text.engine.Engine
+import app.loki.kit.*
 import app.loki.text.engine.EngineException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -823,13 +824,16 @@ fun App(
     if (showAbout) AboutDialog { showAbout = false }
     showCommands?.let { section ->
         AllCommandsDialog(
-            catalog, section.ifEmpty { null }, commandState,
+            catalog, LOKI_PROFILE, section.ifEmpty { null }, commandState.disabled, commandState.on,
+            icon = { id -> if (hasRibbonIcon(id)) RibbonIcon(id) },
+            // Home's groups in the ribbon's order; the other tabs keep the engine's.
+            groupRank = { tab, group -> if (tab == "Home") HOME_GROUP_ORDER.indexOf(group).let { if (it < 0) HOME_GROUP_ORDER.size else it } else 0 },
             onRun = { id -> scope.launch { runAny(id) } },
             onOptions = { id -> commandForm = catalogById[id] },
             onDismiss = { showCommands = null },
         )
     }
-    commandForm?.let { c -> CommandFormDialog(c, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }) }
+    commandForm?.let { c -> CommandFormDialog(c, pickFile = { save -> pickFile(save) }, writesFile = ::writesFile, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }) }
     commandResult?.let { (c, result) ->
         ResultDialog(c, result, onChange = if (c.hasParams) ({ commandResult = null; commandForm = c }) else null, onDismiss = { commandResult = null })
     }

@@ -1,4 +1,4 @@
-package app.loki.text
+package app.loki.kit
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement

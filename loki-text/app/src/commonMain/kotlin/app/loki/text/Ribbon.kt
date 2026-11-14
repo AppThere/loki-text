@@ -1,5 +1,6 @@
 package app.loki.text
 
+import app.loki.kit.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -237,19 +238,6 @@ fun parseTableState(e: JsonElement?): TableState? {
     )
 }
 
-/**
- * One ribbon command. Most run from a plain button; one that [needsInput] opens its control or the
- * command form, so menus name it with an ellipsis and it is never drawn as a bare icon.
- */
-class RibbonItem(val id: String, val label: String, val shortcut: String, val needsInput: Boolean = false) {
-    /** The name a menu shows: with an ellipsis when choosing it asks for something first. */
-    val menuLabel: String get() = if (needsInput && !label.endsWith("…")) "$label…" else label
-}
-
-class RibbonGroup(val name: String, val items: List<RibbonItem>)
-
-class RibbonTab(val name: String, val groups: List<RibbonGroup>)
-
 /** The main tabs, in ribbon order. */
 internal val TAB_ORDER = listOf("Home", "Insert", "Draw", "Design", "Layout", "References", "Mailings", "Review", "View", "Developer")
 
@@ -264,19 +252,6 @@ internal val CONTEXTUAL_ORDER = listOf(
 /** [tabs] with the contextual tabs the selection doesn't bring up left out. */
 fun visibleTabs(tabs: List<RibbonTab>, state: CommandState): List<RibbonTab> =
     tabs.filter { it.name !in CONTEXTUAL_ORDER || it.name in state.contextual }
-
-/**
- * Can a command run from a plain button? Its params must be empty or all optional. A command that
- * needs a value (a font size, a colour) or has alternative forms needs a control that supplies it.
- */
-internal fun runsWithoutParams(params: String): Boolean {
-    val p = params.trim()
-    // A doc that is prose from its first word ("(no params) …") describes no parameters.
-    if (!p.startsWith("{")) return true
-    // Only the parameters count: what the doc says the command returns (`{} → {"count": n}`) is not input.
-    val form = parseParamForm(p)
-    return !form.alternatives && form.fields.none { !it.optional }
-}
 
 /**
  * The Home tab's groups in the order people expect (the engine lists them by first command):
@@ -304,32 +279,11 @@ internal val GROUP_LAUNCHERS = mapOf(
 )
 
 /**
- * Builds the ribbon from `engine.commands`: `location` is `Tab › Group[ › …]`. Every command on a
- * ribbon tab is in its group, so none is out of reach: one that takes a value is marked
- * [RibbonItem.needsInput] and opens a control of the app's or the command form.
+ * Loki Text's ribbon from `engine.commands`: the kit's ribbon (every listed command of each tab),
+ * with the groups the app adds and Home's groups in the order people expect.
  */
-fun parseRibbon(commands: JsonElement): List<RibbonTab> {
-    val byTab = LinkedHashMap<String, LinkedHashMap<String, MutableList<RibbonItem>>>()
-    for (c in parseCommands(commands)) {
-        val tab = c.tab.takeIf { it in TAB_ORDER || it in CONTEXTUAL_ORDER } ?: continue
-        val items = byTab.getOrPut(tab) { LinkedHashMap() }.getOrPut(c.group) { mutableListOf() }
-        // A command the pointer or the keyboard drives is not something to pick from a menu.
-        if (isListed(c)) items.add(RibbonItem(c.id, c.label, c.shortcut, c.needsInput))
-    }
-    return (TAB_ORDER + CONTEXTUAL_ORDER).mapNotNull { name ->
-        byTab[name]?.let { groups ->
-            // A group left with nothing to show is dropped unless the app draws it itself.
-            val kept = groups.filter { (g, items) -> items.isNotEmpty() || hasCustomGroup(name, g) }
-            RibbonTab(name, orderGroups(name, withAppGroups(name, kept.map { (g, items) -> RibbonGroup(g, items) })))
-        }
-    }
-}
-
-/**
- * A shortcut as a person reads it. The engine lists every binding (`Mod+O / Mod+F12 / …`); a menu
- * has room for the first, and `Mod` is the platform's command key, shown as Ctrl.
- */
-internal fun displayShortcut(raw: String): String = raw.substringBefore(" / ").trim().replace("Mod+", "Ctrl+")
+fun parseRibbon(commands: JsonElement): List<RibbonTab> =
+    parseRibbon(commands, LOKI_PROFILE, ::hasCustomGroup).map { t -> RibbonTab(t.name, orderGroups(t.name, withAppGroups(t.name, t.groups))) }
 
 /** What the Styles gallery needs to draw one style's preview (from `styles.manage`). */
 class StylePreview(
@@ -807,94 +761,6 @@ private fun SimpleRibbon(
             }
         }
         HorizontalDivider()
-    }
-}
-
-/** One line of the all-commands list: a group heading (command null) or a command. */
-private class CommandRow(val heading: String?, val command: CommandInfo?)
-
-/** Does [c] match every word of [query]? The label, the place and the id all count. */
-internal fun matchesQuery(c: CommandInfo, query: String): Boolean {
-    val words = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    val hay = "${c.label} ${c.location} ${c.id}".lowercase()
-    return words.all { it in hay }
-}
-
-/**
- * Every command the engine has, by place (the ribbon's tabs, then File and the rest), with a
- * search box: the way to anything on any screen. A command that asks for values opens its form
- * ([onRun] decides); one that only takes optional ones has an Options button for the form.
- */
-@Composable
-internal fun AllCommandsDialog(
-    commands: List<CommandInfo>,
-    initialSection: String?,
-    state: CommandState,
-    onRun: (String) -> Unit,
-    onOptions: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val listed = remember(commands) { commands.filter(::isListed) }
-    val sections = remember(listed) { catalogSections(listed) }
-    var query by remember { mutableStateOf("") }
-    var section by remember { mutableStateOf(initialSection?.takeIf { it in sections } ?: sections.firstOrNull().orEmpty()) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.padding(8.dp).widthIn(max = 720.dp).fillMaxWidth().fillMaxHeight(0.92f), shape = RoundedCornerShape(12.dp), tonalElevation = 6.dp) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search commands") }, modifier = Modifier.weight(1f).padding(8.dp))
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                if (query.isBlank() && sections.isNotEmpty()) {
-                    ScrollableTabRow(selectedTabIndex = sections.indexOf(section).coerceAtLeast(0), edgePadding = 0.dp, divider = {}) {
-                        sections.forEach { name -> Tab(selected = name == section, onClick = { section = name }, text = { Text(name, style = MaterialTheme.typography.labelLarge) }) }
-                    }
-                }
-                HorizontalDivider()
-                val rows = remember(query, section, listed) {
-                    val out = ArrayList<CommandRow>()
-                    val q = query.trim()
-                    val hits = if (q.isEmpty()) listed.filter { it.tab.ifEmpty { "Other" } == section } else listed.filter { matchesQuery(it, q) }
-                    // Grouped under the place each is found: the group on a tab, the whole path in a search.
-                    val places = hits.groupBy { if (q.isEmpty()) it.path.drop(1).joinToString(" › ").ifEmpty { it.tab } else it.location }
-                    // Home's groups in the ribbon's order (the engine lists them by first command); the sort is stable.
-                    val ordered = if (q.isEmpty() && section == "Home") places.entries.sortedBy { e -> HOME_GROUP_ORDER.indexOf(e.key.substringBefore(" › ")).let { if (it < 0) HOME_GROUP_ORDER.size else it } } else places.entries
-                    for ((place, group) in ordered) {
-                        out += CommandRow(place, null)
-                        group.mapTo(out) { CommandRow(null, it) }
-                    }
-                    out
-                }
-                if (rows.isEmpty()) Text("No command matches.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(16.dp))
-                LazyColumn(Modifier.weight(1f)) {
-                    items(rows) { r ->
-                        val c = r.command
-                        if (c == null) {
-                            Text(r.heading.orEmpty(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
-                        } else {
-                            val why = state.disabled[c.id]
-                            Row(Modifier.fillMaxWidth().clickable(enabled = why == null) { onDismiss(); onRun(c.id) }.padding(start = 16.dp, end = 8.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(28.dp), contentAlignment = Alignment.CenterStart) { if (hasRibbonIcon(c.id)) RibbonIcon(c.id) }
-                                Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
-                                    Text(
-                                        (if (c.id in state.on) "✓ " else "") + c.label + (if (c.needsInput) "…" else ""),
-                                        style = MaterialTheme.typography.bodyMedium, color = if (why == null) Color.Unspecified else MaterialTheme.colorScheme.outline,
-                                    )
-                                    if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                                }
-                                if (c.shortcut.isNotEmpty()) Text(displayShortcut(c.shortcut), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                                // Optional values: the command runs as it is, and this opens its form.
-                                if (!c.needsInput && c.hasParams) {
-                                    IconButton(onClick = { onDismiss(); onOptions(c.id) }, enabled = why == null, modifier = Modifier.size(36.dp)) {
-                                        Icon(Lucide.SlidersHorizontal, contentDescription = "${c.label} options", modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

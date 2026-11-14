@@ -1,5 +1,6 @@
 package app.loki.text
 
+import app.loki.kit.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -44,21 +45,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
-
-/** An engine command with its parameters. */
-class PaneStep(val command: String, val params: JsonObject = JsonObject(emptyMap()))
-
-/**
- * Something a pane row or header offers: [steps] run in order on the engine, or [ui] names a
- * command the app runs its own way (one that opens a dialog or a form).
- */
-class PaneAction(val label: String, val steps: List<PaneStep> = emptyList(), val ui: String? = null)
-
-/** One line of a pane: tapping it runs [tap]; [actions] are its buttons. */
-class PaneRow(val title: String, val detail: String = "", val tap: PaneAction? = null, val actions: List<PaneAction> = emptyList())
-
-/** What a pane shows: its [rows] (or [empty], when there are none) under the [header] actions. */
-class PaneContent(val rows: List<PaneRow>, val empty: String, val header: List<PaneAction> = emptyList())
 
 /** The command whose answer fills [kind]'s pane; null for a pane drawn from state the app already has. */
 internal fun paneSource(kind: PaneKind): String? = when (kind) {
@@ -239,32 +225,5 @@ private fun DataPane(
             reload()
         }
     }
-    Column(modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(kind.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) { Icon(Lucide.X, contentDescription = "Close ${kind.title} pane", modifier = Modifier.size(18.dp)) }
-        }
-        if (content.header.isNotEmpty()) {
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                for (a in content.header) TextButton({ perform(a) }) { Text(a.label, maxLines = 1) }
-            }
-        }
-        if (error.isNotEmpty()) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        if (content.rows.isEmpty()) Text(content.empty, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(8.dp))
-        LazyColumn(Modifier.weight(1f)) {
-            items(content.rows) { r ->
-                Row(
-                    Modifier.fillMaxWidth().then(if (r.tap != null) Modifier.clickable { perform(r.tap) } else Modifier).heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(r.title, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        if (r.detail.isNotEmpty()) Text(r.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                    for (a in r.actions) TextButton({ perform(a) }) { Text(a.label, maxLines = 1) }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            }
-        }
-    }
+    PaneList(kind.title, content, error, ::perform, onClose, modifier)
 }

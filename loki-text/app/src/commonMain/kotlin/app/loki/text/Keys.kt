@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType

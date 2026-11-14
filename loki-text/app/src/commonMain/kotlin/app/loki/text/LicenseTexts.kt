@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 // The full texts of the licenses AppThere Loki Text and the WordCraft engine are offered under.
 // Verbatim copies of LICENSE-MIT and LICENSE-APACHE at the repository root; LicenseTextsTest fails
 // when they drift, so update both together.

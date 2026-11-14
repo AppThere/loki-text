@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem

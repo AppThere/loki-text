@@ -30,10 +30,10 @@ Everything in WordCraft is a command, so parity here is a question with a number
 
 | Piece | Where | What it does |
 |---|---|---|
-| Command form | `CommandParams.kt`, `CommandFormDialog.kt` | Reads a params doc (`{"kind": "box\|none", "width"?: pt, "color"?: "RRGGBB"}`) into fields: choice chips, number and text boxes, a colour box with swatches, a file box with Browse, yes/no chips, and a raw JSON box as the last resort. Errors from the engine stay in the form. |
-| Result dialog | `CommandCatalog.kt` (`describeResult`) | A command that reports instead of changing (Word Count, Info, Check Compatibility, Theme List…) shows its answer as named lines; **Change…** opens the same command's form. |
-| All-commands list | `Ribbon.kt` (`AllCommandsDialog`) | Every command by place (ribbon tabs, then File, Quick Access Toolbar, Editing, Navigation, Reading…) with search over names, places and ids. The magnifier beside Undo/Redo opens it at every size; so does `tools.search` (Alt+Q). |
-| Ribbon | `Ribbon.kt` (`parseRibbon`) | Lists every command of its tabs. One that needs a value is in the group's menu with an ellipsis. Groups the app draws itself have a `…` at the left of their name that lists all the group's commands. |
+| Command form | the kit: `CommandParams.kt`, `Dialogs.kt` | Reads a params doc (`{"kind": "box\|none", "width"?: pt, "color"?: "RRGGBB"}`) into fields: choice chips, number and text boxes, a colour box with swatches, a file box with Browse, yes/no chips, and a raw JSON box as the last resort. Errors from the engine stay in the form. |
+| Result dialog | the kit: `Commands.kt` (`describeResult`) | A command that reports instead of changing (Word Count, Info, Check Compatibility, Theme List…) shows its answer as named lines; **Change…** opens the same command's form. |
+| All-commands list | the kit: `AllCommandsDialog.kt` | Every command by place (ribbon tabs, then File, Quick Access Toolbar, Editing, Navigation, Reading…) with search over names, places and ids. The magnifier beside Undo/Redo opens it at every size; so does `tools.search` (Alt+Q). |
+| Ribbon | the kit's `parseRibbon`, drawn by `Ribbon.kt` | Lists every command of its tabs. One that needs a value is in the group's menu with an ellipsis. Groups the app draws itself have a `…` at the left of their name that lists all the group's commands. |
 | Engine requests | `ffi/src/lib.rs` (`loki.uiRequests`), `App.kt` (`handleUiRequest`) | When a command asks the front end for a dialog or a picker (`{"open": "exportPdf"}`), the app opens its own dialog, the platform picker, or that command's form. |
 
 ## Responsive layout
@@ -107,7 +107,7 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
 ```sh
 cd loki-text
 cargo test -p loki-ffi                 # FFI round trip, loki.uiRequests, the command fixture
-gradle :app:jvmTest                    # parsers, panes, view state, engine coverage
+gradle :kit:jvmTest :app:jvmTest       # the shared kit; then panes, view state, engine coverage
 cargo build -p loki-ffi                # then look at it:
 LOKI_LIB=$PWD/target/debug LOKI_SHOTS=/tmp/shots \
 LOKI_SHOT_SCRIPT='size=390x780@2; wait=3000; shot=phone.png; click=116,66; wait; shot=commands.png' \

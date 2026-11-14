@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height

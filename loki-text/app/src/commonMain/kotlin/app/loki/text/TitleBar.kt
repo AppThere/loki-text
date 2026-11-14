@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier

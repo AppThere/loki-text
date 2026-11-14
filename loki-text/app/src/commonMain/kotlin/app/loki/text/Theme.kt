@@ -1,5 +1,9 @@
 package app.loki.text
 
+import app.loki.kit.*
+
+import app.loki.kit.CraftTheme
+import app.loki.kit.LocalBaseColors
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -82,30 +86,13 @@ val LokiDarkColors = darkColorScheme(
     onError = Color(0xFF690005),
 )
 
-/** The app's colours outside the blue bars, for a menu that opens from a bar and must not inherit [OnBarColors]. */
-val LocalBaseColors = staticCompositionLocalOf { LokiColors }
-
 /**
- * The app's theme: light, dark, or the system's choice (the start). [content] gets the choice
- * (`system`, `light` or `dark`), how to change it, and whether the result is dark. The engine's
- * View › Interface Theme asks for the change; File has it too.
+ * The app's theme: light, dark, or the system's choice (the start), from the kit's [CraftTheme]
+ * with Loki Text's two palettes and its interface font.
  */
 @Composable
-internal fun AppTheme(content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit) {
-    var choice by remember { mutableStateOf("system") }
-    val dark = when (choice) {
-        "dark" -> true
-        "light" -> false
-        else -> isSystemInDarkTheme()
-    }
-    val colors = if (dark) LokiDarkColors else LokiColors
-    MaterialTheme(colorScheme = colors, typography = typographyWith(uiFontFamily())) {
-        // The window is a plain background, not a Surface, so the content colour is set here: icons and text follow the theme.
-        CompositionLocalProvider(LocalBaseColors provides colors, LocalContentColor provides colors.onBackground) {
-            content(choice, { c -> if (c == "system" || c == "light" || c == "dark") choice = c }, dark)
-        }
-    }
-}
+internal fun AppTheme(content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit) =
+    CraftTheme(LokiColors, LokiDarkColors, typographyWith(uiFontFamily()), content)
 
 /** The ribbon's tab bar and the status bar: a deep, saturated blue with a hint of teal that frames the page. */
 val BarBlue = Color(0xFF004F93)

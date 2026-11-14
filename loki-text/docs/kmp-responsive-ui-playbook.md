@@ -13,7 +13,8 @@ trusted, §1 says whether the target app's engine is ready.
 | Claim | How it was checked | State |
 |---|---|---|
 | The FFI crate builds, its tests pass | `cargo test -p loki-ffi` (24 tests), Linux x86_64 | verified, November 2026 |
-| The Kotlin common code compiles, its tests pass | `gradle :app:jvmTest` (163 tests), Gradle 8.14.3, JDK 21, no Android SDK installed | verified, November 2026 |
+| The Kotlin common code compiles, its tests pass | `gradle :kit:jvmTest :app:jvmTest` (18 + 148 tests), Gradle 8.14.3, JDK 21, no Android SDK installed | verified, November 2026 |
+| The shared kit serves the app unchanged | the app's tests, and off-screen renders before and after the extraction | verified on the JVM. The kit's Android and iOS targets have **not been compiled** |
 | The UI lays out at phone, tablet and desktop widths, light and dark | off-screen renders of the real app (`ScreenshotHarness`), read as images | verified, November 2026 |
 | The desktop app runs in a window | `scripts/build-desktop.sh run` | verified October 2026, not re-run since |
 | The Android app builds and runs | `scripts/build-android.sh`, a Chromebook's Android runtime | verified October 2026. **Not rebuilt after the November changes**: the picker change in `androidMain/MainActivity.kt` has not been compiled |
@@ -172,13 +173,13 @@ to one coroutine that acts on them in order (§5.6). A caller that deals with th
 
 Four pieces turn `engine.commands` into a complete UI. All four are engine-agnostic.
 
-**Ribbon** (`parseRibbon`, `Ribbon.kt`). `location` is `Tab › Group[ › …]`. Tabs come in a fixed
+**Ribbon** (the kit's `parseRibbon`; Loki Text's `Ribbon.kt` draws it). `location` is `Tab › Group[ › …]`. Tabs come in a fixed
 `TAB_ORDER`, then the contextual tabs (`CONTEXTUAL_ORDER`) the selection brings up. Every listed
 command of a tab is in its group. A command with a known icon and no required value is an icon
 button; the rest are a menu under the group. A command that needs a value is marked
 `RibbonItem.needsInput` and named with an ellipsis.
 
-**Command form** (`CommandParams.kt`, `CommandFormDialog.kt`). `parseParamForm` reads a params doc
+**Command form** (the kit's `CommandParams.kt` and `Dialogs.kt`). `parseParamForm` reads a params doc
 into fields and never fails:
 
 | In the doc | Field |
@@ -208,7 +209,8 @@ then places outside the ribbon (`OTHER_PLACES`: File, Navigation…), then any p
 never heard of. Search matches names, places and ids. A button beside Undo/Redo opens it at every
 size, so it is the guarantee that nothing is out of reach.
 
-What is deliberately **not** listed (`isListed`), each a named set the coverage test checks:
+What is deliberately **not** listed (`CommandProfile.isListed`), each a named set of the profile
+that the coverage check verifies (Loki Text's are in `CommandCatalog.kt`):
 
 | Set | Meaning | For a new app |
 |---|---|---|
@@ -346,8 +348,8 @@ Three layers, cheapest first. A port is not done until all three exist.
    `LOKI_UPDATE_FIXTURES=1` and otherwise fails when the two differ. Expect to refresh it after
    every engine merge; that is the point.
 2. **Kotlin** (`gradle :app:jvmTest`): pure parsers in `commonTest` (keep parsing out of
-   composables), and in `jvmTest` the **coverage test** (`EngineCoverageTest`), which reads the
-   fixture and fails when
+   composables), and in `jvmTest` the **coverage test** (`EngineCoverageTest`, a few lines over the
+   kit's `coverageProblems`), which reads the fixture and fails when
    * a command is neither listed nor in one of the four named sets of §5.3;
    * a command on a ribbon tab is not on the ribbon, or a group is empty;
    * a command that needs values has a form with no fields;
@@ -426,24 +428,23 @@ common code can be developed and tested on any machine with a JDK and Rust.
 9. **Release builds:** R8 is off until JNA's reflection has keep rules, and the release variant is
    signed with the debug key. Both must be settled before anything is distributed.
 
-## 8. What to copy, adapt and rewrite
+## 8. What to depend on, copy, adapt and rewrite
 
-Sizes are Loki Text's, to show where the work is (about 11,200 lines of common Kotlin, 500 of Rust).
+The engine-agnostic parts are a module, **Loki Kit** ([`../kit`](../kit/README.md), `app.loki:kit`):
+depend on it, do not copy it. Loki Text is about 9,200 lines of common Kotlin on top of 1,300 in
+the kit and 500 of Rust.
 
-| Copy as it is (engine-agnostic) | Adapt (same shape, the app's names) | Rewrite (the app's own surface) |
-|---|---|---|
-| `engine/Engine.kt` (less the selection types) | `ffi/src/lib.rs`: the crate and symbol prefix, `loki.selection`, render | the surface part of `App.kt`: what is drawn, pointer gestures, selection overlay |
-| `CommandParams.kt`, `CommandFormDialog.kt` | `ffi/src/state.rs`: the toggle tables, contextual tabs | `ViewState.kt`: what `view.state` holds and what the app must draw |
-| `CommandCatalog.kt` (the logic; empty the named sets) | `Ribbon.kt`: `TAB_ORDER`, `CONTEXTUAL_ORDER`, `GROUP_LAUNCHERS`, `NEEDS_INPUT` | the bespoke groups and dialogs (`HomeRibbon.kt`, `TableRibbon.kt`, `FontDialog.kt`…) |
-| `Ribbon.kt`: `parseRibbon`, `SimpleRibbon`, `GroupPanelButton`, `AllCommandsDialog`, `ScrollRow`, `RibbonTabRow` | `RibbonIcons.kt`: the id → icon map | `Ruler.kt`, `ImeInput.kt`, `SelectionHandles.kt` (documents only) |
-| `RibbonControls.kt` (buttons, fields, menus) | `SidePanes.kt`: `PaneKind`, `paneSource`, `parsePane` | the status bar's counts |
-| `Shortcuts.kt`, `FileMenu.kt` (the mechanism) | `Theme.kt`: the palette and bar token | |
-| `Theme.kt`: `AppTheme`, `SheetDialog` | `CommandCatalog.kt`: `APP_DIALOGS`, `REQUEST_DIALOGS`, `QUIET_RESULTS`, `PARAM_DOCS` | |
-| `EngineCoverageTest`, `ScreenshotHarness`, the fixture test in `ffi/src/tests.rs` | `About.kt`, `LicenseTexts.kt`, bundled fonts and their licence files | |
-| platform files: pickers, clipboard, print, `NativeEngine` | `build.gradle.kts`: `namespace`, `applicationId`, framework `baseName` | |
+| Depend on (the kit) | Copy from Loki Text, then generalise into the kit | Adapt (same shape, the app's names) | Rewrite (the app's own surface) |
+|---|---|---|---|
+| `EngineClient`, `EngineTransport` | `Ribbon.kt`: `Ribbon`, `SimpleRibbon`, `GroupPanelButton`, `ScrollRow`, `RibbonTabRow`, `CommandMenu` | `ffi/src/lib.rs`: the crate name, `loki.selection`, render | the surface part of `App.kt`: what is drawn, pointer gestures, selection overlay |
+| `CommandProfile`, `parseCommands`, `parseRibbon` | `RibbonControls.kt` (buttons, fields, menus) | `ffi/src/state.rs`: the toggle tables, contextual tabs | `ViewState.kt`: what `view.state` holds and what the app must draw |
+| `parseParamForm`, `CommandFormDialog`, `ResultDialog`, `SheetDialog` | the shell in `App.kt`: lock, snapshot, `perform`, `handleUiRequest`, size classes | `CommandCatalog.kt`: the profile and its named sets, `APP_DIALOGS`, `REQUEST_DIALOGS` | the bespoke groups and dialogs (`HomeRibbon.kt`, `TableRibbon.kt`, `FontDialog.kt`…) |
+| `AllCommandsDialog`, `PaneList` | `FileMenu.kt` (the mechanism) | `RibbonIcons.kt`: the id → icon map | `Ruler.kt`, `ImeInput.kt`, `SelectionHandles.kt` (documents only) |
+| `parseShortcuts`, `CraftTheme` | platform files: pickers, clipboard, print, `NativeEngine` | `SidePanes.kt`: `PaneKind`, `paneSource`, `parsePane` | the status bar's counts |
+| `coverageProblems`, `runShotScript` | the fixture test in `ffi/src/tests.rs` | `Theme.kt`: the palette and bar token; `build.gradle.kts`: `namespace`, `applicationId` | |
 
-Until the second app exists this is copying. When it does, move the first column into a shared
-Gradle module (see §10) rather than keeping two copies in step by hand.
+The second column is the work still to share. Whoever ports the second app should move each piece
+into the kit as they find what has to become a parameter, rather than keep two copies in step.
 
 ## 9. Porting procedure
 
@@ -454,8 +455,8 @@ Each phase ends with something that runs. Do not start a phase before the one ab
 | 0. Engine | Read the app's `AGENTS.md`; its rules (never crash, no third-party assets, `cargo xtask ci`) apply to the new folder. Check the engine against §1. | `engine.commands` from its headless backend has all six fields for every command |
 | 1. FFI | Copy §3's layout. Rename the crate (`<app>-ffi`), library, header. Implement the six functions against the app's backend. Port the hostile-arguments and round-trip tests. | `cargo test -p <app>-ffi` passes; `clippy` clean |
 | 2. Fixture | Add `kotlin_command_fixture_follows_the_engine`; generate the fixture. | `engine-commands.json` is in the tree |
-| 3. Skeleton | Copy the first column of §8. Set `TAB_ORDER` from the fixture's tabs. Empty the named sets. Show one rendered surface. | `gradle :app:jvmTest` compiles; the harness saves a picture of the app with a ribbon |
-| 4. Coverage | Add `EngineCoverageTest`. Work its failures: fill `TYPING_COMMANDS`, `STATE_READERS`, `PARAM_DOCS`, `NEEDS_INPUT`; put every pointer command in `POINTER_GAPS` for now. | the test passes; `POINTER_GAPS` is an honest list |
+| 3. Skeleton | Depend on the kit; copy §8's second column. Write the app's `CommandProfile` with the fixture's tabs and empty sets. Show one rendered surface. | `gradle :app:jvmTest` compiles; the harness saves a picture of the app with a ribbon |
+| 4. Coverage | Add a test that asserts the kit's `coverageProblems` is empty. Work its lines: fill the profile's `typing`, `stateReaders`, `paramDocs`, `needsInput`; put every pointer command in `pointerGaps` for now. | the test passes; `POINTER_GAPS` is an honest list |
 | 5. Surface | Selection geometry (`loki.selection`), pointer input, zoom from the engine, the snapshot. Move commands from `POINTER_GAPS` to `POINTER_GESTURES` as each gesture is built. | the app can be used for the app's basic task with a mouse and with a finger |
 | 6. State | `state.rs` toggles; `loki.uiRequests` and `handleUiRequest`; the view state the front end must draw (§5.6). | every toggle on the View tab changes what is on screen; Export and Save As open a picker |
 | 7. Responsive | Check each feature at the three widths; fill the per-feature table in the app's `parity.md`. | harness pictures at 390, 760 and 1280 dp, light and dark, read and filed |
@@ -470,9 +471,11 @@ time to go there. No timings are given: only one app has been done, and not in t
 
 Not done; recommendations for whoever starts the second app.
 
-* **Share the first column of §8 as a Gradle module** (a `craft-kmp` repository or an included
-  build), parameterised by the tables in the second column. The split in §8 is where the seam is.
-  Do this when porting the second app, not before: one example is not enough to get the seam right.
+* **The kit exists** ([`../kit`](../kit/README.md)); it lives inside Loki Text for now. Its own
+  repository, and whether it is published or included as a build, is the owner's decision. Until
+  then another app includes this build (`includeBuild`) and depends on `app.loki:kit`.
+* **Finish the kit** with the second app: the ribbon's composables and the app shell (§8, second
+  column) are the largest pieces still copied.
 * **Share the FFI shape too.** The six functions, `catch_unwind`, the reply format and the hostile
   tests are the same for every engine; only `loki.selection`, the render call and `state.rs` differ.
 * **One symbol prefix per app** (`loki_`, and so on) if two engines could ever be linked into one

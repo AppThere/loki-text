@@ -1,5 +1,7 @@
 package app.loki.text.engine
 
+import app.loki.kit.EngineClient
+import app.loki.kit.EngineTransport
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
@@ -62,48 +64,31 @@ fun parseSelectionGeometry(r: JsonObject): SelectionGeometry {
     return SelectionGeometry(caret, rects, obj, hf)
 }
 
-class EngineException(message: String) : Exception(message)
+/** The engine's refusal, as the shared kit raises it. */
+typealias EngineException = app.loki.kit.EngineException
+
+/** [NativeEngine] as the kit's transport: the one JSON call, and closing the session. */
+private class NativeTransport(val native: NativeEngine) : EngineTransport {
+    override fun callRaw(method: String, paramsJson: String?): String = native.callRaw(method, paramsJson)
+    override fun close() = native.close()
+}
 
 /**
  * The editing session. Everything the UI does is a WordCraft command (`format.bold`,
- * `text.insert`, …), so the UI stays thin: [execute] by id, [inspect] to read state, [renderPage]
- * to draw. Calls block; run them off the UI thread (see [EngineHost]).
+ * `text.insert`, …), so the UI stays thin: `execute` by id, [inspect] to read state, [renderPage]
+ * to draw. The calls every Craft front end makes are the kit's [EngineClient]; this adds what a
+ * document's pages need. Calls block; run them off the UI thread.
  */
-class Engine(private val native: NativeEngine = NativeEngine()) : AutoCloseable {
-    private val json = Json { ignoreUnknownKeys = true }
-
-    fun call(method: String, params: JsonObject? = null): JsonElement {
-        val reply = json.parseToJsonElement(native.callRaw(method, params?.toString())).jsonObject
-        if (reply["ok"]?.jsonPrimitive?.contentOrNull == "true") return reply["result"] ?: JsonObject(emptyMap())
-        throw EngineException(reply["error"]?.jsonPrimitive?.contentOrNull ?: "unknown engine error")
-    }
-
-    fun execute(command: String, params: JsonObject = JsonObject(emptyMap())): JsonElement =
-        call("engine.execute", buildJsonObject {
-            put("command", command)
-            put("params", params)
-        })
-
+class Engine(private val native: NativeEngine = NativeEngine()) : EngineClient(NativeTransport(native)) {
     fun insertText(text: String) = execute("text.insert", buildJsonObject { put("text", text) })
     fun inspect(): JsonElement = call("document.inspect")
-    fun commands(): JsonElement = call("engine.commands")
-    /** Commands that can't run now (with the reason) and the toggles that are on; see `ffi/src/state.rs`. */
-    fun commandState(): JsonElement = call("loki.commandState")
     /** The window size in points, for the reflowing views (Web Layout, Read Mode). */
     fun setViewport(widthPt: Float, heightPt: Float) {
         call("loki.viewport", buildJsonObject { put("width", widthPt); put("height", heightPt) })
     }
 
-    /**
-     * What commands asked the front end to do since the last call (`{"open": "exportPdf"}`,
-     * `{"interfaceTheme": "dark"}`, `{"close": true}`), oldest first; reading them clears them.
-     */
-    fun uiRequests(): List<JsonObject> = (call("loki.uiRequests") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-
     /** Caret and selection boxes, or empty geometry when the reply is malformed. */
     fun selection(): SelectionGeometry = parseSelectionGeometry(call("loki.selection").jsonObject)
 
     fun renderPage(page: Int, scale: Float): PageBitmap? = native.renderPage(page, scale)
-
-    override fun close() = native.close()
 }
