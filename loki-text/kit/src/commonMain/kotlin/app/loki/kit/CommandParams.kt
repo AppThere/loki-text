@@ -35,7 +35,10 @@ private const val MAX_HINT = 240
 private const val MAX_NOTES = 600
 
 /** Unquoted type words that mean a number. */
-private val NUMBER_WORDS = setOf("pt", "n", "number", "percent", "%", "deg", "int", "px", "twips", "emu", "index")
+private val NUMBER_WORDS = setOf(
+    "pt", "n", "number", "num", "percent", "%", "deg", "int", "float", "px", "dp", "twips", "emu", "index", "f64", "f32", "u8", "u16", "u32", "u64", "i32", "i64", "usize",
+    "seconds", "ms", "samples", "ticks", "frames", "ppi", "dpi",
+)
 
 /** Field names that hold a file or folder path. */
 private fun isPathName(name: String) = name == "path" || name == "dir" || name.endsWith("Path") || name.endsWith("Folder")
@@ -109,54 +112,103 @@ private fun withoutParentheticals(s: String): Pair<String, String> {
 
 private fun isNumberLiteral(s: String) = s.toDoubleOrNull() != null
 
-/** Does an unquoted type word mean a number (`pt`, `0-8`, `percent`, `non-negative JSON integer`)? */
+/** A range of numbers as the docs write one: `0-8`, `4..127`, `-360..360`, `0.1–1000`. */
+private val RANGE = Regex("^-?\\d+(\\.\\d+)?\\s*(-|–|\\.\\.)\\s*-?\\d+.*")
+
+/** Does an unquoted type mean a number (`pt`, `slide pt`, `0-8`, `4..127`, `f64`, `non-negative JSON integer`)? */
 private fun isNumberWord(word: String): Boolean {
     val w = word.trim()
     if (w.isEmpty()) return false
-    val first = w.substringBefore(' ').substringBefore('|').lowercase()
-    if (first in NUMBER_WORDS) return true
-    if (Regex("^-?\\d+(\\.\\d+)?\\s*(-|–|\\.\\.)\\s*-?\\d+.*").matches(w)) return true
-    return "integer" in w.lowercase() || w.lowercase().startsWith("px ")
+    val lower = w.lowercase()
+    if (lower.split(' ', '|').any { it in NUMBER_WORDS }) return true
+    if (RANGE.matches(w)) return true
+    return "integer" in lower
 }
 
-/** The field for [name] with the doc's [typeText] (everything after the colon). */
-private fun classify(name: String, optional: Boolean, typeText: String): ParamField {
-    val (core, said) = withoutParentheticals(typeText)
-    val hint = said.trim().take(MAX_HINT)
-    val alts = splitTopLevel(core, '|').map { it.trim() }.filter { it.isNotEmpty() }
+/** Unquoted words that name a kind of value rather than a value: `id|name` is "an id or a name", not a choice of two. */
+private val TYPE_WORDS = NUMBER_WORDS + setOf(
+    "bool", "boolean", "string", "str", "text", "name", "id", "ids", "hex", "color", "colour", "path", "paths", "file", "url", "key", "value",
+    "any", "object", "array", "list", "json", "base64", "tag", "title", "label", "cell", "range", "sheet", "handle", "handles", "date", "time", "position",
+)
+
+/** A value written bare in a doc (`left`, `F10`, `4:3`, `moveAndSize`): one word, nothing that reads as prose or a nested shape. */
+private val BARE_VALUE = Regex("^[A-Za-z0-9_][A-Za-z0-9_:+#./-]{0,39}$")
+
+private fun isEllipsis(s: String) = s == "…" || s == "..." || s == ".."
+
+/**
+ * The field for [name] with the doc's [typeText] (everything after the colon). The Craft engines
+ * write these three ways, all read here: `"key"?: "a|b"` (WordCraft), `key?: a|b` (most of the
+ * others) and `"key":"a|b"?` or `"key":f64=5` (optional and default after the type).
+ */
+private fun classify(name: String, optionalKey: Boolean, typeText: String): ParamField {
+    val (withDefault, said) = withoutParentheticals(typeText)
+    var optional = optionalKey
+    // `type=default`: what the engine uses when the key is left out, so the key can be.
+    val byDefault = splitTopLevel(withDefault, '=')
+    var core = byDefault.first().trim()
+    val default = byDefault.drop(1).joinToString("=").trim()
+    // `type?`: optional, marked after the type.
+    if (core.endsWith("?") && core.length > 1) { optional = true; core = core.dropLast(1).trim() }
+    if (default.isNotEmpty()) optional = true
+    val alts = splitTopLevel(core, '|').map { it.trim().removeSuffix("?").trim() }.filter { it.isNotEmpty() }
     val options = ArrayList<ParamOption>()
     val words = ArrayList<String>()
+    var open = false
     for (a in alts) {
         if (a.length >= 2 && a.startsWith("\"") && a.endsWith("\"")) {
             // One string can list its values: "left|center|right".
             a.substring(1, a.length - 1).split('|').map { it.trim() }.filter { it.isNotEmpty() }.forEach { options += ParamOption(it, true) }
         } else if (a == "null" || a == "true" || a == "false" || isNumberLiteral(a)) {
             options += ParamOption(a, false)
+        } else if (isEllipsis(a)) {
+            open = true
         } else words += a
     }
-    val open = options.any { it.text.endsWith("…") || it.text.endsWith("...") }
+    // Values written bare (`left|center|right`): a choice, each sent as a string. Kinds of value (`id|name`) are not,
+    // though a word that can be either (`list`) is a value when the words beside it are.
+    fun bare(w: String) = BARE_VALUE.matches(w) && !RANGE.matches(w) && (w.firstOrNull()?.isUpperCase() != true || w.length <= 4 && w.all { c -> c.isUpperCase() || c.isDigit() })
+    val values = words.count { bare(it) && it.lowercase() !in TYPE_WORDS }
+    if (words.isNotEmpty() && words.all(::bare) && words.size + options.size >= 2 && (values == words.size || values >= 2)) {
+        words.forEach { options += ParamOption(it, true) }
+        words.clear()
+    }
+    open = open || options.any { it.text.endsWith("…") || it.text.endsWith("...") }
     val named = options.filter { !(it.quoted && (it.text == "RRGGBB" || it.text.endsWith("…") || it.text.endsWith("..."))) }
     val first = words.firstOrNull().orEmpty()
+    // One literal alone is an example or the default (`size?: 48`, `"format": "M/d/yyyy"`), not a choice of one.
+    val isColor = options.any { it.quoted && it.text == "RRGGBB" }
+    val example = if (!isColor && words.isEmpty() && named.size == 1 && !open && named[0].text !in setOf("null", "true", "false")) named[0] else null
     val kind = when {
-        options.any { it.quoted && it.text == "RRGGBB" } -> FieldKind.Color
-        first == "bool" || (words.isEmpty() && options.isNotEmpty() && options.all { !it.quoted && (it.text == "true" || it.text == "false") }) -> FieldKind.Bool
-        isPathName(name) && (first.isEmpty() || first.startsWith("string")) && options.isEmpty() -> FieldKind.Path
+        isColor -> FieldKind.Color
+        first == "bool" || first == "boolean" || (words.isEmpty() && options.isNotEmpty() && options.all { !it.quoted && (it.text == "true" || it.text == "false") }) -> FieldKind.Bool
+        isPathName(name) && (first.isEmpty() || first.startsWith("str")) && options.isEmpty() -> FieldKind.Path
+        example != null -> if (example.quoted) FieldKind.Text else FieldKind.Number
         words.isEmpty() && named.isNotEmpty() && !open -> FieldKind.Choice
+        first.startsWith("[") || first.startsWith("{") || (first.firstOrNull()?.isUpperCase() == true && first.length > 1) || first == "pos" -> FieldKind.Json
         isNumberWord(first) -> FieldKind.Number
-        first.startsWith("[") || first.startsWith("{") || first.firstOrNull()?.isUpperCase() == true || first == "pos" -> FieldKind.Json
         else -> FieldKind.Text
     }
-    return ParamField(name, optional, kind, if (kind == FieldKind.Bool) emptyList() else named, hint)
+    val hint = listOf(
+        said.trim(),
+        if (example != null) "for example ${example.text}" else "",
+        if (default.isNotEmpty()) "default $default" else "",
+    ).filter { it.isNotEmpty() }.joinToString("; ").take(MAX_HINT)
+    return ParamField(name, optional, kind, if (kind == FieldKind.Bool || example != null) emptyList() else named, hint)
 }
 
-private val KEY = Regex("^\\s*\"([^\"]+)\"\\s*(\\?)?\\s*(?::\\s*(.*))?$", RegexOption.DOT_MATCHES_ALL)
+/** A key as the docs write one: `"name"` or `name`, then `?` when optional, then `: type` when the doc gives one. */
+private val KEY = Regex("^\\s*(?:\"([^\"]+)\"|([A-Za-z_][\\w.-]*))\\s*(\\?)?\\s*(?::\\s*(.*))?$", RegexOption.DOT_MATCHES_ALL)
 private val KEY_GROUP = Regex("^\\s*((?:\"\\w+\"\\s*\\|\\s*)+\"\\w+\")\\s*(\\?)?\\s*:\\s*(.*)$", RegexOption.DOT_MATCHES_ALL)
+/** `ids?|id?` or `expr? | value?: number`: one of several bare keys. */
+private val BARE_KEY_GROUP = Regex("^\\s*([A-Za-z_]\\w*\\??(?:\\s*\\|\\s*[A-Za-z_]\\w*\\??)+)\\s*(?::\\s*(.*))?$", RegexOption.DOT_MATCHES_ALL)
 private val NEXT_KEY = Regex("^\\s*\"(\\w+)\"\\s*(\\?)?\\s*:(.*)$", RegexOption.DOT_MATCHES_ALL)
 
 /**
- * Reads a command's params doc (`{"size": pt, "name"?: string} (notes)`) into a form. The docs are
- * prose written for people, so anything this can't read becomes a text field or is left to the
- * form's raw JSON box; it never fails.
+ * Reads a command's params doc into a form: `{"size": pt, "name"?: string} (notes)`,
+ * `{align: left|center|right, id?}` or `{"on":bool?,"seconds":f64=5}`, as the Craft engines write
+ * them. The docs are prose written for people, so anything this can't read becomes a text field or
+ * is left to the form's raw JSON box; it never fails.
  */
 fun parseParamForm(doc: String): ParamForm {
     val p = doc.trim()
@@ -176,10 +228,16 @@ fun parseParamForm(doc: String): ParamForm {
             for (n in names) fields += classify(n, true, group.groupValues[3])
             continue
         }
+        val bareGroup = BARE_KEY_GROUP.find(segment)
+        if (bareGroup != null) {
+            // ids?|id? — one of several keys; none is required on its own.
+            for (n in bareGroup.groupValues[1].split('|').map { it.trim().removeSuffix("?") }) if (fields.none { it.name == n }) fields += classify(n, true, bareGroup.groupValues[2])
+            continue
+        }
         val m = KEY.find(segment) ?: continue
-        val name = m.groupValues[1]
-        var type = m.groupValues[3]
-        var optional = m.groupValues[2] == "?"
+        val name = m.groupValues[1].ifEmpty { m.groupValues[2] }
+        var type = m.groupValues[4]
+        var optional = m.groupValues[3] == "?"
         // `"delta": pt | "percent": number` — one of several keys; none is required on its own.
         val more = ArrayList<Pair<String, String>>()
         // Only at the top level: `{"top"|"right": {…}}` inside a value is that value's own shape.
@@ -200,7 +258,8 @@ fun parseParamForm(doc: String): ParamForm {
         if (fields.none { it.name == name }) fields += classify(name, optional, type)
         for ((n, t) in more) if (fields.none { it.name == n }) fields += classify(n, true, t)
     }
-    if (rest.contains("exactly one") || rest.contains("one of")) alternatives = alternatives || fields.all { it.optional }
+    // "(exactly one)" after keys that are each optional: none is required alone. Prose after `{}` is not about keys.
+    if (fields.isNotEmpty() && (rest.contains("exactly one") || rest.startsWith("(one of"))) alternatives = alternatives || fields.all { it.optional }
     return ParamForm(fields, alternatives, rest.take(MAX_NOTES))
 }
 

@@ -247,6 +247,97 @@ class CommandParamsTest {
     }
 
     @Test
+    fun docsWithBareKeysAndBareValuesAreRead() {
+        // As GridCraft, DeckCraft, VectorCraft and most of the others write them.
+        val a = form("{kind: chart|image|shape|slicer, id, mode: moveAndSize|moveOnly|absolute}")
+        assertEquals(listOf("kind", "id", "mode"), a.fields.map { it.name })
+        assertEquals(FieldKind.Choice, a.field("kind").kind)
+        assertEquals(listOf("chart", "image", "shape", "slicer"), a.field("kind").options.map { it.text })
+        assertEquals(JsonPrimitive("moveOnly"), fieldValue(a.field("mode"), "moveOnly"))
+        assertEquals(FieldKind.Text, a.field("id").kind)
+        assertFalse(a.field("id").optional)
+
+        val b = form("{action?: list (default) | add | modify | delete | unlock, title?, range?, password?} → ranges")
+        assertEquals(FieldKind.Choice, b.field("action").kind)
+        assertEquals(5, b.field("action").options.size)
+        assertTrue(b.fields.all { it.optional })
+        assertEquals("→ ranges", b.notes)
+
+        val c = form("{preset?: normal|none|narrow|wide, left?, right?, top?, bottom?: pt, cells?, id?}")
+        assertEquals(FieldKind.Number, c.field("bottom").kind)
+        assertEquals(7, c.fields.size)
+
+        // Kinds of value are not a choice between two words; an open list takes any text.
+        assertEquals(FieldKind.Text, form("{item: id|name}").field("item").kind)
+        val open = form("{type?: column|bar|line|…, rect?, series?: [{name, values}]}")
+        assertEquals(FieldKind.Text, open.field("type").kind)
+        assertEquals(listOf("column", "bar", "line"), open.field("type").options.map { it.text })
+        assertEquals(FieldKind.Json, open.field("series").kind)
+
+        assertEquals(FieldKind.Bool, form("{on?: bool}").field("on").kind)
+        assertEquals(FieldKind.Choice, form("{slot: F10|F11|F12, comp?}").field("slot").kind)
+        assertEquals(FieldKind.Choice, form("{direction: 1|-1, count?: n}").field("direction").kind)
+        assertEquals(FieldKind.Number, form("{index, x, y: slide pt, id?}").field("y").kind)
+        // One number alone is the default, not a choice of one.
+        val d = form("{minPpi?: 150} → issues")
+        assertEquals(FieldKind.Number, d.field("minPpi").kind)
+        assertTrue(d.field("minPpi").options.isEmpty() && "150" in d.field("minPpi").hint)
+        // One of several keys.
+        val e = form("{ids?|id?} detach from the grid")
+        assertEquals(listOf("ids", "id"), e.fields.map { it.name })
+        assertTrue(runsWithoutParams("{ids?|id?} detach from the grid"))
+        assertFalse(runsWithoutParams("{align: left|center|right}"))
+        assertTrue(runsWithoutParams("{} → [{id, title, summary}]"))
+        // Prose after an empty object is not a rule about keys, whatever words it uses.
+        assertTrue(runsWithoutParams("{} cut the paths at their anchors: one of each cut's two anchors stays selected"))
+    }
+
+    @Test
+    fun docsThatMarkOptionalAndDefaultsAfterTheTypeAreRead() {
+        // As FilmCraft and PhotoCraft write them.
+        val a = form("""{"position":[x,y]?,"size":[w,h]=[400,200],"clip":id?,"seconds":f64=5,"track":index?}""")
+        assertEquals(listOf("position", "size", "clip", "seconds", "track"), a.fields.map { it.name })
+        assertTrue(a.fields.all { it.optional })
+        assertEquals(FieldKind.Json, a.field("position").kind)
+        assertEquals(FieldKind.Number, a.field("seconds").kind)
+        assertTrue("default 5" in a.field("seconds").hint)
+        assertEquals(FieldKind.Number, a.field("track").kind)
+
+        val b = form("""{"clips":[id]?,"speed":percent=100,"reverse":bool,"interpolation":"frameSampling|frameBlending|opticalFlow"?}""")
+        assertEquals(FieldKind.Choice, b.field("interpolation").kind)
+        assertTrue(b.field("interpolation").optional)
+        assertFalse(b.field("reverse").optional)
+        assertEquals(FieldKind.Bool, b.field("reverse").kind)
+        assertFalse(runsWithoutParams("""{"name":str}"""))
+        assertTrue(runsWithoutParams("""{"on":bool?}"""))
+        assertTrue(runsWithoutParams("""{"wait":bool=false}"""))
+
+        val c = form("""{"maxRadius":4..127=8,"channel1":-360..360=108}""")
+        assertEquals(FieldKind.Number, c.field("maxRadius").kind)
+        assertEquals(FieldKind.Number, c.field("channel1").kind)
+        assertEquals(JsonPrimitive(12L), fieldValue(c.field("maxRadius"), "12"))
+        // Several shapes: nothing is required.
+        assertTrue(form("""{"path":str} | {"back":true} | {"forward":true}""").alternatives)
+    }
+
+    @Test
+    fun commandsAreReadFromEitherListingShape() {
+        val sibling = parseCommands(json("""[
+            {"id":"object.align","label":"Align","menu":["Object","Align"],"shortcut":null,"params":"{align: left|center|right}","undoable":true},
+            {"id":"view.zoomIn","label":"Zoom In","menu":["View"],"shortcut":"Cmd+=","params":"{}","journal":false},
+            {"id":"mix.state","label":"State","menu":[],"shortcut":null,"params":"{}"}
+        ]"""), CommandProfile(tabs = listOf("Object", "View")))
+        assertEquals(listOf("Object › Align", "View", ""), sibling.map { it.location })
+        assertEquals("Object", sibling[0].tab)
+        assertEquals("Align", sibling[0].group)
+        assertEquals(listOf(true, false, true), sibling.map { it.mutates })
+        assertEquals("", sibling[0].shortcut)
+        assertTrue(sibling[0].needsInput)
+        // A command on no menu has no place of its own: the all-commands list files it under Other.
+        assertEquals(listOf("Object", "View", "Other"), catalogSections(sibling, CommandProfile(tabs = listOf("Object", "View"))))
+    }
+
+    @Test
     fun fitsAreWorkedOutFromTheContentAndTheWindow() {
         assertEquals(1f, fitZoom("pageWidth", 612f, 792f, 918f, 594f, 1.5f)!!, 0.001f)
         assertEquals(0.5f, fitZoom("whole", 612f, 792f, 918f, 594f, 1.5f)!!, 0.001f)

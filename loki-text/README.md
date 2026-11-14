@@ -23,7 +23,8 @@ cinterop, `app/src/nativeInterop`). New engine features reach the UI with no bin
   `iosMain` have the entry points, image conversion and (iOS) the native binding.
 - `kit/`: Loki Kit, the engine-agnostic part (command model, generated forms, all-commands list,
   coverage check, screenshot runner) that other Craft front ends depend on. See `kit/README.md`.
-- `scripts/`: build the Rust library per target.
+- `scripts/`: build the Rust library per target; `egui2compose.py` starts a new app on the kit from
+  a Craft repository's egui front end (`docs/egui2compose.md`).
 
 ## Run
 

@@ -19,19 +19,23 @@ trusted, §1 says whether the target app's engine is ready.
 | The desktop app runs in a window | `scripts/build-desktop.sh run` | verified October 2026, not re-run since |
 | The Android app builds and runs | `scripts/build-android.sh`, a Chromebook's Android runtime | verified October 2026. **Not rebuilt after the November changes**: the picker change in `androidMain/MainActivity.kt` has not been compiled |
 | iOS / iPadOS | none | **never built**. `iosMain` is a scaffold; there is no Xcode host project |
-| Another Craft app | none | **never tried**. §1 and §11 are written from WordCraft's engine; the other engines were not available to check against |
+| Another Craft app | [`egui2compose`](egui2compose.md) run on the ten other Craft repositories: each generated project compiles and passes its coverage test on the JVM | the **start** of a port is verified for all ten; no port has been finished, and no other engine was run here |
 | Typing into the generated dialogs | none (the harness sends pointer input only) | not verified |
 
 Treat every "should" about Android after November, iOS, and other apps as a plan, not a report.
 
 ## 1. What the engine must offer (check this before anything else)
 
+`scripts/egui2compose.py --repo <app> --out <dir>` answers most of this section for an app in a few
+seconds: its `REPORT.md` has an "Is the engine ready?" section. See [`egui2compose.md`](egui2compose.md),
+which also has the table of how the ten other Craft front ends are built.
+
 The whole approach rests on the engine, not on Kotlin. "The same type of API" means all of the
 following. Each line names where WordCraft has it, so the equivalent can be found in another app.
 
 | # | The engine has | WordCraft | Needed for |
 |---|---|---|---|
-| 1 | A **command registry**: every user-visible action is a command with `id`, `label`, `location` (`Tab › Group[ › …]`), `params` (a doc string, §5.3), `shortcut`, `mutates` | `Session::registry`, `registry.describe()` → `engine.commands` | the ribbon, the forms, the all-commands list, shortcuts, the coverage test |
+| 1 | A **command registry**: every user-visible action is a command with `id`, `label`, where it lives (`location`: `Tab › Group[ › …]`, or in the other Craft engines `menu`: `["Edit", "Transform"]`), `params` (a doc string, §5.3), `shortcut`, and whether it changes the document (`mutates`, or `undoable`/`journal`) | `Session::registry`, `registry.describe()` → `engine.commands` | the ribbon, the forms, the all-commands list, shortcuts, the coverage test |
 | 2 | **Run by id** with JSON params, returning JSON or an error string; never panics on junk | `Session::run(id, &params)`; `hostile_params_never_panic` | everything |
 | 3 | An **enabled check with a reason** per command | `Session::why_disabled(id)` | greying buttons, tooltips |
 | 4 | **State queries as commands** | `format.state`, `view.state`, `para.state`, `file.info` | toggles drawn pressed, the status bar, the title |
@@ -182,9 +186,14 @@ button; the rest are a menu under the group. A command that needs a value is mar
 **Command form** (the kit's `CommandParams.kt` and `Dialogs.kt`). `parseParamForm` reads a params doc
 into fields and never fails:
 
+The Craft engines write these docs three ways, and all three are read: `{"key"?: "a|b"}` (WordCraft),
+`{key?: a|b, id}` (most of the others) and `{"key":"a|b"?,"n":f64=5}` (FilmCraft, PhotoCraft).
+
 | In the doc | Field |
 |---|---|
-| `"name": string`, `"name"?: string` (`?` is optional) | text box |
+| `"name": string`, `name: string`, `"name"?: string`, `name?`, `"name":str?` (`?` is optional) | text box |
+| `seconds: f64=5`, `size?: 48` | number box; the default or example is the hint |
+| `align: left\|center\|right` (bare values) | choice chips, each sent as a string; `id\|name` is two kinds of value, not a choice |
 | `bool` | yes/no chips |
 | `pt`, `n`, `number`, `percent`, `deg`, `0-8` | number box |
 | `"left\|center\|right"` or `"a" \| "b" \| 1.5` | choice chips, each sent as what it is |
@@ -455,8 +464,8 @@ Each phase ends with something that runs. Do not start a phase before the one ab
 | 0. Engine | Read the app's `AGENTS.md`; its rules (never crash, no third-party assets, `cargo xtask ci`) apply to the new folder. Check the engine against §1. | `engine.commands` from its headless backend has all six fields for every command |
 | 1. FFI | Copy §3's layout. Rename the crate (`<app>-ffi`), library, header. Implement the six functions against the app's backend. Port the hostile-arguments and round-trip tests. | `cargo test -p <app>-ffi` passes; `clippy` clean |
 | 2. Fixture | Add `kotlin_command_fixture_follows_the_engine`; generate the fixture. | `engine-commands.json` is in the tree |
-| 3. Skeleton | Depend on the kit; copy §8's second column. Write the app's `CommandProfile` with the fixture's tabs and empty sets. Show one rendered surface. | `gradle :app:jvmTest` compiles; the harness saves a picture of the app with a ribbon |
-| 4. Coverage | Add a test that asserts the kit's `coverageProblems` is empty. Work its lines: fill the profile's `typing`, `stateReaders`, `paramDocs`, `needsInput`; put every pointer command in `pointerGaps` for now. | the test passes; `POINTER_GAPS` is an honest list |
+| 3. Skeleton | Run `scripts/egui2compose.py` ([`egui2compose.md`](egui2compose.md)): it writes the project on the kit, the profile, the theme, the panels and tools, and a shell. Then show one rendered surface in it. | `gradle :app:jvmTest` compiles; the harness saves a picture of the app with a ribbon |
+| 4. Coverage | The script writes this test (`CoverageTest`); it asserts the kit's `coverageProblems` is empty. Replace the fixture with the engine's own list and work its lines: fill the profile's `typing`, `stateReaders`, `paramDocs`, `needsInput`; put every pointer command in `pointerGaps` for now. | the test passes; `POINTER_GAPS` is an honest list |
 | 5. Surface | Selection geometry (`loki.selection`), pointer input, zoom from the engine, the snapshot. Move commands from `POINTER_GAPS` to `POINTER_GESTURES` as each gesture is built. | the app can be used for the app's basic task with a mouse and with a finger |
 | 6. State | `state.rs` toggles; `loki.uiRequests` and `handleUiRequest`; the view state the front end must draw (§5.6). | every toggle on the View tab changes what is on screen; Export and Save As open a picker |
 | 7. Responsive | Check each feature at the three widths; fill the per-feature table in the app's `parity.md`. | harness pictures at 390, 760 and 1280 dp, light and dark, read and filed |

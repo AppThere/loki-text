@@ -89,16 +89,25 @@ class CommandProfile(
         !c.mutates && c.id !in quietResults && quietPrefixes.none { c.id.startsWith(it) } && isInformative(result)
 }
 
-/** Every command of `engine.commands`, in the engine's order; entries that are not usable are left out. */
+/**
+ * Every command of `engine.commands`, in the engine's order; entries that are not usable are left
+ * out. The Craft engines describe a command two ways, both read here: WordCraft gives `location`
+ * (`"Home › Font"`) and `mutates`; the others give `menu` (`["Edit", "Transform"]`, empty for a
+ * command on no menu) and `undoable` or `journal`.
+ */
 fun parseCommands(commands: JsonElement?, profile: CommandProfile): List<CommandInfo> = (commands as? JsonArray).orEmpty().mapNotNull { c ->
     val o = c as? JsonObject ?: return@mapNotNull null
-    fun str(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    fun str(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull.orEmpty()
+    fun flag(k: String) = (o[k] as? JsonPrimitive)?.booleanOrNull
     val id = str("id")
     if (id.isEmpty() || (profile.foreignPrefix.isNotEmpty() && id.startsWith(profile.foreignPrefix))) return@mapNotNull null
     val params = profile.paramDocs[id] ?: str("params")
+    val menu = (o["menu"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.takeIf { t -> t.isNotBlank() } }
+    val location = str("location").ifEmpty { menu.orEmpty().joinToString(" › ") }
     CommandInfo(
-        id, str("label").ifEmpty { id }, str("location"), params, str("shortcut"),
-        (o["mutates"] as? JsonPrimitive)?.booleanOrNull != false,
+        id, str("label").ifEmpty { id }, location, params, str("shortcut"),
+        // Unknown counts as changing the document: its answer is then never shown in place of the surface.
+        mutates = flag("mutates") ?: flag("undoable") ?: flag("journal") ?: true,
         needsInput = id in profile.needsInput || !runsWithoutParams(params),
     )
 }
