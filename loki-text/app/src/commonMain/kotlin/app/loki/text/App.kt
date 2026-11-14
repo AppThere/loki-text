@@ -536,7 +536,7 @@ fun App(
         if (command == "styles.modify" && params["style"] == null) {
             // The style at the caret.
             val id = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { (engine.execute("format.state") as? JsonObject)?.get("style")?.jsonPrimitive?.contentOrNull }.getOrNull() } }
-            val all = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseStyleEntries(engine.execute("styles.manage")) }.getOrDefault(emptyList()) } }
+            val all = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { parseStyleEntries(engine.styleList("recommended")) }.getOrDefault(emptyList()) } }
             all.firstOrNull { it.id == id }?.let { modifyStyle = it } ?: run { manageStyles = true }
             return
         }
@@ -632,7 +632,7 @@ fun App(
     LaunchedEffect(stylesRevision) {
         styles = engineLock.withLock {
             withContext(Dispatchers.Default) {
-                runCatching { parseStyles(engine.execute("styles.manage", buildJsonObject { put("sort", "recommended") })) }.getOrDefault(emptyList())
+                runCatching { parseStyles(engine.styleList("recommended")) }.getOrDefault(emptyList())
             }
         }
     }
@@ -641,7 +641,7 @@ fun App(
         if (!manageStyles && listLevels == null) return@LaunchedEffect
         styleEntries = engineLock.withLock {
             withContext(Dispatchers.Default) {
-                runCatching { parseStyleEntries(engine.execute("styles.manage", buildJsonObject { put("sort", if (stylesAlphabetical) "alphabetical" else "recommended") })) }.getOrDefault(emptyList())
+                runCatching { parseStyleEntries(engine.styleList(if (stylesAlphabetical) "alphabetical" else "recommended")) }.getOrDefault(emptyList())
             }
         }
     }

@@ -82,6 +82,17 @@ private class NativeTransport(val native: NativeEngine) : EngineTransport {
 class Engine(private val native: NativeEngine = NativeEngine()) : EngineClient(NativeTransport(native)) {
     fun insertText(text: String) = execute("text.insert", buildJsonObject { put("text", text) })
     fun inspect(): JsonElement = call("document.inspect")
+
+    /**
+     * The styles list (`styles.manage`), read for the app's own use. The engine also queues a request for a
+     * front end to open its Manage Styles dialog; this app opens that dialog itself, so the request is dropped.
+     * Left queued, the next edit would collect it and the dialog would pop up after a keystroke.
+     */
+    fun styleList(sort: String): JsonElement = try {
+        execute("styles.manage", buildJsonObject { put("sort", sort) })
+    } finally {
+        uiRequests()
+    }
     /** The window size in points, for the reflowing views (Web Layout, Read Mode). */
     fun setViewport(widthPt: Float, heightPt: Float) {
         call("loki.viewport", buildJsonObject { put("width", widthPt); put("height", heightPt) })

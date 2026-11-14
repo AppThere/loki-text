@@ -105,3 +105,6 @@ compose.desktop {
         jvmArgs += "-Dloki.lib=${rootDir}/target/release"
     }
 }
+
+// Tests that drive the real engine find the library `scripts/build-desktop.sh` builds.
+tasks.withType<Test>().configureEach { systemProperty("loki.lib", "${rootDir}/target/release") }
