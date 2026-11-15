@@ -36,6 +36,7 @@ forks, read from source).
 | What it writes renders at phone, tablet and desktop widths | off-screen renders of three (FilmCraft, GridCraft, VectorCraft), read as images | verified for those three |
 | The command lists it reads from the *other* engines are right | **not checked**: their engines were not run here, so there was no true list to compare with | unverified |
 | The generated apps do anything | **no**: they run on a recorded command list (`FixtureTransport`); nothing executes until the FFI crate exists | by design |
+| Carried through phases 1–4 on a real engine | Loki Grid, Loki Decks, VecThere and PhotoThere (the AppThere forks): an FFI crate per app, the fixture from the engine, the generated project, a JNA binding and a rendered surface. `cargo test -p loki-ffi` (6 tests each), `gradle :app:jvmTest` and off-screen renders on the engine library, Linux x86_64, JDK 21, Gradle 9.1 | verified, November 2026; each app's `README.md` lists what is left |
 | Android, iOS | the generated project is JVM-only | not attempted |
 
 ## How the other Craft front ends work (what the script was built from)
@@ -139,6 +140,16 @@ command from another function. So:
   hand-shaped dialog is worth finishing only where its layout or preview matters.
 
 ## After running it
+
+Generated paths to Loki Kit are relative to `--out` (the two checkouts side by side), and with
+`--commands` the fixture is that file as given, so an FFI crate's fixture test that writes the same
+listing agrees with it.
+
+The four ports above share one FFI shape: `ffi/src/lib.rs` (the six functions, `loki.commandState`
+from the `enabled`/`disabled_reason` every engine lists, the hostile-argument and fixture tests) is
+the same file in each, and `ffi/src/app.rs` holds the app's own part (the session, `call`,
+`loki.surface`, the render). `app/src/jvmMain` adds `NativeEngine.kt` (JNA) and `EngineSurface.kt`.
+They are the candidates to move into the generator and the kit next.
 
 1. Replace `app/src/jvmTest/resources/engine-commands.json` with the engine's own list if the
    commands were read from source; run `gradle :app:jvmTest`. Each line the coverage test prints is

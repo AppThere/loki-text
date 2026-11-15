@@ -142,6 +142,13 @@ class Kotlin(unittest.TestCase):
 
 
 @unittest.skipUnless(os.path.isdir(os.path.join(REPO, "crates", "engine", "src")) and os.path.isfile(FIXTURE), "needs the WordCraft engine source and the command fixture")
+class Sets(unittest.TestCase):
+    def test_commands_the_kit_leaves_out_are_in_no_set(self):
+        cmd = lambda i: {"id": i, "label": i, "menu": [], "params": "{x: f64, y: f64}", "mutates": True, "shortcut": None}
+        sets = e.classify_commands([cmd("ui.newArtboard"), cmd("canvas.click")], set())
+        self.assertEqual(sets["pointer"], ["canvas.click"])
+
+
 class AgainstWordCraft(unittest.TestCase):
     """The source reader against the engine's own listing. These floors may rise, not fall."""
 
@@ -176,6 +183,15 @@ class AgainstWordCraft(unittest.TestCase):
             self.assertEqual(model["tabs"][:4], ["File", "Home", "Insert", "Draw"])   # the front end's order, not the engine's
             self.assertTrue(model["uiRequests"] and model["headless"])
             self.assertEqual(len(model["dialogs"]), 5)
+            # The engine's listing is kept as given (an FFI crate's fixture test writes the same text).
+            with open(FIXTURE, encoding="utf-8") as a, open(os.path.join(out, "app/src/jvmTest/resources/engine-commands.json"), encoding="utf-8") as b:
+                self.assertEqual(a.read(), b.read())
+            # The kit is named by a path relative to the project, so it works on any checkout.
+            with open(os.path.join(out, "settings.gradle.kts"), encoding="utf-8") as f:
+                settings = f.read()
+            kit = os.path.relpath(os.path.join(os.path.dirname(os.path.abspath(e.__file__)), ".."), out).replace(os.sep, "/")
+            self.assertIn(f'includeBuild("{kit}")', settings)
+            self.assertNotIn(os.path.abspath(out), settings)
 
 
 if __name__ == "__main__":

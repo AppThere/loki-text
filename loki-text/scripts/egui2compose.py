@@ -791,11 +791,18 @@ def params_mention_point(params: str) -> bool:
     return ("x" in keys and "y" in keys) or bool(keys & {"toX", "toY", "points"}) and bool(keys & {"x", "page", "points"})
 
 
+FOREIGN_PREFIX = "ui."
+
+
 def classify_commands(commands: list[dict], ui_ids: set) -> dict:
     """Which commands are pointer gestures, state the app reads, or typing: the profile's named sets."""
     pointer, readers, typing = [], [], []
     for c in commands:
         cid, label = c["id"], c["label"]
+        # The kit leaves `ui.` commands out (`CommandProfile.foreignPrefix`): they act on the desktop
+        # front end's window. A set that named one would name a command the app does not have.
+        if cid.startswith(FOREIGN_PREFIX):
+            continue
         required_point = params_mention_point(c["params"]) and not re.search(r'"?\bx\b"?\s*\?', c["params"])
         if required_point and not c["menu"]:
             pointer.append(cid)
@@ -1729,9 +1736,21 @@ def emit(model: dict, args, notes: list[str]):
     kit_build = os.path.abspath(args.kit)
     if not os.path.isfile(os.path.join(kit_build, "kit", "build.gradle.kts")):
         raise SystemExit(f"egui2compose: no Loki Kit at {kit_build}/kit (use --kit to name the folder that holds it)")
+    # Paths in the generated build are relative to it when they can be, so the project works from
+    # any checkout of the two repositories side by side, not only on the machine that generated it.
+    def rel(path: str) -> str:
+        try:
+            return os.path.relpath(path, out).replace(os.sep, "/")
+        except ValueError:  # another drive (Windows)
+            return path
     by_id = {c["id"]: c for c in model["commands"]}
     fixture = [{"id": c["id"], "label": c["label"], "menu": c["menu"], "shortcut": c["shortcut"], "params": c["params"], "undoable": c["mutates"]} for c in model["commands"]]
     fixture_text = "[\n" + ",\n".join(json.dumps(c, ensure_ascii=False) for c in fixture) + "\n]\n"
+    if getattr(args, "commands", None):
+        # The engine's own list, as it gave it: an FFI crate's fixture test writes the same text,
+        # and the kit reads every listing shape, so a translation would only lose fields (`enabled`).
+        with open(args.commands, encoding="utf-8") as f:
+            fixture_text = f.read()
     bare = [c["id"] for c in model["commands"] if needs_input_without_fields(c["params"])]
 
     write(os.path.join(src, "Profile.kt"), gen_profile(pkg, model))
@@ -1749,12 +1768,12 @@ def emit(model: dict, args, notes: list[str]):
           .replace("__BARE__", kt_list(bare)))
     write(os.path.join(out, "app", "build.gradle.kts"), BUILD_KTS.replace("__PKG__", pkg))
     write(os.path.join(out, "settings.gradle.kts"), SETTINGS_KTS.replace("__SLUG__", kt(re.sub(r"[^a-z0-9-]", "-", model["repoName"].lower()) + "-compose"))
-          .replace("__CATALOG__", kt(os.path.join(kit_build, "gradle", "libs.versions.toml"))).replace("__KIT_BUILD__", kt(kit_build)))
+          .replace("__CATALOG__", kt(rel(os.path.join(kit_build, "gradle", "libs.versions.toml")))).replace("__KIT_BUILD__", kt(rel(kit_build))))
     write(os.path.join(out, "build.gradle.kts"), ROOT_BUILD_KTS)
     props = os.path.join(kit_build, "gradle.properties")
     if os.path.isfile(props):
         shutil.copyfile(props, os.path.join(out, "gradle.properties"))
-    write(os.path.join(out, ".gitignore"), "build/\n.gradle/\n.kotlin/\nlocal.properties\n")
+    write(os.path.join(out, ".gitignore"), "build/\n.gradle/\n.kotlin/\nlocal.properties\ntarget/\n")
     write(os.path.join(out, "ui-model.json"), json.dumps(model, ensure_ascii=False, indent=1))
     write(os.path.join(out, "REPORT.md"), gen_report(model, notes))
 
