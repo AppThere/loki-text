@@ -1432,7 +1432,12 @@ WORKSPACE_STATE = r'''    // The art workspace's own state: what the state comma
         toolInHand(state)?.let { tool = it }
     }
 '''
-WORKSPACE_LAYOUT = r'''    // On a phone or tablet the menus open from one button as a sheet; on the desktop they are a menu bar.
+WORKSPACE_LAYOUT = r'''    val pickTool: (RailTool) -> Unit = { t -> tool = t.id; toolCommand(t.id)?.let { (id, params) -> runWith(id, params) } }
+    // Every chord a command or a tool answers to: a command's shortcut first, then the tools' letters.
+    val keys = remember(shortcuts, railTools) {
+        shortcuts + railTools.flatMap { listOf(it) + it.alternates }.mapNotNull { t -> parseChord(t.shortcut)?.let { it to TOOL_KEY + t.id } }.filter { it.first !in shortcuts }
+    }
+    // On a phone or tablet the menus open from one button as a sheet; on the desktop they are a menu bar.
     val sheet = remember { MenuSheetState() }
     val bigTargets = if (isTouchPlatform) 44.dp else 36.dp
     val quickActions: @Composable () -> Unit = {
@@ -1464,7 +1469,7 @@ WORKSPACE_LAYOUT = r'''    // On a phone or tablet the menus open from one butto
         },
         optionsBar = { OptionsBar(tool, railTools, state, ::runWith) },
         tools = { vertical ->
-            ToolRail(railTools, tool, vertical, onPick = { t -> tool = t.id; toolCommand(t.id)?.let { (id, params) -> runWith(id, params) } }, footer = { ToolFooter(state, ::runWith) })
+            ToolRail(railTools, tool, vertical, onPick = pickTool, footer = { ToolFooter(state, ::runWith) })
         },
         document = { DocumentTab(documentTitle(state), documentDirty(state)) },
         canvas = { m -> CompositionLocalProvider(LocalWorkspace provides workspace) { surface(revision, m) } },
@@ -1472,7 +1477,12 @@ WORKSPACE_LAYOUT = r'''    // On a phone or tablet the menus open from one butto
         openPanel = dockOpen,
         onOpenPanel = { dockOpen = it },
         statusBar = { StatusBar(statusSegments(state), status, isError = status.isNotEmpty()) },
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing),
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)
+            // With a keyboard: the engine's shortcuts run its commands, a tool's letter picks it up.
+            .shortcutKeys(keys, revision) { id ->
+                if (id.startsWith(TOOL_KEY)) railTools.flatMap { listOf(it) + it.alternates }.firstOrNull { it.id == id.removePrefix(TOOL_KEY) }?.let(pickTool)
+                else if (id !in disabled) run(id)
+            },
         panelGroups = PANEL_GROUPS,
     )'''
 
@@ -1567,6 +1577,8 @@ import app.loki.kit.MenuSheet
 import app.loki.kit.MenuSheetState
 import app.loki.kit.TouchTopBar
 import app.loki.kit.isTouchPlatform
+import app.loki.kit.parseChord
+import app.loki.kit.shortcutKeys
 import __PKG__.dialogs.TRANSLATED_DIALOGS
 import __PKG__.dialogs.TranslatedDialog
 import kotlinx.coroutines.Dispatchers
@@ -1591,6 +1603,9 @@ const val APP_NAME = __NAME__
 
 /** The theme the app opens with: dark for an art app, as its desktop opens; else the system's. */
 const val START_THEME = __THEME__
+
+/** In the shortcut map, a tool (by its id) rather than a command. */
+private const val TOOL_KEY = "tool:"
 
 /** How much room the window gives: a phone, a tablet, a desktop. From the window's width, not the device. */
 enum class SizeClass { Compact, Medium, Expanded }
@@ -1627,6 +1642,7 @@ fun App(
     var status by remember { mutableStateOf("") }
     var catalog by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
     var ribbon by remember { mutableStateOf<List<RibbonTab>>(emptyList()) }
+__SHORTCUT_STATE__
     var disabled by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var on by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showCommands by remember { mutableStateOf(false) }
@@ -1669,6 +1685,7 @@ __STATE__
         val commands = onEngine { commands() }.getOrElse { status = "engine.commands failed: ${it.message}"; null }
         catalog = parseCommands(commands, PROFILE)
         ribbon = __RIBBON__
+__SHORTCUT_LOAD__
     }
     LaunchedEffect(revision) {
         val (d, o) = parseState(onEngine { commandState() }.getOrNull())
@@ -2119,6 +2136,8 @@ def emit(model: dict, args, notes: list[str]):
     app_kt = (APP_KT.replace("__LAYOUT__", WORKSPACE_LAYOUT if workspace else RIBBON_LAYOUT)
               .replace("__APP_ACTION__", WS_APP_ACTION if workspace else "")
               .replace("__WS_VARS__", "    // What the state commands last answered (the art workspace's panels, tools and File actions read it).\n    var state by remember { mutableStateOf<JsonElement?>(null) }\n" if workspace else "")
+              .replace("__SHORTCUT_STATE__\n", "    var shortcuts by remember { mutableStateOf<Map<app.loki.kit.Chord, String>>(emptyMap()) }\n" if workspace else "")
+              .replace("__SHORTCUT_LOAD__\n", "        shortcuts = commands?.let { runCatching { app.loki.kit.parseShortcuts(it) }.getOrNull() }.orEmpty()\n" if workspace else "")
               .replace("__RIBBON__", "withAppActions(parseRibbon(commands, PROFILE))" if workspace else "parseRibbon(commands, PROFILE)")
               .replace("__STATE__", WORKSPACE_STATE if workspace else "")
               .replace("__THEME__", kt("dark" if workspace else "system")))

@@ -191,10 +191,16 @@ fun ToolRail(tools: List<RailTool>, current: String, vertical: Boolean, onPick: 
                 }
             }
         }
-        footer()
     }
-    if (vertical) Column(modifier.width(if (isTouchPlatform) 56.dp else 48.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) { content() }
-    else Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) { content() }
+    // The footer (an art app's colours) stays put while the tools scroll: it is never scrolled out of reach.
+    if (vertical) Column(modifier.width(if (isTouchPlatform) 56.dp else 48.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) { content() }
+        HorizontalDivider()
+        footer()
+    } else Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        footer()
+        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) { content() }
+    }
 }
 
 /** A right click, where there is a mouse; nothing on touch, where the long press does the same. */
