@@ -16,10 +16,11 @@ trusted, §1 says whether the target app's engine is ready.
 | The Kotlin common code compiles, its tests pass | `gradle :kit:jvmTest :app:jvmTest` (18 + 148 tests), Gradle 8.14.3, JDK 21, no Android SDK installed | verified, November 2026 |
 | The shared kit serves the app unchanged | the app's tests, and off-screen renders before and after the extraction | verified on the JVM. The kit's Android and iOS targets have **not been compiled** |
 | The UI lays out at phone, tablet and desktop widths, light and dark | off-screen renders of the real app (`ScreenshotHarness`), read as images | verified, November 2026 |
-| The desktop app runs in a window | `scripts/build-desktop.sh run` | verified October 2026, not re-run since |
-| The Android app builds and runs | `scripts/build-android.sh`, a Chromebook's Android runtime | verified October 2026. **Not rebuilt after the November changes**: the picker change in `androidMain/MainActivity.kt` has not been compiled |
+| The desktop app runs in a window | `scripts/build-desktop.sh run` | verified November 2026 (Linux x86_64, JDK 21, Gradle 9.1) |
+| The Android app builds and runs | `ABIS="arm64-v8a x86_64" VARIANT=Release scripts/build-android.sh` (NDK r28c, x86_64 Linux host); `adb install` to a Pixel 9 (Android 16) and a Galaxy Tab S10 Lite (Android 16, API 36) | verified November 2026: one release APK with both ABIs installs and launches with no crash or engine-load error. Use on the devices, and the x86_64 library on a device, have **not** been checked |
 | iOS / iPadOS | none | **never built**. `iosMain` is a scaffold; there is no Xcode host project |
 | Another Craft app | [`egui2compose`](egui2compose.md) run on the ten other Craft repositories: each generated project compiles and passes its coverage test on the JVM | the **start** of a port is verified for all ten; no port has been finished, and no other engine was run here |
+| Loki Grid, Loki Decks, PhotoThere, VecThere on Android | the same build and devices, through the FFI crate, JNA (`jnaMain`) and the kit's Android target (first compiled here) | verified November 2026: install and launch only |
 | Typing into the generated dialogs | none (the harness sends pointer input only) | not verified |
 
 Treat every "should" about Android after November, iOS, and other apps as a plan, not a report.
