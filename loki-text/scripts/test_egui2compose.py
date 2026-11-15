@@ -149,6 +149,24 @@ class Sets(unittest.TestCase):
         self.assertEqual(sets["pointer"], ["canvas.click"])
 
 
+class Icons(unittest.TestCase):
+    def test_shared_ids_get_the_same_glyph_in_every_engine(self):
+        self.assertEqual(e.icon_for("edit.undo"), "Undo2")
+        self.assertEqual(e.icon_for("home.bold"), e.icon_for("format.bold"))
+        self.assertEqual(e.icon_for("object.arrange.bringToFront"), e.icon_for("arrange.bringToFront"))
+        self.assertIsNone(e.icon_for("data.textToColumns"))
+        self.assertEqual(e.tool_icon("PolygonLasso", "Polygonal Lasso Tool"), "Lasso")
+
+    def test_only_the_engines_own_commands_are_mapped(self):
+        cmd = lambda i: {"id": i, "label": i, "menu": ["Edit"], "params": "{}", "mutates": True, "shortcut": None}
+        model = {"commands": [cmd("edit.undo"), cmd("ui.bold"), cmd("edit.flashFill")], "tools": []}
+        kt = e.gen_icons("app.loki.x", model)
+        self.assertIn('"edit.undo" -> Lucide.Undo2', kt)
+        self.assertNotIn("ui.bold", kt)
+        self.assertIn('UNDO_COMMAND = "edit.undo"', kt)
+        self.assertIn('REDO_COMMAND = ""', kt)
+
+
 class AgainstWordCraft(unittest.TestCase):
     """The source reader against the engine's own listing. These floors may rise, not fall."""
 

@@ -16,11 +16,17 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,9 +41,21 @@ import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.Lucide
 
-/** A button that opens a menu of [items] by name, each with its tick, its shortcut and, when it can't run, greyed. */
+/**
+ * A button that opens a menu of [items] by name, each with its tick, its shortcut and, when it can't
+ * run, greyed. [icon] draws an item's icon before its name; items without one keep the space empty
+ * when any item of the menu has one, so the names line up.
+ */
 @Composable
-fun CommandMenuButton(label: String, items: List<RibbonItem>, disabled: Map<String, String>, on: Set<String>, onRun: (String) -> Unit) {
+fun CommandMenuButton(
+    label: String,
+    items: List<RibbonItem>,
+    disabled: Map<String, String>,
+    on: Set<String>,
+    onRun: (String) -> Unit,
+    hasIcon: (id: String) -> Boolean = { false },
+    icon: @Composable (id: String) -> Unit = {},
+) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, contentPadding = PaddingValues(start = 8.dp, end = 2.dp), modifier = Modifier.height(36.dp)) {
@@ -45,12 +63,14 @@ fun CommandMenuButton(label: String, items: List<RibbonItem>, disabled: Map<Stri
             Icon(Lucide.ChevronDown, contentDescription = null, modifier = Modifier.size(16.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.widthIn(min = 240.dp)) {
+            val iconColumn = items.any { hasIcon(it.id) }
             for (item in items) {
                 val off = item.id in disabled
                 Row(
                     Modifier.fillMaxWidth().clickable(enabled = !off) { open = false; onRun(item.id) }.padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    if (iconColumn) Box(Modifier.size(28.dp), contentAlignment = Alignment.CenterStart) { if (hasIcon(item.id)) icon(item.id) }
                     Text(
                         (if (item.id in on) "✓ " else "") + item.menuLabel,
                         style = MaterialTheme.typography.bodyMedium, color = if (off) MaterialTheme.colorScheme.outline else Color.Unspecified,
@@ -102,12 +122,31 @@ fun CommandBar(
                 VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
                 val buttons = g.items.filter { hasIcon(it.id) && !it.needsInput }
                 val rest = g.items - buttons.toSet()
-                for (item in buttons) {
-                    IconButton(onClick = { onRun(item.id) }, enabled = item.id !in disabled, modifier = Modifier.size(36.dp)) { icon(item.id) }
-                }
-                if (rest.isNotEmpty()) CommandMenuButton(if (buttons.isEmpty()) g.name.ifEmpty { tab.name } else "More", rest, disabled, on, onRun)
+                for (item in buttons) CommandIconButton(item, disabled[item.id], item.id in on, icon, onRun)
+                // The menu keeps the group's name even beside its buttons: "More" would say nothing about what is in it.
+                if (rest.isNotEmpty()) CommandMenuButton(g.name.ifEmpty { tab.name }, rest, disabled, on, onRun, hasIcon, icon)
             }
         }
         HorizontalDivider()
+    }
+}
+
+/**
+ * A command as an icon button: its name, shortcut and (when it can't run) the reason in a tooltip,
+ * as Loki Text's ribbon does, and drawn on when it is a toggle that is on.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CommandIconButton(item: RibbonItem, disabledReason: String?, checked: Boolean, icon: @Composable (id: String) -> Unit, onRun: (String) -> Unit) {
+    val tip = if (item.shortcut.isEmpty()) item.label else "${item.label}  (${displayShortcut(item.shortcut)})"
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(if (disabledReason == null) tip else "$tip — $disabledReason") } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(
+            onClick = { onRun(item.id) }, enabled = disabledReason == null, modifier = Modifier.size(36.dp),
+            colors = if (checked) IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else IconButtonDefaults.iconButtonColors(),
+        ) { icon(item.id) }
     }
 }
