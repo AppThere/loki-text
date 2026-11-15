@@ -1234,6 +1234,118 @@ fun CommandIcon(id: String, size: Dp = 18.dp) {{
 """
 
 
+def chrome_of(model: dict, choice: str) -> str:
+    """`workspace` (menu bar, tools, dock: the art apps) or `ribbon` (the document apps)."""
+    if choice in ("ribbon", "workspace"):
+        return choice
+    # The desktop front ends with a ribbon have a Home tab (WordCraft, GridCraft, DeckCraft); those
+    # with a menu bar, tools and panels (PhotoCraft, VectorCraft…) have none.
+    return "ribbon" if "Home" in model["tabs"] else "workspace"
+
+
+def gen_app_parts(pkg: str, model: dict) -> str:
+    ids = {c["id"] for c in model["commands"]}
+    state = next((i for i in ("document.inspect", "doc.inspect") if i in ids), "")
+    return f"""package {pkg}
+
+// Written ONCE by egui2compose for an app with the art workspace (menu bar, tools, dock), and never
+// written again: this file is the app's own. It says what the generic workspace cannot know: which
+// command describes the document, which panels the dock has and what they draw, how a tool is
+// picked, and what the status bar says. The defaults below work for any engine; replace them.
+
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.loki.kit.DockPanel
+import app.loki.kit.EngineClient
+import app.loki.kit.PaneContent
+import app.loki.kit.PaneList
+import app.loki.kit.PaneRow
+import app.loki.kit.RailTool
+import app.loki.kit.describeResult
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.SlidersHorizontal
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+
+/**
+ * Read after every change. The answers reach every function here as `state`, an object keyed by
+ * command id ({{"document.inspect": {{…}}}}), and feed the panels, the document tab and the status bar.
+ */
+val STATE_COMMANDS: List<String> = listOf({kt(state) if state else ""})
+
+/** The document's description: the first state command's answer. */
+fun docOf(state: JsonElement?): JsonElement? = STATE_COMMANDS.firstOrNull()?.let {{ (state as? JsonObject)?.get(it) }}
+
+/** Commands this file runs, so the coverage test checks the engine still has them. */
+val PANEL_COMMANDS: Set<String> = emptySet()
+
+/** The panel open at the start (null: the dock starts collapsed). */
+val FIRST_PANEL: String? = "properties"
+
+/** Panels that share a column, shown as tabs together. */
+val PANEL_GROUPS: List<List<String>> = emptyList()
+
+private fun JsonElement?.str(key: String): String? = ((this as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull
+
+fun documentTitle(state: JsonElement?): String = docOf(state).str("name") ?: docOf(state).str("title") ?: APP_NAME
+
+fun documentDirty(state: JsonElement?): Boolean = ((docOf(state) as? JsonObject)?.get("dirty") as? JsonPrimitive)?.booleanOrNull == true
+
+fun statusSegments(state: JsonElement?): List<String> = emptyList()
+
+/** The tool palette, read once (from the engine, if it lists its tools). */
+fun loadTools(engine: EngineClient): List<RailTool> = TOOLS.map {{ RailTool(it.id, it.title, icon = toolIcon(it.id)) }}
+
+/** The engine command that picks up tool [id], or null when the tool is the front end's own. */
+fun toolCommand(id: String): Pair<String, JsonObject>? =
+    TOOLS.firstOrNull {{ it.id == id }}?.command?.takeIf {{ it.isNotEmpty() }}?.let {{ it to JsonObject(emptyMap()) }}
+
+/** The tool in hand according to the engine, when it says. */
+fun toolInHand(state: JsonElement?): String? = null
+
+/** The options bar under the menus: the tool in hand and its options. */
+@Composable
+fun OptionsBar(tool: String, tools: List<RailTool>, state: JsonElement?, run: (String, JsonObject) -> Unit) {{
+    val name = tools.flatMap {{ listOf(it) + it.alternates }}.firstOrNull {{ it.id == tool }}?.label ?: tool
+    Row(Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {{
+        Text(name, style = MaterialTheme.typography.labelLarge)
+    }}
+}}
+
+/** Under the tools: colour swatches, say. */
+@Composable
+fun ToolFooter(state: JsonElement?, run: (String, JsonObject) -> Unit) {{}}
+
+/** Entries the app adds to its File menu (Open, Save… where the engine has them on no menu). None by default. */
+val APP_ACTIONS: List<app.loki.kit.RibbonItem> = emptyList()
+val APP_ACTION_IDS: Set<String> = APP_ACTIONS.map {{ it.id }}.toSet()
+
+fun withAppActions(tabs: List<app.loki.kit.RibbonTab>): List<app.loki.kit.RibbonTab> = app.loki.kit.addToFileMenu(tabs, APP_ACTIONS)
+
+/** Runs one of [APP_ACTIONS] (off the UI thread: it may wait on a file picker). */
+suspend fun appAction(id: String, state: JsonElement?, io: app.loki.kit.FileIo) {{}}
+
+/** The dock. The default shows what the state command answers, as lines. */
+fun dockPanels(state: JsonElement?, revision: Int, run: (String, JsonObject) -> Unit): List<DockPanel> = listOf(
+    DockPanel("properties", "Properties", Lucide.SlidersHorizontal) {{ m ->
+        val rows = describeResult(docOf(state)).map {{ PaneRow(it.name.ifEmpty {{ it.value }}, if (it.name.isEmpty()) "" else it.value) }}
+        PaneList("Properties", PaneContent(rows, "Nothing to show."), "", {{}}, {{}}, m)
+    }},
+)
+"""
+
+
 def gen_dialog_index(pkg: str, dialogs: list[dict]) -> str:
     rows = "".join(f"    TranslatedDialog({kt(d['title'])}, {kt(d['file'])}) {{ onRun, onDismiss -> {ident(d['name'], upper=True)}Dialog(onRun, onDismiss) }},\n" for d in dialogs)
     return f'''package {pkg}.dialogs
@@ -1250,6 +1362,131 @@ val TRANSLATED_DIALOGS: List<TranslatedDialog> = listOf(
 {rows})
 '''
 
+
+RIBBON_LAYOUT = r'''    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
+        val sizeClass = if (maxWidth < 600.dp) SizeClass.Compact else if (maxWidth < 900.dp) SizeClass.Medium else SizeClass.Expanded
+        Column(Modifier.fillMaxSize()) {
+            CommandBar(
+                ribbon, disabled, on,
+                hasIcon = { commandIcon(it) != null },
+                icon = { CommandIcon(it) },
+                leading = {
+                    AppMenu(themeChoice, setTheme, onDialog = { dialog = it })
+                    // Undo and Redo at every width, as in Loki Text.
+                    for (id in listOf(UNDO_COMMAND, REDO_COMMAND)) byId[id]?.let { c ->
+                        IconButton(onClick = { run(id) }, enabled = id !in disabled, modifier = Modifier.size(36.dp)) {
+                            commandIcon(id)?.let { Icon(it, contentDescription = c.label, modifier = Modifier.size(18.dp)) }
+                        }
+                    }
+                    IconButton(onClick = { showCommands = true }, modifier = Modifier.size(36.dp)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
+                },
+                onRun = ::run,
+            )
+            // A smaller window moves a feature, it never removes one: tools and panels go above the surface.
+            if (sizeClass == SizeClass.Compact) {
+                ToolStrip(tool, horizontal = true) { t -> tool = t.id; if (t.command.isNotEmpty()) run(t.command) }
+                PanelChips(openPanel) { openPanel = if (openPanel == it) null else it }
+                openPanel?.let { p -> PanelView(p, revision, { cmd -> onEngine { execute(cmd) }.getOrNull() }, { openPanel = null }, Modifier.fillMaxWidth().height(260.dp)) }
+            }
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                if (sizeClass != SizeClass.Compact) ToolStrip(tool, horizontal = false) { t -> tool = t.id; if (t.command.isNotEmpty()) run(t.command) }
+                surface(revision, Modifier.weight(1f).fillMaxHeight())
+                if (sizeClass != SizeClass.Compact && PANELS.isNotEmpty()) {
+                    Column(Modifier.width(320.dp).fillMaxHeight()) {
+                        PanelChips(openPanel) { openPanel = if (openPanel == it) null else it }
+                        openPanel?.let { p -> PanelView(p, revision, { cmd -> onEngine { execute(cmd) }.getOrNull() }, { openPanel = null }, Modifier.fillMaxWidth().weight(1f)) }
+                    }
+                }
+            }
+            HorizontalDivider()
+            Text(
+                status.ifEmpty { "${catalog.size} commands" }, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = if (status.isEmpty()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+    }'''
+WORKSPACE_STATE = r'''    // The art workspace's own state: what the state command last answered, the tool palette, the open panel.
+    var railTools by remember { mutableStateOf<List<RailTool>>(emptyList()) }
+    var dockOpen by remember { mutableStateOf<String?>(FIRST_PANEL) }
+    LaunchedEffect(engine) { railTools = onEngine { loadTools(this) }.getOrDefault(emptyList()) }
+    // What the canvas's tools get: the tool in hand, the state, and the engine (each call on the lock, off the UI thread).
+    val workspace = WorkspaceContext(
+        tool, state, revision,
+        run = { id, params, then ->
+            scope.launch {
+                val r = onEngine { execute(id, params) }
+                r.onSuccess { revision++ }.onFailure { status = (it as? EngineException)?.message ?: it.message ?: "error" }
+                then(r.getOrNull())
+            }
+        },
+        // A question for the engine (what is under this point?), not an action: a "no" is an answer, not an error to show.
+        call = { method, params, then ->
+            scope.launch { then(onEngine { call(method, params) }.getOrNull()) }
+        },
+        refresh = { revision++ },
+        status = { status = it },
+    )
+    LaunchedEffect(revision) {
+        // `{command: answer}` for each state command; one that fails is left out.
+        state = onEngine { JsonObject(STATE_COMMANDS.mapNotNull { c -> runCatching { c to execute(c) }.getOrNull() }.toMap()) }.getOrNull()
+        toolInHand(state)?.let { tool = it }
+    }
+'''
+WORKSPACE_LAYOUT = r'''    // On a phone or tablet the menus open from one button as a sheet; on the desktop they are a menu bar.
+    val sheet = remember { MenuSheetState() }
+    val bigTargets = if (isTouchPlatform) 44.dp else 36.dp
+    val quickActions: @Composable () -> Unit = {
+        for (id in listOf(UNDO_COMMAND, REDO_COMMAND)) byId[id]?.let { c ->
+            IconButton(onClick = { run(id) }, enabled = id !in disabled, modifier = Modifier.size(bigTargets)) {
+                commandIcon(id)?.let { Icon(it, contentDescription = c.label, modifier = Modifier.size(18.dp)) }
+            }
+        }
+        IconButton(onClick = { showCommands = true }, modifier = Modifier.size(bigTargets)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
+    }
+    CanvasWorkspace(
+        menuBar = {
+            if (isTouchPlatform) {
+                TouchTopBar(
+                    sheet, documentTitle(state), documentDirty(state), hasFileMenu = ribbon.any { it.name == "File" },
+                    trailing = { quickActions(); AppMenu(themeChoice, setTheme, onDialog = { dialog = it }, settingsIcon = true) },
+                )
+            } else {
+                MenuBar(
+                    ribbon, disabled, on, hasIcon = { commandIcon(it) != null }, icon = { CommandIcon(it) }, onRun = ::run,
+                    leading = { AppMenu(themeChoice, setTheme, onDialog = { dialog = it }) },
+                    title = documentTitle(state),
+                    trailing = quickActions,
+                )
+            }
+        },
+        overlay = { compact ->
+            if (isTouchPlatform) MenuSheet(sheet, ribbon, disabled, on, hasIcon = { commandIcon(it) != null }, icon = { CommandIcon(it) }, onRun = ::run, compact = compact)
+        },
+        optionsBar = { OptionsBar(tool, railTools, state, ::runWith) },
+        tools = { vertical ->
+            ToolRail(railTools, tool, vertical, onPick = { t -> tool = t.id; toolCommand(t.id)?.let { (id, params) -> runWith(id, params) } }, footer = { ToolFooter(state, ::runWith) })
+        },
+        document = { DocumentTab(documentTitle(state), documentDirty(state)) },
+        canvas = { m -> CompositionLocalProvider(LocalWorkspace provides workspace) { surface(revision, m) } },
+        panels = dockPanels(state, revision, ::runWith),
+        openPanel = dockOpen,
+        onOpenPanel = { dockOpen = it },
+        statusBar = { StatusBar(statusSegments(state), status, isError = status.isNotEmpty()) },
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing),
+        panelGroups = PANEL_GROUPS,
+    )'''
+
+WS_APP_ACTION = r'''if (id in APP_ACTION_IDS) {
+            val io = FileIo(
+                pick = { save, name -> if (save) saveAs(name) else pickFile(false) },
+                publish = publishFile,
+                call = { method, params -> onEngine { call(method, params) }.onFailure { status = (it as? EngineException)?.message ?: it.message ?: "error" }.getOrNull() },
+                refresh = { revision++ },
+                status = { status = it },
+            )
+            scope.launch { withContext(Dispatchers.Default) { appAction(id, state, io) } }
+            return
+        }'''
 
 APP_KT = r'''package __PKG__
 
@@ -1298,6 +1535,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.loki.kit.AllCommandsDialog
 import app.loki.kit.CommandBar
+import app.loki.kit.CanvasWorkspace
+import app.loki.kit.FileIo
+import app.loki.kit.LocalWorkspace
+import app.loki.kit.WorkspaceContext
+import androidx.compose.runtime.CompositionLocalProvider
+import app.loki.kit.DocumentTab
+import app.loki.kit.MenuBar
+import app.loki.kit.StatusBar
+import app.loki.kit.ToolRail
+import app.loki.kit.RailTool
 import app.loki.kit.CommandFormDialog
 import app.loki.kit.CommandInfo
 import app.loki.kit.CraftTheme
@@ -1315,6 +1562,11 @@ import app.loki.kit.parseRibbon
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Menu
 import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.Settings
+import app.loki.kit.MenuSheet
+import app.loki.kit.MenuSheetState
+import app.loki.kit.TouchTopBar
+import app.loki.kit.isTouchPlatform
 import __PKG__.dialogs.TRANSLATED_DIALOGS
 import __PKG__.dialogs.TranslatedDialog
 import kotlinx.coroutines.Dispatchers
@@ -1337,6 +1589,9 @@ import kotlinx.serialization.json.contentOrNull
 
 const val APP_NAME = __NAME__
 
+/** The theme the app opens with: dark for an art app, as its desktop opens; else the system's. */
+const val START_THEME = __THEME__
+
 /** How much room the window gives: a phone, a tablet, a desktop. From the window's width, not the device. */
 enum class SizeClass { Compact, Medium, Expanded }
 
@@ -1357,8 +1612,12 @@ private fun parseState(e: JsonElement?): Pair<Map<String, String>, Set<String>> 
 fun App(
     transport: EngineTransport,
     pickFile: (save: Boolean) -> String? = { null },
+    /** A place to save a new file, starting from [suggestedName] (a native "Save As" or "Create document" picker); null when cancelled. */
+    saveAs: (suggestedName: String) -> String? = { pickFile(true) },
+    /** After the engine wrote [path]: copy it to where the person chose (Android's content URIs), if anywhere. */
+    publishFile: (path: String) -> Unit = {},
     surface: @Composable (revision: Int, modifier: Modifier) -> Unit = { _, modifier -> SurfacePlaceholder(modifier) },
-) = CraftTheme(LightColors, DarkColors, Typography()) { themeChoice, setTheme, _ ->
+) = CraftTheme(LightColors, DarkColors, Typography(), START_THEME) { themeChoice, setTheme, _ ->
     val engine = remember(transport) { EngineClient(transport) }
     DisposableEffect(engine) { onDispose { engine.close() } }
     val scope = rememberCoroutineScope()
@@ -1377,7 +1636,7 @@ fun App(
     var openPanel by remember { mutableStateOf<Panel?>(null) }
     var tool by remember { mutableStateOf(TOOLS.firstOrNull()?.id.orEmpty()) }
     val byId = remember(catalog) { catalog.associateBy { it.id } }
-
+__WS_VARS__
     suspend fun <T> onEngine(block: EngineClient.() -> T): Result<T> =
         runCatching { lock.withLock { withContext(Dispatchers.Default) { engine.block() } } }
 
@@ -1393,15 +1652,23 @@ fun App(
     }
 
     fun run(id: String) {
+        __APP_ACTION__
         val c = byId[id] ?: return
         if (c.needsInput) { form = c; return }
         scope.launch { execute(c, JsonObject(emptyMap()), show = true)?.let { status = it } }
     }
 
+    // A command with the params a panel or tool already has (no form): pick a layer, toggle its eye.
+    fun runWith(id: String, params: JsonObject) {
+        scope.launch {
+            onEngine { execute(id, params) }.onSuccess { revision++ }.onFailure { status = (it as? EngineException)?.message ?: it.message ?: "error" }
+        }
+    }
+__STATE__
     LaunchedEffect(engine) {
         val commands = onEngine { commands() }.getOrElse { status = "engine.commands failed: ${it.message}"; null }
         catalog = parseCommands(commands, PROFILE)
-        ribbon = parseRibbon(commands, PROFILE)
+        ribbon = __RIBBON__
     }
     LaunchedEffect(revision) {
         val (d, o) = parseState(onEngine { commandState() }.getOrNull())
@@ -1420,48 +1687,7 @@ fun App(
         d.show({ id, params -> byId[id]?.let { c -> scope.launch { execute(c, params, show = false)?.let { status = it } } } ?: run { status = "no such command: $id" } }, { dialog = null })
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
-        val sizeClass = if (maxWidth < 600.dp) SizeClass.Compact else if (maxWidth < 900.dp) SizeClass.Medium else SizeClass.Expanded
-        Column(Modifier.fillMaxSize()) {
-            CommandBar(
-                ribbon, disabled, on,
-                hasIcon = { commandIcon(it) != null },
-                icon = { CommandIcon(it) },
-                leading = {
-                    AppMenu(themeChoice, setTheme, onDialog = { dialog = it })
-                    // Undo and Redo at every width, as in Loki Text.
-                    for (id in listOf(UNDO_COMMAND, REDO_COMMAND)) byId[id]?.let { c ->
-                        IconButton(onClick = { run(id) }, enabled = id !in disabled, modifier = Modifier.size(36.dp)) {
-                            commandIcon(id)?.let { Icon(it, contentDescription = c.label, modifier = Modifier.size(18.dp)) }
-                        }
-                    }
-                    IconButton(onClick = { showCommands = true }, modifier = Modifier.size(36.dp)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
-                },
-                onRun = ::run,
-            )
-            // A smaller window moves a feature, it never removes one: tools and panels go above the surface.
-            if (sizeClass == SizeClass.Compact) {
-                ToolStrip(tool, horizontal = true) { t -> tool = t.id; if (t.command.isNotEmpty()) run(t.command) }
-                PanelChips(openPanel) { openPanel = if (openPanel == it) null else it }
-                openPanel?.let { p -> PanelView(p, revision, { cmd -> onEngine { execute(cmd) }.getOrNull() }, { openPanel = null }, Modifier.fillMaxWidth().height(260.dp)) }
-            }
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                if (sizeClass != SizeClass.Compact) ToolStrip(tool, horizontal = false) { t -> tool = t.id; if (t.command.isNotEmpty()) run(t.command) }
-                surface(revision, Modifier.weight(1f).fillMaxHeight())
-                if (sizeClass != SizeClass.Compact && PANELS.isNotEmpty()) {
-                    Column(Modifier.width(320.dp).fillMaxHeight()) {
-                        PanelChips(openPanel) { openPanel = if (openPanel == it) null else it }
-                        openPanel?.let { p -> PanelView(p, revision, { cmd -> onEngine { execute(cmd) }.getOrNull() }, { openPanel = null }, Modifier.fillMaxWidth().weight(1f)) }
-                    }
-                }
-            }
-            HorizontalDivider()
-            Text(
-                status.ifEmpty { "${catalog.size} commands" }, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = if (status.isEmpty()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
-    }
+__LAYOUT__
 }
 
 /** Where the document goes. Replace it: pass `surface` to [App] with what the engine renders. */
@@ -1474,10 +1700,11 @@ fun SurfacePlaceholder(modifier: Modifier) {
 
 /** The app's own menu: the theme, and the dialogs translated from the desktop front end. */
 @Composable
-private fun AppMenu(themeChoice: String, setTheme: (String) -> Unit, onDialog: (TranslatedDialog) -> Unit) {
+private fun AppMenu(themeChoice: String, setTheme: (String) -> Unit, onDialog: (TranslatedDialog) -> Unit, settingsIcon: Boolean = false) {
     var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, modifier = Modifier.size(36.dp)) {
-        Icon(Lucide.Menu, contentDescription = "Menu", modifier = Modifier.size(18.dp))
+    // Beside a touch top bar's Menus button this is the app's settings, so it looks like settings.
+    IconButton(onClick = { open = true }, modifier = Modifier.size(if (settingsIcon) 44.dp else 36.dp)) {
+        Icon(if (settingsIcon) Lucide.Settings else Lucide.Menu, contentDescription = if (settingsIcon) "Settings" else "Menu", modifier = Modifier.size(18.dp))
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             for (choice in listOf("system", "light", "dark")) {
                 DropdownMenuItem(text = { Text((if (choice == themeChoice) "✓ " else "") + "Theme: " + choice.replaceFirstChar { it.uppercase() }) }, onClick = { open = false; setTheme(choice) })
@@ -1580,7 +1807,7 @@ class CoverageTest {
     @Test
     fun everyCommandHasAWayToIt() {
         val named = PANELS.map { it.source }.filter { it.isNotEmpty() } + TOOLS.map { it.command }.filter { it.isNotEmpty() } +
-            ICON_COMMANDS + listOf(UNDO_COMMAND, REDO_COMMAND).filter { it.isNotEmpty() }
+            ICON_COMMANDS + listOf(UNDO_COMMAND, REDO_COMMAND).filter { it.isNotEmpty() }__EXTRA_NAMED__
         // Lower maxGaps as gestures are built; it may never rise.
         val problems = coverageProblems(raw, PROFILE, parseRibbon(raw, PROFILE), { _, _ -> false }, named, emptySet(), maxGaps = __GAPS__)
             // Until an engine params doc is fixed, list here the ids whose form has no fields.
@@ -1886,7 +2113,19 @@ def emit(model: dict, args, notes: list[str]):
     write(os.path.join(src, "Theme.kt"), gen_theme(pkg, model))
     write(os.path.join(src, "Workspace.kt"), gen_workspace(pkg, model))
     write(os.path.join(src, "Icons.kt"), gen_icons(pkg, model))
-    write(os.path.join(src, "App.kt"), APP_KT.replace("__PKG__", pkg).replace("__NAME__", kt(model["name"])))
+    chrome = chrome_of(model, getattr(args, "chrome", "auto"))
+    model["chrome"] = chrome
+    workspace = chrome == "workspace"
+    app_kt = (APP_KT.replace("__LAYOUT__", WORKSPACE_LAYOUT if workspace else RIBBON_LAYOUT)
+              .replace("__APP_ACTION__", WS_APP_ACTION if workspace else "")
+              .replace("__WS_VARS__", "    // What the state commands last answered (the art workspace's panels, tools and File actions read it).\n    var state by remember { mutableStateOf<JsonElement?>(null) }\n" if workspace else "")
+              .replace("__RIBBON__", "withAppActions(parseRibbon(commands, PROFILE))" if workspace else "parseRibbon(commands, PROFILE)")
+              .replace("__STATE__", WORKSPACE_STATE if workspace else "")
+              .replace("__THEME__", kt("dark" if workspace else "system")))
+    write(os.path.join(src, "App.kt"), app_kt.replace("__PKG__", pkg).replace("__NAME__", kt(model["name"])))
+    parts = os.path.join(src, "AppParts.kt")
+    if workspace and not os.path.exists(parts):
+        write(parts, gen_app_parts(pkg, model))
     for d in model["dialogs"]:
         write(os.path.join(src, "dialogs", ident(d["name"], upper=True) + "Dialog.kt"), gen_dialog(pkg, d, by_id))
     write(os.path.join(src, "dialogs", "TranslatedDialogs.kt"), gen_dialog_index(pkg, model["dialogs"]))
@@ -1895,7 +2134,8 @@ def emit(model: dict, args, notes: list[str]):
     write(os.path.join(out, "app", "src", "jvmTest", "resources", "engine-commands.json"), fixture_text)
     write(os.path.join(out, "app", "src", "jvmTest", "kotlin", *pkg.split("."), "CoverageTest.kt"),
           TEST_KT.replace("__PKG__", pkg).replace("__GAPS__", str(len(model["sets"]["pointer"]))).replace("__MIN__", str(max(1, len(model["commands"]) * 9 // 10)))
-          .replace("__BARE__", kt_list(bare)))
+          .replace("__BARE__", kt_list(bare))
+          .replace("__EXTRA_NAMED__", " +\n            PANEL_COMMANDS + STATE_COMMANDS" if workspace else ""))
     write(os.path.join(out, "app", "build.gradle.kts"), BUILD_KTS.replace("__PKG__", pkg))
     write(os.path.join(out, "settings.gradle.kts"), SETTINGS_KTS.replace("__SLUG__", kt(re.sub(r"[^a-z0-9-]", "-", model["repoName"].lower()) + "-compose"))
           .replace("__CATALOG__", kt(rel(os.path.join(kit_build, "gradle", "libs.versions.toml")))).replace("__KIT_BUILD__", kt(rel(kit_build))))
@@ -1931,6 +2171,8 @@ def main(argv=None) -> int:
     ap.add_argument("--ui", default="crates/ui-egui/src", help="the egui crate's source, relative to --repo")
     ap.add_argument("--kit", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."), help="the folder that holds Loki Kit (its `kit/` and `gradle/`)")
     ap.add_argument("--max-dialogs", type=int, default=40, help="translate at most this many dialogs, those with the most inputs first")
+    ap.add_argument("--chrome", choices=["auto", "ribbon", "workspace"], default="auto",
+                    help="the window: a ribbon (document apps) or the art workspace (menu bar, tools, dock); auto follows the desktop front end")
     ap.add_argument("--model-only", action="store_true", help="write only ui-model.json and REPORT.md")
     args = ap.parse_args(argv)
     args.max_dialogs = max(0, min(args.max_dialogs, 500))

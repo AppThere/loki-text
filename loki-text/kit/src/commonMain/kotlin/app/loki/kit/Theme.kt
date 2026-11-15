@@ -21,7 +21,8 @@ val LocalBaseColors = staticCompositionLocalOf<ColorScheme> { lightColorScheme()
 val THEME_CHOICES = listOf("system", "light", "dark")
 
 /**
- * A Craft app's theme: [light], [dark], or the system's choice (the start). [content] gets the
+ * A Craft app's theme: [light], [dark], or the system's choice. [initialChoice] is the start: the
+ * system's for most apps; an art app whose desktop opens dark (PhotoCraft, VectorCraft) starts "dark". [content] gets the
  * choice (one of [THEME_CHOICES]), how to change it, and whether the result is dark, so the app can
  * answer the engine's interface-theme request and offer the choice in a menu.
  *
@@ -34,8 +35,18 @@ fun CraftTheme(
     dark: ColorScheme,
     typography: Typography,
     content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit,
+) = CraftTheme(light, dark, typography, "system", content)
+
+/** [CraftTheme] starting from [initialChoice] (one of [THEME_CHOICES]) instead of the system's. */
+@Composable
+fun CraftTheme(
+    light: ColorScheme,
+    dark: ColorScheme,
+    typography: Typography,
+    initialChoice: String,
+    content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit,
 ) {
-    var choice by remember { mutableStateOf("system") }
+    var choice by remember { mutableStateOf(if (initialChoice in THEME_CHOICES) initialChoice else "system") }
     val isDark = when (choice) {
         "dark" -> true
         "light" -> false

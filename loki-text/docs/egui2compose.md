@@ -114,6 +114,19 @@ How to read it:
 Every run writes `REPORT.md` (counts, an engine-readiness check, a table per panel and per dialog,
 and the list of what was not translated) and `ui-model.json` (everything it read, for other tools).
 
+## Two windows: ribbon or art workspace
+
+The script picks the window the desktop front end has (`--chrome auto|ribbon|workspace`):
+
+* **ribbon** for the document apps, whose tabs include Home (WordCraft, GridCraft, DeckCraft): the
+  kit's `CommandBar`.
+* **workspace** for the others (PhotoCraft, VectorCraft, …): the kit's `CanvasWorkspace`, dark at the
+  start as their desktops are: a text menu bar, an options bar, the tool palette, the canvas under
+  its document tab, a dock of panels, a status bar. What only the app knows (which commands describe
+  the document, the dock's panels, how a tool is picked, the options bar, the status line) is in
+  `AppParts.kt`, written once with defaults that work for any engine and **never written again**.
+  PhotoThere's and VecThere's are the worked examples.
+
 ## What it does not carry over
 
 * **The surface.** The canvas, page or timeline is painted by hand in egui. The generated `App`
