@@ -75,6 +75,10 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("insert.editHeader", "Edit Header", "Insert › Header & Footer › Header", |s, v| edit_hf(s, v, true))
             .params(r#"{"page"?: number (0-based: the header that page shows, created if it has none)}"#)
             .pure(),
+        // A touch or pointer front end enters the header or footer by where a double tap landed, as a double-click does.
+        CommandSpec::new("hf.enterAt", "Edit Header or Footer at", "Header & Footer", enter_hf_at)
+            .params(r#"{"page": n, "x": pt, "y": pt}  (Print Layout only: when the point is in the page's header or footer area, edits that one (creating it if the page has none) with the caret at the point; replies {"entered": "header" | "footer" | null})"#)
+            .pure(),
         CommandSpec::new("insert.editFooter", "Edit Footer", "Insert › Header & Footer › Footer", |s, v| edit_hf(s, v, false))
             .params(r#"{"page"?: number (0-based: the footer that page shows, created if it has none)}"#)
             .pure(),
@@ -151,3 +155,33 @@ pub fn specs() -> Vec<CommandSpec> {
 
 #[cfg(test)]
 mod tests;
+
+/// `hf.enterAt`: edits the header or footer under a page point, if the point is in one.
+fn enter_hf_at(s: &mut Session, v: &Value) -> CmdResult {
+    let page = p::u64(v, "page").ok_or_else(|| CmdError::Params("`page` required".into()))?;
+    let (Some(x), Some(y)) = (p::f32(v, "x"), p::f32(v, "y")) else { return Err(CmdError::Params("`x` and `y` required".into())) };
+    if !x.is_finite() || !y.is_finite() {
+        return Err(CmdError::Params("`x` and `y` must be numbers".into()));
+    }
+    // The other views show no margins, and Reading Mode never edits.
+    if s.view.mode != wordcraft_layout::ViewMode::Print || s.view.read_mode {
+        return Ok(json!({"entered": null}));
+    }
+    let page = usize::try_from(page).unwrap_or(usize::MAX);
+    let zone = {
+        let l = s.layout();
+        l.header_footer_zone(page, y)
+    };
+    let Some((_, header)) = zone else { return Ok(json!({"entered": null})) };
+    s.run(if header { "insert.editHeader" } else { "insert.editFooter" }, &json!({"page": page}))?;
+    let story = s.sel.focus.story;
+    let hit = {
+        let l = s.layout();
+        l.hit(page, x, y, story)
+    };
+    if let Some(pos) = hit {
+        s.sel = Selection::caret(pos);
+    }
+    s.page_hint = page;
+    Ok(json!({"entered": if header { "header" } else { "footer" }}))
+}

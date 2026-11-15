@@ -49,6 +49,9 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(serde_json::to_value(sect(s)).unwrap_or(Value::Null))
         })
         .params(r#"{"section"?: SectionProps} (replaces the whole section, headers and footers included; checked like Size, Margins, Columns, Line Numbers, Footnotes and Page Borders: non-finite numbers and margins that leave no room for text are refused; page sides 7.2–1584 pt, 1–12 columns with 0–300 pt gaps, header/footer/gutter 0–1584 pt, page border width 0.25–6 pt and distance 0–31 pt, note start 1–32767, line numbers start 1–32767, countBy 1–100, distance 0–1584 pt are clamped)"#),
+        CommandSpec::new("layout.pageLayout", "Page Layout", "Layout › Page Setup", page_layout).params(
+            r#"{"width"?: pt, "height"?: pt (the paper; the long side goes across in landscape), "landscape"?: bool, "top"?: pt, "bottom"?: pt, "left"?: pt, "right"?: pt (the margins as they are on the finished page), "gutter"?: pt, "mirror"?: bool, "valign"?: "top|center|justify|bottom"} — Page Setup's OK as one step: omitted values stay; refused whole when the margins leave no room for text"#,
+        ),
         CommandSpec::new("layout.verticalAlign", "Vertical Alignment", "Layout › Page Setup › Layout", |s, v| {
             let va = wordcraft_doc::section::PageVAlign::parse(p::str(v, "value").unwrap_or_default());
             with_sect(s, |x| x.valign = va)
@@ -571,6 +574,36 @@ fn size(s: &mut Session, v: &Value) -> CmdResult {
         return Err(CmdError::Params(MARGINS_DONT_FIT.into()));
     }
     with_sect(s, |x| (x.page_w, x.page_h) = oriented(x))
+}
+
+/// Page Setup's OK as one command (so one undo step): paper, orientation, margins, gutter,
+/// mirroring and vertical alignment together. Unlike `layout.orientation`, the margins given are
+/// the finished page's, not rotated with the paper; omitted values stay as they are.
+fn page_layout(s: &mut Session, v: &Value) -> CmdResult {
+    let c = sect(s);
+    let landscape = p::bool(v, "landscape").unwrap_or(c.landscape);
+    let side = |x: f32| x.clamp(MIN_PAGE_SIDE, MAX_PAGE_SIDE);
+    let (w, h) = (side(p::f32(v, "width").unwrap_or(c.page_w)), side(p::f32(v, "height").unwrap_or(c.page_h)));
+    let page = if landscape { (w.max(h), w.min(h)) } else { (w.min(h), w.max(h)) };
+    let margin = |key: &str, cur: f32| p::f32(v, key).unwrap_or(cur).clamp(0.0, MAX_PAGE_SIDE);
+    let m = (margin("top", c.margin_top), margin("bottom", c.margin_bottom), margin("left", c.margin_left), margin("right", c.margin_right));
+    let gutter = p::f32(v, "gutter").map_or(c.gutter, |g| g.clamp(0.0, MAX_PAGE_SIDE));
+    if !margins_fit(page, m, gutter) {
+        return Err(CmdError::Params(MARGINS_DONT_FIT.into()));
+    }
+    let valign = p::str(v, "valign").map(wordcraft_doc::section::PageVAlign::parse);
+    if let Some(on) = p::bool(v, "mirror") {
+        s.doc.settings.mirror_margins = on;
+    }
+    with_sect(s, |x| {
+        x.landscape = landscape;
+        (x.page_w, x.page_h) = page;
+        (x.margin_top, x.margin_bottom, x.margin_left, x.margin_right) = m;
+        x.gutter = gutter;
+        if let Some(a) = valign {
+            x.valign = a;
+        }
+    })
 }
 
 fn columns(s: &mut Session, v: &Value) -> CmdResult {

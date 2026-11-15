@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Registry;
+use crate::{Registry, Session};
 
 /// The ribbon's tabs in their default order. `File` opens Backstage: it is always first and
 /// isn't part of the customizable list.
@@ -430,6 +430,59 @@ impl<'de> Deserialize<'de> for RibbonLayout {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         Ok(RibbonLayout::from_value(&Value::deserialize(d)?))
     }
+}
+
+/// Whether the selection is a picture (so Picture Format is shown).
+pub fn has_picture_selected(s: &Session) -> bool {
+    matches!(crate::cmd::objects::selected(s), Some((_, wordcraft_doc::para::InlineObject::Image { .. })))
+}
+
+/// Whether the selection is a shape, text box or Drawing Canvas (so Shape Format is shown).
+pub fn has_shape_selected(s: &Session) -> bool {
+    match crate::cmd::objects::selected(s) {
+        Some((_, o)) => matches!(o, wordcraft_doc::para::InlineObject::Shape { .. }) || o.is_canvas(),
+        None => false,
+    }
+}
+
+/// Whether the selection is a SmartArt graphic WordCraft can edit (so SmartArt Design is shown).
+pub fn has_smart_art_selected(s: &Session) -> bool {
+    crate::cmd::smart_art::selected_smart_art(s).is_some()
+}
+
+/// Whether the selection is a chart WordCraft can edit (so Chart Design is shown).
+pub fn has_chart_selected(s: &Session) -> bool {
+    crate::cmd::chart::selected_chart(s).is_some()
+}
+
+/// The contextual tabs the current selection brings up, in ribbon order (pure).
+pub fn contextual_tabs(s: &Session) -> Vec<&'static str> {
+    let mut tabs = Vec::new();
+    if s.sel.focus.path.cell().is_some() {
+        tabs.push("Table Design");
+        tabs.push("Table Layout");
+    }
+    if has_picture_selected(s) {
+        tabs.push("Picture Format");
+    }
+    if has_shape_selected(s) {
+        tabs.push("Shape Format");
+    }
+    if has_smart_art_selected(s) {
+        tabs.push("SmartArt Design");
+    }
+    if has_chart_selected(s) {
+        tabs.push("Chart Design");
+    }
+    // Editing an equation.
+    if s.math.is_some() {
+        tabs.push("Equation");
+    }
+    // Outline view (drawn first, next to File, as Word does).
+    if s.view.mode == wordcraft_layout::ViewMode::Outline {
+        tabs.push("Outlining");
+    }
+    tabs
 }
 
 #[cfg(test)]
