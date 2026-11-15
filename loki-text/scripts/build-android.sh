@@ -53,6 +53,16 @@ else
     cargo ndk $targets -o "$OUT" build --release -p loki-ffi
 fi
 
+# Gradle strips native libraries only with the NDK version it pins, so strip them here: the engine's
+# symbols add a third to the APK and nothing on a device reads them.
+STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+[ -x "$STRIP" ] || STRIP=$(command -v llvm-strip || true)
+if [ -n "$STRIP" ]; then
+    for abi in $ABIS; do "$STRIP" --strip-unneeded "$OUT/$abi/libloki_ffi.so"; done
+else
+    echo "No llvm-strip found: the APK carries the library's symbols" >&2
+fi
+
 if [ -x ./gradlew ]; then GRADLE=./gradlew; else GRADLE=gradle; fi
 VARIANT="${VARIANT:-Debug}"
 $GRADLE ":app:assemble$VARIANT"
