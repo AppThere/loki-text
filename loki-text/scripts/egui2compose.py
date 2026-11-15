@@ -1119,6 +1119,121 @@ fun {fn}(onRun: (command: String, params: JsonObject) -> Unit, onDismiss: () -> 
 '''
 
 
+# Lucide icons (com.composables:icons-lucide-cmp, ISC; the kit's version) for the commands the Craft
+# engines share, so every generated app shows the same glyph for the same action as Loki Text does.
+# Every name here exists in that package (checked against it; the Kotlin build fails otherwise).
+# A command with an icon and nothing to ask is a button in the command bar; the rest stay named
+# menu entries, so a wrong guess costs a glyph, never a command.
+ICON_EXACT = {
+    "file.new": "FilePlus", "file.export": "Download", "file.properties": "Info", "file.options": "Settings",
+    "select.all": "SquareDashedMousePointer", "edit.selectAll": "SquareDashedMousePointer",
+    "slide.new": "SquarePlus", "layer.new": "SquarePlus", "layer.new.layer": "SquarePlus", "artboard.new": "Frame",
+    "shape.insert": "Shapes", "insert.shape": "Shapes", "insert.icon": "Smile", "insert.icons": "Smile",
+    "insert.video": "Video", "insert.audio": "Music", "insert.dateTime": "Calendar", "insert.slideNumber": "Hash",
+    "image.adjustments.invert": "Contrast", "image.adjustments.brightnessContrast": "SunMedium",
+}
+ICON_SUFFIX = {
+    "undo": "Undo2", "redo": "Redo2", "cut": "Scissors", "copy": "Copy", "paste": "ClipboardPaste",
+    "open": "FolderOpen", "save": "Save", "saveAs": "SaveAll", "print": "Printer",
+    "find": "Search", "findReplace": "Replace", "replace": "Replace",
+    "bold": "Bold", "italic": "Italic", "underline": "Underline", "strikethrough": "Strikethrough",
+    "superscript": "Superscript", "subscript": "Subscript",
+    "alignLeft": "TextAlignStart", "alignCenter": "TextAlignCenter", "alignRight": "TextAlignEnd", "justify": "TextAlignJustify",
+    "increaseIndent": "ListIndentIncrease", "indent": "ListIndentIncrease", "decreaseIndent": "ListIndentDecrease", "outdent": "ListIndentDecrease",
+    "bullets": "List", "numbering": "ListOrdered",
+    "increaseFontSize": "AArrowUp", "decreaseFontSize": "AArrowDown", "grow": "AArrowUp", "shrink": "AArrowDown",
+    "bringToFront": "BringToFront", "sendToBack": "SendToBack", "bringForward": "ArrowUpFromLine", "sendBackward": "ArrowDownToLine",
+    "group": "Group", "groupLayers": "Group", "ungroup": "Ungroup",
+    "flipHorizontal": "FlipHorizontal2", "flipVertical": "FlipVertical2", "flipCanvasHorizontal": "FlipHorizontal2", "flipCanvasVertical": "FlipVertical2",
+    "rotateLeft": "RotateCcw", "rotateRight": "RotateCw", "90ccw": "RotateCcw", "90cw": "RotateCw",
+    "duplicate": "CopyPlus", "delete": "Trash2", "lock": "Lock", "unlockAll": "LockOpen", "hide": "EyeOff", "showAll": "Eye",
+    "sortAscending": "ArrowDownAZ", "sortDescending": "ArrowDownZA", "filter": "Funnel", "clearFilter": "FunnelX",
+    "autoSum": "Sigma", "insertFunction": "SquareFunction", "wrapText": "TextWrap", "percent": "Percent",
+    "increaseDecimal": "DecimalsArrowRight", "decreaseDecimal": "DecimalsArrowLeft",
+    "mergeCenter": "TableCellsMerge", "mergeCells": "TableCellsMerge", "unmergeCells": "TableCellsSplit",
+    "insertRows": "BetweenHorizontalStart", "insertColumns": "BetweenVerticalStart",
+    "zoomIn": "ZoomIn", "zoomOut": "ZoomOut", "freezePanes": "Snowflake", "crop": "Crop",
+    "formatPainter": "Paintbrush", "painter": "Paintbrush", "fill": "PaintBucket",
+    "newComment": "MessageSquarePlus", "newNote": "StickyNote",
+    "picture": "Image", "chart": "ChartColumn", "table": "Table", "textBox": "TextCursorInput", "link": "Link", "hyperlink": "Link",
+    "mergeDown": "Merge", "flattenImage": "Layers",
+}
+# A tool's glyph by the first word of its name or title found here (order matters: "Magic Wand"
+# before "magic", "Polygonal Lasso" by "lasso").
+TOOL_ICONS = [
+    ("artboard", "Frame"), ("marquee", "SquareDashed"), ("lasso", "Lasso"), ("wand", "Wand"), ("crop", "Crop"),
+    ("eyedropper", "Pipette"), ("sampler", "Pipette"), ("move", "Move"), ("select", "MousePointer2"),
+    ("heal", "Bandage"), ("patch", "Bandage"), ("stamp", "Stamp"), ("clone", "Stamp"), ("brush", "Brush"), ("pencil", "Pencil"),
+    ("eraser", "Eraser"), ("gradient", "Blend"), ("bucket", "PaintBucket"), ("blur", "Droplet"), ("sharpen", "Triangle"),
+    ("dodge", "Sun"), ("burn", "Flame"), ("sponge", "Droplets"), ("text", "Type"), ("type", "Type"), ("pen", "PenTool"),
+    ("path", "Spline"), ("rect", "Square"), ("ellipse", "Circle"), ("shape", "Shapes"), ("hand", "Hand"), ("zoom", "ZoomIn"),
+    ("ink", "PenLine"), ("slice", "Slice"), ("ruler", "Ruler"), ("note", "StickyNote"), ("count", "Hash"), ("rotate", "RotateCw"),
+]
+
+
+def icon_for(cid: str):
+    """The Lucide name for a command id, or None."""
+    if cid in ICON_EXACT:
+        return ICON_EXACT[cid]
+    return ICON_SUFFIX.get(cid.rsplit(".", 1)[-1])
+
+
+def tool_icon(name: str, title: str):
+    words = (name + " " + title).lower()
+    return next((icon for key, icon in TOOL_ICONS if key in words), None)
+
+
+def gen_icons(pkg: str, model: dict) -> str:
+    ids = [c["id"] for c in model["commands"] if not c["id"].startswith(FOREIGN_PREFIX)]
+    cmd = [(i, icon_for(i)) for i in ids if icon_for(i)]
+    tools = [(t["name"], tool_icon(t["name"], t["title"])) for t in model["tools"] if tool_icon(t["name"], t["title"])]
+    names = sorted({n for _, n in cmd} | {n for _, n in tools})
+    imports = "".join(f"import com.composables.icons.lucide.{n}\n" for n in names)
+    crow = "".join(f"    {kt(i)} -> Lucide.{n}\n" for i, n in cmd)
+    trow = "".join(f"    {kt(i)} -> Lucide.{n}\n" for i, n in tools)
+    has = lambda i: any(c == i for c, _ in cmd)
+    undo = next((i for i in ("edit.undo", "history.undo") if has(i)), "")
+    redo = next((i for i in ("edit.redo", "history.redo") if has(i)), "")
+    return f"""package {pkg}
+
+// Generated by egui2compose: Lucide icons for the commands and tools this engine shares with the
+// other Craft apps (the same glyph as in Loki Text for the same action). Edit freely; the coverage
+// test checks every id here is still one of the engine's.
+
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.composables.icons.lucide.Lucide
+{imports}
+/** A command's icon, or null: a command without one is a named menu entry. */
+fun commandIcon(id: String): ImageVector? = when (id) {{
+{crow}    else -> null
+}}
+
+/** A tool's icon by its id in [TOOLS], or null. */
+fun toolIcon(id: String): ImageVector? = when (id) {{
+{trow}    else -> null
+}}
+
+/** The ids above that are engine commands, for the coverage test. */
+val ICON_COMMANDS: Set<String> = setOf({kt_list([i for i, _ in cmd])})
+
+/** Undo and Redo, shown beside the menu at every width when the engine has them. */
+const val UNDO_COMMAND = {kt(undo)}
+const val REDO_COMMAND = {kt(redo)}
+
+@Composable
+fun CommandIcon(id: String, size: Dp = 18.dp) {{
+    val icon = commandIcon(id) ?: return
+    Icon(icon, contentDescription = null, modifier = Modifier.size(size))
+}}
+"""
+
+
 def gen_dialog_index(pkg: str, dialogs: list[dict]) -> str:
     rows = "".join(f"    TranslatedDialog({kt(d['title'])}, {kt(d['file'])}) {{ onRun, onDismiss -> {ident(d['name'], upper=True)}Dialog(onRun, onDismiss) }},\n" for d in dialogs)
     return f'''package {pkg}.dialogs
@@ -1295,7 +1410,7 @@ fun App(
     }
 
     if (showCommands) {
-        AllCommandsDialog(catalog, PROFILE, null, disabled, on, icon = {}, onRun = ::run, onOptions = { id -> form = byId[id] }, onDismiss = { showCommands = false })
+        AllCommandsDialog(catalog, PROFILE, null, disabled, on, icon = { CommandIcon(it) }, onRun = ::run, onOptions = { id -> form = byId[id] }, onDismiss = { showCommands = false })
     }
     form?.let { c ->
         CommandFormDialog(c, pickFile = pickFile, writesFile = { id -> "export" in id.lowercase() || "save" in id.lowercase() }, run = { p -> execute(c, p, show = true) }, onDismiss = { form = null })
@@ -1310,8 +1425,16 @@ fun App(
         Column(Modifier.fillMaxSize()) {
             CommandBar(
                 ribbon, disabled, on,
+                hasIcon = { commandIcon(it) != null },
+                icon = { CommandIcon(it) },
                 leading = {
                     AppMenu(themeChoice, setTheme, onDialog = { dialog = it })
+                    // Undo and Redo at every width, as in Loki Text.
+                    for (id in listOf(UNDO_COMMAND, REDO_COMMAND)) byId[id]?.let { c ->
+                        IconButton(onClick = { run(id) }, enabled = id !in disabled, modifier = Modifier.size(36.dp)) {
+                            commandIcon(id)?.let { Icon(it, contentDescription = c.label, modifier = Modifier.size(18.dp)) }
+                        }
+                    }
                     IconButton(onClick = { showCommands = true }, modifier = Modifier.size(36.dp)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
                 },
                 onRun = ::run,
@@ -1370,7 +1493,11 @@ private fun AppMenu(themeChoice: String, setTheme: (String) -> Unit, onDialog: (
 private fun ToolStrip(current: String, horizontal: Boolean, onPick: (Tool) -> Unit) {
     if (TOOLS.isEmpty()) return
     val content: @Composable () -> Unit = {
-        for (t in TOOLS) FilterChip(t.id == current, { onPick(t) }, label = { Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.padding(horizontal = 2.dp))
+        for (t in TOOLS) FilterChip(
+            t.id == current, { onPick(t) }, label = { Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingIcon = toolIcon(t.id)?.let { icon -> { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) } },
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
     }
     Surface(tonalElevation = 1.dp) {
         if (horizontal) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) { content() }
@@ -1452,7 +1579,8 @@ class CoverageTest {
 
     @Test
     fun everyCommandHasAWayToIt() {
-        val named = PANELS.map { it.source }.filter { it.isNotEmpty() } + TOOLS.map { it.command }.filter { it.isNotEmpty() }
+        val named = PANELS.map { it.source }.filter { it.isNotEmpty() } + TOOLS.map { it.command }.filter { it.isNotEmpty() } +
+            ICON_COMMANDS + listOf(UNDO_COMMAND, REDO_COMMAND).filter { it.isNotEmpty() }
         // Lower maxGaps as gestures are built; it may never rise.
         val problems = coverageProblems(raw, PROFILE, parseRibbon(raw, PROFILE), { _, _ -> false }, named, emptySet(), maxGaps = __GAPS__)
             // Until an engine params doc is fixed, list here the ids whose form has no fields.
@@ -1604,6 +1732,7 @@ def gen_report(model: dict, notes: list[str]) -> str:
     L.append("* `Profile.kt`: the tabs in the desktop's order, and first guesses at the pointer, state-reader and typing sets.")
     L.append("* `Theme.kt`: light and dark schemes from the desktop theme's accent and backgrounds.")
     L.append("* `Workspace.kt`: the panels and tools the desktop declares.")
+    L.append(f"* `Icons.kt`: Lucide icons for {sum(1 for c in model['commands'] if not c['id'].startswith(FOREIGN_PREFIX) and icon_for(c['id']))} commands (as buttons in the command bar when they ask for nothing) and {sum(1 for t in model['tools'] if tool_icon(t['name'], t['title']))} tools, by the ids the Craft engines share; the rest are named menu entries.")
     L.append(f"* `dialogs/`: {len(dialogs)} dialogs, each with the desktop dialog's controls in its order.")
     L.append("* `App.kt`: a responsive shell on Loki Kit: command bar, all-commands list, generated forms, results, panels, tools, themes.")
     L.append("* `CoverageTest.kt`: the test that every command has a way to it, and off-screen screenshots.\n")
@@ -1756,6 +1885,7 @@ def emit(model: dict, args, notes: list[str]):
     write(os.path.join(src, "Profile.kt"), gen_profile(pkg, model))
     write(os.path.join(src, "Theme.kt"), gen_theme(pkg, model))
     write(os.path.join(src, "Workspace.kt"), gen_workspace(pkg, model))
+    write(os.path.join(src, "Icons.kt"), gen_icons(pkg, model))
     write(os.path.join(src, "App.kt"), APP_KT.replace("__PKG__", pkg).replace("__NAME__", kt(model["name"])))
     for d in model["dialogs"]:
         write(os.path.join(src, "dialogs", ident(d["name"], upper=True) + "Dialog.kt"), gen_dialog(pkg, d, by_id))
@@ -1773,7 +1903,7 @@ def emit(model: dict, args, notes: list[str]):
     props = os.path.join(kit_build, "gradle.properties")
     if os.path.isfile(props):
         shutil.copyfile(props, os.path.join(out, "gradle.properties"))
-    write(os.path.join(out, ".gitignore"), "build/\n.gradle/\n.kotlin/\nlocal.properties\ntarget/\n")
+    write(os.path.join(out, ".gitignore"), "build/\n.gradle/\n.kotlin/\nlocal.properties\ntarget/\n# Everything the script read; rerunning it writes this again.\nui-model.json\n")
     write(os.path.join(out, "ui-model.json"), json.dumps(model, ensure_ascii=False, indent=1))
     write(os.path.join(out, "REPORT.md"), gen_report(model, notes))
 

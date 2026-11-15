@@ -107,6 +107,7 @@ How to read it:
 | Panels and tools | `Workspace.kt`, shown as chips and a tool strip | `Panel`/`PanelKind`/`Tool` enums and the `Variant => "Title"` arms beside them; a source command when one matches by name (`layers.list`) |
 | Dialogs | one composable each in `dialogs/` | functions under `dialogs/` (and prefs, options) that call input widgets |
 | A dialog's widgets | the same controls in the same order | `checkbox`, `Slider::new`, `DragValue::new`, `ComboBox` with its `selectable_value`s, `radio_value`, `text_edit_*`, `button`; the label from the call or the `label(…)` before it |
+| Icons | `Icons.kt`: Lucide icons (the kit's package) for commands and tools; an icon and no value to ask makes a command a button in the bar, with its name in a tooltip; Undo and Redo beside the menu | the last part of the command id (`*.bold`, `*.bringToFront`), a few whole ids, and the tool's name |
 | The theme | `Theme.kt`: a light and a dark scheme | `name: Color32::from_rgb(…)` in theme files: the accent, and the lightest and darkest backgrounds |
 | Front-end-only methods | a list in `REPORT.md` | `ui.*` / `window.*` names the desktop's control channel answers |
 
@@ -120,8 +121,11 @@ and the list of what was not translated) and `ui-model.json` (everything it read
 * **Behaviour.** Starting values, enabling rules, live previews, validation, drag and drop, docking
   layouts, context menus, keyboard handling.
 * **Hand-drawn panels and custom widgets.** A panel with no source command is a titled placeholder.
-* **Icons and translations.** Commands without an icon are named menu entries, so nothing is lost,
-  but the bar is text until icons are mapped.
+* **Translations.** The interface is English, as the engine's labels are.
+* **Icons, beyond the shared ones.** `Icons.kt` maps the commands the Craft engines share (Undo,
+  Bold, Bring to Front, Group, Sort…) and the tools to Lucide icons, the same glyph Loki Text uses
+  for the same action (`ICON_EXACT`, `ICON_SUFFIX`, `TOOL_ICONS` in the script). An app's own
+  commands are named menu entries until someone adds them there.
 * **Platform code.** The generated project is JVM-only and has no FFI crate.
 
 ### Dialogs: a start, not a result
