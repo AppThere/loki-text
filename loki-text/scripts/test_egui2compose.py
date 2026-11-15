@@ -167,6 +167,27 @@ class Icons(unittest.TestCase):
         self.assertIn('REDO_COMMAND = ""', kt)
 
 
+class Chrome(unittest.TestCase):
+    def test_ribbon_apps_keep_the_ribbon_and_art_apps_get_the_workspace(self):
+        self.assertEqual(e.chrome_of({"tabs": ["File", "Home", "Insert"]}, "auto"), "ribbon")
+        self.assertEqual(e.chrome_of({"tabs": ["File", "Edit", "Image", "Layer"]}, "auto"), "workspace")
+        self.assertEqual(e.chrome_of({"tabs": ["File", "Edit"]}, "ribbon"), "ribbon")
+
+    def test_the_app_parts_file_is_written_once(self):
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "1", "--chrome", "workspace", "--package", "app.loki.x"]), 0)
+            parts = os.path.join(out, "app/src/commonMain/kotlin/app/loki/x/AppParts.kt")
+            with open(parts, "a", encoding="utf-8") as f:
+                f.write("// mine\n")
+            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "1", "--chrome", "workspace", "--package", "app.loki.x"]), 0)
+            with open(parts, encoding="utf-8") as f:
+                self.assertTrue(f.read().endswith("// mine\n"))
+            with open(os.path.join(out, "app/src/commonMain/kotlin/app/loki/x/App.kt"), encoding="utf-8") as f:
+                app = f.read()
+            self.assertIn("CanvasWorkspace(", app)
+            self.assertIn('START_THEME = "dark"', app)
+
+
 class AgainstWordCraft(unittest.TestCase):
     """The source reader against the engine's own listing. These floors may rise, not fall."""
 
