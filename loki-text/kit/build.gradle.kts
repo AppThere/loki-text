@@ -35,6 +35,10 @@ kotlin {
             // The off-screen screenshot runner draws with the desktop's Skia.
             implementation(compose.desktop.currentOs)
         }
+        androidMain.dependencies {
+            // Ink drawn straight to the display's front buffer while a pen moves (InkLayer.android.kt).
+            implementation(libs.graphics.core)
+        }
     }
 }
 
