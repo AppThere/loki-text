@@ -21,13 +21,14 @@ import java.io.File
  * * `wait[=ms]` lets effects and the engine catch up (default 1500);
  * * `shot=name.png` saves what is on screen;
  * * `click=x,y` and `drag=x1,y1,x2,y2` (dp) send mouse input (the primary button);
+ * * `key=Cmd+Z` presses a key, written as the engine writes a shortcut;
  * * `pen=x1,y1,x2,y2[,eraser]` draws with a pen from one point to the other, its pressure rising and
  *   falling as a real stroke's does (`eraser`: with the eraser end); `finger=x1,y1,x2,y2` drags one finger.
  *
- * It cannot type: open a prepared document instead. It draws the common code with the desktop's
+ * It cannot type text: open a prepared document instead. It draws the common code with the desktop's
  * Skia, so it proves layout at a size, not the Android or iOS platform edge.
  */
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, androidx.compose.ui.InternalComposeUiApi::class)
 fun runShotScript(dir: File, script: String, content: @Composable () -> Unit) {
     dir.mkdirs()
     // LOKI_SHOT_TOUCH=1 draws the phone and tablet layout (the touch top bar and menu sheet) on the desktop.
@@ -57,6 +58,14 @@ fun runShotScript(dir: File, script: String, content: @Composable () -> Unit) {
                 "shot" -> scene?.let { s ->
                     val png = s.render(System.nanoTime()).encodeToData(EncodedImageFormat.PNG) ?: error("no image for $arg")
                     File(dir, arg).writeBytes(png.bytes)
+                }
+                // A key press and release, as an engine shortcut names it (`key=Cmd+Z`, `key=B`).
+                "key" -> scene?.let { s ->
+                    val c = parseChord(arg) ?: error("unknown key: $arg")
+                    for (type in listOf(androidx.compose.ui.input.key.KeyEventType.KeyDown, androidx.compose.ui.input.key.KeyEventType.KeyUp)) {
+                        s.sendKeyEvent(androidx.compose.ui.input.key.KeyEvent(c.key, type, isCtrlPressed = c.mod, isAltPressed = c.alt, isShiftPressed = c.shift))
+                    }
+                    pump(400)
                 }
                 "click" -> scene?.let { s ->
                     val (x, y) = arg.split(',').map { it.trim().toFloat() * density }

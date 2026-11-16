@@ -1,6 +1,18 @@
 package app.loki.kit
 
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -48,11 +60,12 @@ fun parseChord(text: String): Chord? {
     // An empty part (`Mod++`) names no key this app maps.
     if (parts.isEmpty() || parts.any { it.isEmpty() }) return null
     val mods = parts.dropLast(1)
-    if (mods.any { it !in setOf("Mod", "Ctrl", "Alt", "Shift") }) return null
+    // The art engines write the same modifier as `Cmd`.
+    if (mods.any { it !in setOf("Mod", "Cmd", "Ctrl", "Alt", "Shift") }) return null
     // `Mod+Ctrl+F` (a Mac's full screen) would read as `Mod+F`: leave it to the platform.
-    if ("Mod" in mods && "Ctrl" in mods) return null
+    if (("Mod" in mods || "Cmd" in mods) && "Ctrl" in mods) return null
     val key = KEY_NAMES[parts.last()] ?: KEY_NAMES[parts.last().uppercase()] ?: return null
-    return Chord(key, mod = "Mod" in mods || "Ctrl" in mods, alt = "Alt" in mods, shift = "Shift" in mods)
+    return Chord(key, mod = "Mod" in mods || "Cmd" in mods || "Ctrl" in mods, alt = "Alt" in mods, shift = "Shift" in mods)
 }
 
 /**
@@ -97,3 +110,18 @@ private val ALT_KEYS = setOf(
     Key.PageUp, Key.PageDown, Key.Tab, Key.Enter, Key.Backspace, Key.Delete, Key.Escape,
 )
 
+
+/**
+ * Keyboard shortcuts for a whole window: a key press nothing inside used (a text field keeps its
+ * own typing, copy and paste) runs what [shortcuts] names for it through [onRun]. The window's root
+ * takes the keyboard focus when nothing inside has it, again after each change of [refocus] (a
+ * number that moves when a command ran), so shortcuts keep working after a field or a menu closes.
+ */
+@Composable
+fun Modifier.shortcutKeys(shortcuts: Map<Chord, String>, refocus: Any?, onRun: (String) -> Unit): Modifier {
+    val focus = remember { FocusRequester() }
+    var inside by remember { mutableStateOf(false) }
+    LaunchedEffect(refocus) { if (!inside) runCatching { focus.requestFocus() } }
+    return onFocusChanged { inside = it.hasFocus }.focusRequester(focus).focusable()
+        .onKeyEvent { e -> chordOf(e)?.let { shortcuts[it] }?.let { onRun(it); true } ?: false }
+}
