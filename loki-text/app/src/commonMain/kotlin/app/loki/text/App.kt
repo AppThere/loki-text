@@ -88,6 +88,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.KeyEventType
@@ -307,6 +309,7 @@ fun App(
     // List dialogs: the multilevel definition (levels as read), and the three small ones.
     var listLevels by remember { mutableStateOf<List<LevelForm>?>(null) }
     var listDialog by remember { mutableStateOf<String?>(null) }
+    var pasteSpecial by remember { mutableStateOf<PasteSpecialRequest?>(null) }
     var stylesAlphabetical by remember { mutableStateOf(false) }
     var styleEntries by remember { mutableStateOf<List<StyleEntry>>(emptyList()) }
     var modifyStyle by remember { mutableStateOf<StyleEntry?>(null) }
@@ -451,7 +454,7 @@ fun App(
             return
         }
         var p = params
-        if (command == "edit.paste") {
+        if (command == "edit.paste" || command == "edit.pasteSpecial" && params["as"] == null) {
             val text = withContext(Dispatchers.Default) { clipboardText() }
             val ours = lastCopied
             if (text != null && ours != null && sameClipboardText(text, ours)) {
@@ -461,6 +464,13 @@ fun App(
                 if (ours != null) println("paste: clipboard text differs from last copy: [$text] vs [$ours]")
                 p = buildJsonObject { put("text", text) }
             }
+        }
+        if (command == "edit.pasteSpecial" && params["as"] == null) {
+            // The engine lists what the clipboard can be pasted as; this UI asks which.
+            val listed = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute(command, p) }.getOrNull() } }
+            val formats = parsePasteFormats(listed)
+            if (formats.isEmpty()) status = "The clipboard is empty" else pasteSpecial = PasteSpecialRequest(formats, p)
+            return
         }
         perform {
             val r = execute(command, p)
@@ -634,6 +644,9 @@ fun App(
             onApply = { p -> listLevels = null; scope.launch { runCommand("list.define", p) } },
             onDismiss = { listLevels = null },
         )
+    }
+    pasteSpecial?.let { req ->
+        PasteSpecialDialog(req, onPaste = { p -> pasteSpecial = null; scope.launch { runCommand("edit.pasteSpecial", p) } }, onDismiss = { pasteSpecial = null })
     }
     when (listDialog) {
         "para.defineBullet" -> DefineBulletDialog({ p -> listDialog = null; scope.launch { runCommand("para.defineBullet", p) } }, { listDialog = null })
@@ -824,6 +837,12 @@ fun App(
         }
         // Where each page sits in the scrolled content (top, pixels per point), to find the caret on screen.
         val pageGeo = remember { mutableMapOf<Int, Pair<Float, Float>>() }
+        // The ruler (View › Ruler) sits over the top of the pages in Print Layout. It follows the
+        // caret's page: where that page's left edge is in the window, and its scale.
+        val showRuler = "view.ruler" in commandState.on && !flat
+        val rulerPx = if (showRuler) with(density) { RULER_HEIGHT.toPx() } else 0f
+        val pageLeft = remember { mutableStateMapOf<Int, Pair<Float, Float>>() }
+        var rulerLeft by remember { mutableStateOf(0f) }
         val vScroll = rememberScrollState()
         // Keep the caret in view as it moves, and when the keyboard shrinks the viewport.
         val viewportPx = constraints.maxHeight
@@ -835,7 +854,7 @@ fun App(
             val caretBottom = caretTop + c.h * pxPerPt
             val target = when {
                 caretBottom + margin > vScroll.value + viewportPx -> (caretBottom + margin - viewportPx).toInt()
-                caretTop - margin < vScroll.value -> (caretTop - margin).toInt()
+                caretTop - margin - rulerPx < vScroll.value -> (caretTop - margin - rulerPx).toInt()
                 else -> return@LaunchedEffect
             }
             vScroll.animateScrollTo(target.coerceAtLeast(0))
@@ -855,7 +874,7 @@ fun App(
                     runKey(k)
                     true
                 }
-                .padding(16.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 16.dp + if (showRuler) RULER_HEIGHT else 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The page is a bitmap, so this hidden input is what the on-screen keyboard and IME talk to.
@@ -867,7 +886,11 @@ fun App(
                 // Kept per page index, not per bitmap, so a new image doesn't reset it for a frame.
                 var shown by remember(i) { mutableStateOf(IntSize.Zero) }
                 val pxPerPt = if (shown.width > 0) shown.width * scale / bitmap.width else scale
-                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt; pageOrigin[i] = it.positionInRoot() }) {
+                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned {
+                    pageGeo[i] = it.positionInParent().y to pxPerPt
+                    pageOrigin[i] = it.positionInRoot()
+                    pageLeft[i] = it.positionInWindow().x to pxPerPt
+                }) {
                 Image(
                     bitmap,
                     contentDescription = "Page ${i + 1}",
@@ -1024,6 +1047,17 @@ fun App(
             }
             if (at != null) {
                 MiniToolbar(miniEnv, Modifier.align(Alignment.TopStart).offset { IntOffset(at.x.roundToInt(), at.y.roundToInt()) }.onSizeChanged { barSize = it })
+            }
+        }
+        if (showRuler) {
+            val page = selection.caret?.page ?: 0
+            pageLeft[page]?.let { (x, pxPerPt) ->
+                HorizontalRuler(
+                    commandState.layout, x - rulerLeft, pxPerPt,
+                    onIndents = { p -> scope.launch { runCommand("para.indents", p) } },
+                    modifier = Modifier.align(Alignment.TopStart).background(MaterialTheme.colorScheme.surface)
+                        .onGloballyPositioned { rulerLeft = it.positionInWindow().x },
+                )
             }
         }
         }

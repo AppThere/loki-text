@@ -540,3 +540,79 @@ fn a_header_or_footer_is_entered_by_point_and_left_again() {
     assert!(run("hf.enterAt", r#"{"page":99999999999,"x":1,"y":1}"#).get("error").is_none());
     unsafe { loki_session_free(s) };
 }
+
+/// Page 0 rendered at 1 px per point, as raw RGBA.
+fn page_pixels(s: *mut LokiSession) -> Vec<u8> {
+    let (mut w, mut h, mut n) = (0u32, 0u32, 0u32);
+    let buf = unsafe { loki_render_page(s, 0, 1.0, &mut w, &mut h, &mut n) };
+    assert!(!buf.is_null());
+    let len = (w * h * 4) as usize;
+    let out = unsafe { std::slice::from_raw_parts(buf, len) }.to_vec();
+    unsafe { loki_buffer_free(buf, len) };
+    out
+}
+
+#[test]
+fn show_hide_draws_formatting_marks_on_the_page() {
+    // The page used to render with default options, so Show/Hide ¶ changed nothing on screen.
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Two words"}}"#));
+    let plain = page_pixels(s);
+    let r = call(s, "engine.execute", Some(r#"{"command":"view.marks","params":{}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    assert_ne!(page_pixels(s), plain, "a ¶ and a space dot should be drawn");
+    call(s, "engine.execute", Some(r#"{"command":"view.marks","params":{}}"#));
+    assert_eq!(page_pixels(s), plain);
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn dark_mode_darkens_the_page() {
+    let s = loki_session_new();
+    let light = page_pixels(s);
+    call(s, "engine.execute", Some(r#"{"command":"view.darkMode","params":{}}"#));
+    let dark = page_pixels(s);
+    // The top-left pixel is paper: white before, dark after.
+    assert_eq!(&light[..3], &[255, 255, 255]);
+    assert!(dark[0] < 128, "{:?}", &dark[..4]);
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn layout_state_has_what_the_ruler_needs() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"para.indents","params":{"left":36,"firstLine":-18}}"#));
+    let lay = call(s, "loki.commandState", None)["result"]["layout"].clone();
+    assert!(lay["pageWidth"].as_f64().is_some_and(|w| w > 500.0), "{lay}");
+    assert!(lay["marginLeft"].as_f64().is_some_and(|m| m > 0.0), "{lay}");
+    assert!(lay["marginRight"].as_f64().is_some_and(|m| m > 0.0), "{lay}");
+    assert_eq!(lay["indentLeft"], 36.0, "{lay}");
+    assert_eq!(lay["firstLine"], -18.0, "{lay}");
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn paste_special_lists_formats_then_pastes_the_chosen_one() {
+    // Loki Text asks for the formats with no `as`, shows them, then pastes with the one chosen.
+    let s = loki_session_new();
+    for req in [
+        r#"{"command":"text.insert","params":{"text":"Bold words"}}"#,
+        r#"{"command":"select.all","params":{}}"#,
+        r#"{"command":"format.bold","params":{}}"#,
+        r#"{"command":"edit.copy","params":{}}"#,
+        r#"{"command":"caret.docEnd","params":{}}"#,
+    ] {
+        call(s, "engine.execute", Some(req));
+    }
+    let listed = call(s, "engine.execute", Some(r#"{"command":"edit.pasteSpecial","params":{}}"#))["result"].clone();
+    let ids: Vec<&str> = listed["formats"].as_array().into_iter().flatten().filter_map(|f| f["id"].as_str()).collect();
+    assert!(ids.contains(&"formatted") && ids.contains(&"text"), "{listed}");
+    let r = call(s, "engine.execute", Some(r#"{"command":"edit.pasteSpecial","params":{"as":"text"}}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    let text = call(s, "engine.execute", Some(r#"{"command":"select.all","params":{}}"#));
+    assert!(text.get("error").is_none());
+    let words = call(s, "engine.execute", Some(r#"{"command":"review.wordCount","params":{}}"#))["result"]["words"].clone();
+    // "Bold wordsBold words": pasted straight after the copied text.
+    assert_eq!(words, 3, "the copy was pasted once more");
+    unsafe { loki_session_free(s) };
+}
