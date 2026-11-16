@@ -178,8 +178,14 @@ fun ArtCanvas(
     onInput: (CanvasInput) -> Unit,
     modifier: Modifier = Modifier,
     panTool: Boolean = false,
+    /**
+     * Whether a finger pressed at this document point belongs to the tool even after a pen has been
+     * seen (the handles of a selection's box): such a finger drags the handle instead of panning.
+     */
+    claimsTouch: (x: Double, y: Double) -> Boolean = { _, _ -> false },
     overlay: DrawScope.(CanvasView) -> Unit = {},
 ) {
+    val claims by rememberUpdatedState(claimsTouch)
     val input by rememberUpdatedState(onInput)
     val handPans by rememberUpdatedState(panTool)
     // Palm rejection: once a pen has touched this canvas, fingers navigate and never draw.
@@ -200,7 +206,8 @@ fun ArtCanvas(
                     while (true) {
                         val e = awaitPointerEvent()
                         val km = e.keyboardModifiers
-                        val mods = CanvasMods(km.isShiftPressed, km.isAltPressed, km.isCtrlPressed || km.isMetaPressed)
+                        // A touch screen has no Shift or Alt: the options bar's chips stand in for them.
+                        val mods = CanvasMods(km.isShiftPressed || TouchModifiers.shift, km.isAltPressed || TouchModifiers.alt, km.isCtrlPressed || km.isMetaPressed)
                         fun point(c: PointerInputChange, pos: Offset = c.position, pose: PenPose? = penPose(e, c)): CanvasPoint {
                             val (x, y) = view.toDoc(pos)
                             val pen = c.type == PointerType.Stylus || c.type == PointerType.Eraser
@@ -230,7 +237,7 @@ fun ArtCanvas(
                         }
                         // Pan: the Hand tool, a middle-button drag, or one finger once a pen has been seen.
                         val panner = e.changes.firstOrNull { c ->
-                            c.pressed && (handPans || e.buttons.isTertiaryPressed || (c.type == PointerType.Touch && penSeen))
+                            c.pressed && (handPans || e.buttons.isTertiaryPressed || (c.type == PointerType.Touch && penSeen && !(c.previousPressed.not() && view.toDoc(c.position).let { (x, y) -> claims(x, y) })))
                         }
                         if (stroke == null && (panning != null || (panner != null && panner.previousPressed.not()))) {
                             val c = e.changes.firstOrNull { it.id == panning } ?: panner
@@ -248,7 +255,7 @@ fun ArtCanvas(
                             val barrel = pose?.barrel == true
                             when {
                                 stroke == null && c.pressed && !c.previousPressed -> {
-                                    if (device == InputDevice.Touch && penSeen) continue
+                                    if (device == InputDevice.Touch && penSeen && !view.toDoc(c.position).let { (x, y) -> claims(x, y) }) continue
                                     if (device == InputDevice.Mouse && !e.buttons.isPrimaryPressed) continue
                                     stroke = c.id; strokeDevice = device
                                     input(CanvasInput(CanvasPhase.Down, listOf(point(c, pose = pose)), device, mods, barrel))
