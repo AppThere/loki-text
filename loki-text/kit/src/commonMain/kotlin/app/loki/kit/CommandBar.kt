@@ -1,6 +1,12 @@
 package app.loki.kit
 
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.FlowColumn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,6 +108,13 @@ fun CommandBar(
     hasIcon: (id: String) -> Boolean = { false },
     icon: @Composable (id: String) -> Unit = {},
     leading: @Composable () -> Unit = {},
+    /**
+     * A wide window (a tablet, a desktop): the whole tab at once, as Loki Text's ribbon shows it.
+     * Each group is a frame with its name under it and every command of the group in it, as an
+     * icon and its name (a command with no icon, its name alone), in columns of three; only a tab
+     * wider than the window scrolls.
+     */
+    expanded: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     if (tabs.isEmpty()) return
@@ -116,6 +129,17 @@ fun CommandBar(
             }
         }
         HorizontalDivider()
+        if (expanded) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.Top) {
+                Box(Modifier.height(GROUP_CONTENT + GROUP_NAME)) { Row(Modifier.align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically) { leading() } }
+                tab.groups.forEach { g ->
+                    VerticalDivider(Modifier.height(GROUP_CONTENT + GROUP_NAME).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
+                    RibbonGroupFrame(g, tab.name, disabled, on, hasIcon, icon, onRun)
+                }
+            }
+            HorizontalDivider()
+            return@Column
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             leading()
             tab.groups.forEach { g ->
@@ -148,5 +172,55 @@ fun CommandIconButton(item: RibbonItem, disabledReason: String?, checked: Boolea
             onClick = { onRun(item.id) }, enabled = disabledReason == null, modifier = Modifier.size(36.dp),
             colors = if (checked) IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else IconButtonDefaults.iconButtonColors(),
         ) { icon(item.id) }
+    }
+}
+
+/** Height of a group's buttons: three rows. */
+private val GROUP_CONTENT = 90.dp
+/** Room for a group's name under its buttons. */
+private val GROUP_NAME = 18.dp
+
+/** One group of an expanded ribbon: its commands in columns of three, its name underneath. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RibbonGroupFrame(
+    group: RibbonGroup, tabName: String, disabled: Map<String, String>, on: Set<String>,
+    hasIcon: (String) -> Boolean, icon: @Composable (String) -> Unit, onRun: (String) -> Unit,
+) {
+    Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        FlowColumn(Modifier.height(GROUP_CONTENT), maxItemsInEachColumn = 3, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (item in group.items) RibbonLabelButton(item, disabled[item.id], item.id in on, hasIcon(item.id), icon, onRun)
+        }
+        Text(group.name.ifEmpty { tabName }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.height(GROUP_NAME))
+    }
+}
+
+/**
+ * A command as a small button with its name: its icon first when it has one. The tooltip says its
+ * shortcut and, when it can't run, why; a toggle that is on is drawn on.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RibbonLabelButton(item: RibbonItem, disabledReason: String?, checked: Boolean, hasIcon: Boolean, icon: @Composable (String) -> Unit, onRun: (String) -> Unit) {
+    val tip = if (item.shortcut.isEmpty()) item.label else "${item.label}  (${displayShortcut(item.shortcut)})"
+    val enabled = disabledReason == null
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(if (enabled) tip else "$tip — $disabledReason") } },
+        state = rememberTooltipState(),
+    ) {
+        Row(
+            Modifier.height(30.dp).clip(RoundedCornerShape(6.dp))
+                .background(if (checked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .clickable(enabled = enabled) { onRun(item.id) }.padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (hasIcon) Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) { icon(item.id) }
+            Text(
+                item.menuLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
+                color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = if (hasIcon) 6.dp else 0.dp),
+            )
+        }
     }
 }

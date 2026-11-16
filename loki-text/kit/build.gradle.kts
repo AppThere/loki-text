@@ -27,6 +27,7 @@ kotlin {
             implementation(libs.coroutines.core)
             api(libs.serialization.json)
             implementation(libs.lucide)
+            implementation(compose.components.resources)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -46,4 +47,10 @@ android {
     namespace = "app.loki.kit"
     compileSdk = 35
     defaultConfig { minSdk = 26 }
+}
+
+// The interface font (composeResources/font) every Craft front end shares.
+compose.resources {
+    packageOfResClass = "app.loki.kit.res"
+    generateResClass = always
 }
