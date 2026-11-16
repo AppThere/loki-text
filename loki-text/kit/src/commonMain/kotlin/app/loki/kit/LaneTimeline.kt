@@ -2,6 +2,8 @@ package app.loki.kit
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -10,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -53,10 +56,27 @@ fun rulerLabel(seconds: Double, fine: Boolean): String {
     return if (fine) "$m:" + (if (rest < 10) "0" else "") + "%.1f".format(rest) else "$m:" + "%02d".format(rest.toInt())
 }
 
+/** What a drag on a clip does: move the whole clip, or move its end (making it longer or shorter). */
+enum class ClipDrag { Move, ResizeEnd }
+
+/** The clip at time [at] in [lane] and what a press there would drag: its end if [at] is within [edge] of it, else the clip's body. */
+fun hitClip(lane: TimelineLane, at: Double, edge: Double): Pair<TimelineClip, ClipDrag>? {
+    // The nearest end first, so a clip that ends where the next begins can still be grabbed by its end.
+    lane.clips.firstOrNull { kotlin.math.abs(at - it.end) <= edge && at >= it.start }?.let { return it to ClipDrag.ResizeEnd }
+    return lane.clips.firstOrNull { at >= it.start && at < it.end }?.let { it to ClipDrag.Move }
+}
+
+/** [delta] moved to a multiple of [snap] (0: not at all). */
+fun snapDelta(delta: Double, snap: Double): Double = if (snap > 0.0 && delta.isFinite()) kotlin.math.round(delta / snap) * snap else delta
+
 /**
  * The timeline. A drag or the wheel scrolls it in time, two fingers or Ctrl and the wheel zoom it,
  * a tap on the ruler calls [onSeek] with that time, a tap in a lane calls [onTap] with the time, the lane
  * and the clip under the finger (null for none). [total] is the length that fits at the start.
+ *
+ * With [onDragClip], a drag that starts on a clip moves it, or its end if it starts at the end, instead of
+ * scrolling: the clip follows the finger (to a multiple of [snap]) and [onDragClip] hears the whole
+ * change once, when it is let go, with `done` true.
  */
 @Composable
 fun LaneTimeline(
@@ -68,6 +88,9 @@ fun LaneTimeline(
     laneHeight: Dp = 44.dp,
     onSeek: (Double) -> Unit = {},
     onTap: (TimelineLane, TimelineClip?, Double) -> Unit = { _, _, _ -> },
+    onDragClip: ((TimelineLane, TimelineClip, ClipDrag, Double, Boolean) -> Unit)? = null,
+    /** What a dragged clip's change is rounded to, in the timeline's unit (an animation's whole frames: 1). */
+    snap: Double = 0.0,
     /** The ruler's spacings to choose from, smallest first, in the timeline's unit (seconds by default; an animation's frames). */
     steps: DoubleArray = SECOND_STEPS,
     /** What the ruler writes at a time; `fine` is true where the spacing is under one unit. */
@@ -75,6 +98,9 @@ fun LaneTimeline(
 ) {
     val seek by rememberUpdatedState(onSeek)
     val tap by rememberUpdatedState(onTap)
+    val dragClip by rememberUpdatedState(onDragClip)
+    // A clip being dragged: which, what the drag does, and by how much so far.
+    var preview by remember { mutableStateOf<Triple<Long, Long, Pair<ClipDrag, Double>>?>(null) }
     val laneList by rememberUpdatedState(lanes)
     var perPx by remember { mutableFloatStateOf(0f) }
     var scroll by remember { mutableFloatStateOf(0f) }
@@ -119,6 +145,30 @@ fun LaneTimeline(
                         val lane = laneList.getOrNull(((p.y - rulerH) / laneH).toInt()) ?: return@detectTapGestures
                         tap(lane, lane.clips.firstOrNull { at >= it.start && at < it.end }, at)
                     }
+                }
+                // Innermost, so it sees a press first: one that lands on a clip is a drag of it, and is not the scroll below.
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val dragger = dragClip ?: return@awaitEachGesture
+                        val rulerH = RULER.toPx(); val laneH = laneHeight.toPx()
+                        if (down.position.y < rulerH || perPx <= 0f) return@awaitEachGesture
+                        val lane = laneList.getOrNull(((down.position.y - rulerH) / laneH).toInt()) ?: return@awaitEachGesture
+                        val at = (scroll + down.position.x * perPx).toDouble()
+                        val (clip, kind) = hitClip(lane, at, edge = (8.dp.toPx() * perPx).toDouble()) ?: return@awaitEachGesture
+                        var moved = false
+                        var delta = 0.0
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            delta = snapDelta(((ch.position.x - down.position.x) * perPx).toDouble(), snap)
+                            if (!moved && (ch.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                            if (moved) { preview = Triple(lane.id, clip.id, kind to delta); ch.consume() }
+                            if (!ch.pressed) break
+                        }
+                        preview = null
+                        if (moved && delta != 0.0) dragger(lane, clip, kind, delta, true)
+                    }
                 },
         ) {
             if (perPx <= 0f) perPx = (total.coerceAtLeast(1.0) / size.width.coerceAtLeast(1f)).toFloat()
@@ -134,7 +184,9 @@ fun LaneTimeline(
                 if (lane.selected) drawRect(base.copy(alpha = 0.12f), Offset(0f, top), Size(size.width, laneH))
                 drawLine(cs.outlineVariant, Offset(0f, top + laneH), Offset(size.width, top + laneH))
                 for (c in lane.clips) {
-                    val x0 = x(c.start); val x1 = x(c.end)
+                    val pv = preview?.takeIf { it.first == lane.id && it.second == c.id }?.third
+                    val x0 = x(if (pv?.first == ClipDrag.Move) c.start + pv.second else c.start)
+                    val x1 = x(when (pv?.first) { ClipDrag.Move -> c.end + pv.second; ClipDrag.ResizeEnd -> maxOf(c.end + pv.second, c.start + maxOf(snap, 0.0001)); null -> c.end })
                     if (x1 < 0 || x0 > size.width) continue
                     val w = (x1 - x0).coerceAtLeast(2f)
                     val colour = c.color ?: lane.color ?: base
