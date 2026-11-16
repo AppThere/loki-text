@@ -502,7 +502,7 @@ def apply(d: Dialog, verdicts: list) -> tuple:
                     if line is not None and f"f{f.index} == \"{esc_raw}\"" in line:
                         lines[n] = line.replace(f"\"{esc_raw}\"", json.dumps(clean))
     # Fields that belong inside a doc's list or object go into one.
-    insert_at = d.puts_end + 1
+    insert_at = d.puts_end          # the line of the brace that closes buildJsonObject: the new block goes before it
     extra = []
     for (cname, ckind), vs in nests.items():
         inner = "\n".join(put_line_for(v, v.to, "                        ") for v in vs)

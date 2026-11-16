@@ -154,6 +154,10 @@ class Wiring(unittest.TestCase):
         self.assertNotIn(".into()", text)
         self.assertIn("import kotlinx.serialization.json.buildJsonArray", text)
         self.assertEqual(stats["nested"], 3)
+        # The block lands inside buildJsonObject: before the brace that closes it, which comes before the call that runs the command.
+        close = text.index('}\n                onRun("data.sort", params)')
+        self.assertLess(text.index('put("keys", buildJsonArray {'), close)
+        self.assertLess(text.index('put("column", f0)'), close)
 
     def test_it_is_idempotent(self):
         once, _, _ = wired(SORT, SORT_DOC, "data.sort")
