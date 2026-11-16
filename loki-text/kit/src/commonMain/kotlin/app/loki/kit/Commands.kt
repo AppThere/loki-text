@@ -92,7 +92,7 @@ class CommandProfile(
 /**
  * Every command of `engine.commands`, in the engine's order; entries that are not usable are left
  * out. The Craft engines describe a command two ways, both read here: WordCraft gives `location`
- * (`"Home › Font"`) and `mutates`; the others give `menu` (`["Edit", "Transform"]`, empty for a
+ * (`"Home › Font"`) and `mutates`; the others give `menu` (`["Edit", "Transform"]`, or `"Edit/Transform"`; empty for a
  * command on no menu) and `undoable` or `journal`.
  */
 fun parseCommands(commands: JsonElement?, profile: CommandProfile): List<CommandInfo> = (commands as? JsonArray).orEmpty().mapNotNull { c ->
@@ -102,7 +102,12 @@ fun parseCommands(commands: JsonElement?, profile: CommandProfile): List<Command
     val id = str("id")
     if (id.isEmpty() || (profile.foreignPrefix.isNotEmpty() && id.startsWith(profile.foreignPrefix))) return@mapNotNull null
     val params = profile.paramDocs[id] ?: str("params")
-    val menu = (o["menu"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.takeIf { t -> t.isNotBlank() } }
+    // `menu` is a list of names, or (FigCraft, SoundCraft) one path with slashes: "Edit/Copy as".
+    val menu = when (val m = o["menu"]) {
+        is JsonArray -> m.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.takeIf { t -> t.isNotBlank() } }
+        is JsonPrimitive -> if (m.isString) m.content.split('/').map { it.trim() }.filter { it.isNotEmpty() } else null
+        else -> null
+    }
     val location = str("location").ifEmpty { menu.orEmpty().joinToString(" › ") }
     CommandInfo(
         id, str("label").ifEmpty { id }, location, params, str("shortcut"),

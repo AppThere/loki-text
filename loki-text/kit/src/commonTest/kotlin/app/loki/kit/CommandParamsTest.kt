@@ -338,6 +338,18 @@ class CommandParamsTest {
     }
 
     @Test
+    fun aMenuGivenAsOnePathIsReadLikeAList() {
+        val c = parseCommands(json("""[
+            {"id":"edit.undo","label":"Undo","menu":"Edit","params":"{}"},
+            {"id":"edit.copyAs","label":"Copy as CSS","menu":"Edit/Copy as","params":"{}"},
+            {"id":"x.none","label":"None","menu":"","params":"{}"},
+            {"id":"x.junk","label":"Junk","menu":7,"params":"{}"}
+        ]"""), CommandProfile(tabs = listOf("Edit")))
+        assertEquals(listOf("Edit", "Edit › Copy as", "", ""), c.map { it.location })
+        assertEquals("Edit", c[1].tab)
+    }
+
+    @Test
     fun fitsAreWorkedOutFromTheContentAndTheWindow() {
         assertEquals(1f, fitZoom("pageWidth", 612f, 792f, 918f, 594f, 1.5f)!!, 0.001f)
         assertEquals(0.5f, fitZoom("whole", 612f, 792f, 918f, 594f, 1.5f)!!, 0.001f)
