@@ -45,6 +45,13 @@ class CommandInfo(
 
     /** Takes parameters at all (required or optional), so the form has something to offer. */
     val hasParams: Boolean get() = params.trim().let { it.startsWith("{") && !it.startsWith("{}") } && parseParamForm(params).fields.isNotEmpty()
+
+    /**
+     * Opens its form before running. A command with a required value does; so does one whose label ends in "…" and that takes
+     * any parameter, as on the desktop: Brightness/Contrast has no required value, so running it at once applied its defaults,
+     * a no-op that still dirtied the document and added an undo step.
+     */
+    val asksFirst: Boolean get() = needsInput || (hasParams && label.endsWith("…"))
 }
 
 /**
