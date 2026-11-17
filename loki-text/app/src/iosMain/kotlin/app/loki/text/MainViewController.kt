@@ -16,7 +16,7 @@ actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 fun MainViewController() = ComposeUIViewController { App() }
 
 // TODO: UIDocumentPickerViewController.
-actual fun pickFile(save: Boolean): String? = null
+actual fun pickFile(save: Boolean, suggestedName: String): String? = null
 
 // TODO: UIPasteboard.generalPasteboard.
 actual fun publishFile(path: String) {}

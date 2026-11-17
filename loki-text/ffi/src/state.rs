@@ -130,10 +130,6 @@ fn layout_state(sess: &Session) -> Value {
         "paper": wordcraft_geom::paper_name(sect.page_w, sect.page_h),
         "margins": wordcraft_engine::cmd::page::margins_preset_at(sess),
         "columns": wordcraft_engine::cmd::page::columns_preset_at(sess),
-        // For the ruler: the page's width and side margins, in points.
-        "pageWidth": num(sect.page_w),
-        "marginLeft": num(sect.margin_left),
-        "marginRight": num(sect.margin_right),
     })
 }
 

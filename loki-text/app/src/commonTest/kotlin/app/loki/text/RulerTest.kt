@@ -8,14 +8,16 @@ import kotlin.test.assertNull
 
 class RulerTest {
     // Letter paper, 1-inch margins, a paragraph indented half an inch with a quarter-inch hanging first line.
-    private val lay = LayoutState(36f, 18f, null, null, null, null, null, null, null, firstLine = -18f, pageWidth = 612f, marginLeft = 72f, marginRight = 72f)
-    private val g = rulerGeometry(lay)!!
+    private val info = RulerInfo(612f, 72f, 72f)
+    private val lay = LayoutState(36f, 18f, null, null, null, null, null, null, null, firstLine = -18f)
+    private val g = rulerGeometry(info, lay)
 
     @Test fun markersSitWhereTheIndentsAre() {
         assertEquals(RulerGeometry(612f, 72f, 540f, firstLine = 90f, left = 108f, right = 522f), g)
     }
 
-    @Test fun noRulerWithoutAPageSize() = assertNull(rulerGeometry(LayoutState.EMPTY))
+    @Test fun noIndentsPutTheMarkersOnTheMargins() =
+        assertEquals(RulerGeometry(612f, 72f, 540f, firstLine = 72f, left = 72f, right = 540f), rulerGeometry(info, LayoutState.EMPTY))
 
     @Test fun pressesPickTheNearestMarkerInTheirHalf() {
         assertEquals(IndentMarker.FirstLine, markerAt(g, 92f, upper = true, reach = 6f))

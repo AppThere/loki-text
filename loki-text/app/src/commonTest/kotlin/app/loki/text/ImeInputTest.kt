@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

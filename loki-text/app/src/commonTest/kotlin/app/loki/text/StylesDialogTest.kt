@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.float

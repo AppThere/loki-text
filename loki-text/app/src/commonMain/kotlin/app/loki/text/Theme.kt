@@ -1,5 +1,20 @@
 package app.loki.text
 
+import app.loki.kit.*
+
+import app.loki.kit.CraftTheme
+import app.loki.kit.LocalBaseColors
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
@@ -42,6 +57,42 @@ val LokiColors = lightColorScheme(
     error = Color(0xFFB3261E),
     onError = Color.White,
 )
+
+/** [LokiColors] for a dark room: the same blue accent, lifted so it reads on near-black surfaces. */
+val LokiDarkColors = darkColorScheme(
+    primary = Color(0xFF8FC2F5),
+    onPrimary = Color(0xFF06335F),
+    primaryContainer = Color(0xFF1B4B7C),
+    onPrimaryContainer = Color(0xFFD3E6FA),
+    secondary = Color(0xFFB3C8E0),
+    onSecondary = Color(0xFF1D3147),
+    secondaryContainer = Color(0xFF2A4663),
+    onSecondaryContainer = Color(0xFFD3E6FA),
+    background = Color(0xFF12171D),
+    onBackground = Color(0xFFE1E8F0),
+    surface = Color(0xFF161C23),
+    onSurface = Color(0xFFE1E8F0),
+    surfaceVariant = Color(0xFF2A3440),
+    onSurfaceVariant = Color(0xFFBDCBDA),
+    surfaceTint = Color(0xFF8FC2F5),
+    surfaceContainerLowest = Color(0xFF0D1116),
+    surfaceContainerLow = Color(0xFF161C23),
+    surfaceContainer = Color(0xFF1B222B),
+    surfaceContainerHigh = Color(0xFF242D38),
+    surfaceContainerHighest = Color(0xFF2E3946),
+    outline = Color(0xFF8A9BAE),
+    outlineVariant = Color(0xFF3A4654),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+)
+
+/**
+ * The app's theme: light, dark, or the system's choice (the start), from the kit's [CraftTheme]
+ * with Loki Text's two palettes and its interface font.
+ */
+@Composable
+internal fun AppTheme(content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit) =
+    CraftTheme(LokiColors, LokiDarkColors, typographyWith(uiFontFamily()), content)
 
 /** The ribbon's tab bar and the status bar: a deep, saturated blue with a hint of teal that frames the page. */
 val BarBlue = Color(0xFF004F93)

@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import androidx.compose.ui.input.key.Key
 import kotlinx.serialization.json.Json
 import kotlin.test.Test

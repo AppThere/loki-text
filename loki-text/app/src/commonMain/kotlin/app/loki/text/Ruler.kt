@@ -1,5 +1,7 @@
 package app.loki.text
 
+import app.loki.kit.*
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -25,14 +27,48 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.put
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** The ruler's height. */
-val RULER_HEIGHT = 24.dp
+/** What the horizontal ruler measures: the page's width and its side margins, in points. */
+class RulerInfo(val pageW: Float, val marginLeft: Float, val marginRight: Float)
+
+/** The ruler's numbers from `layout.section`; null when the section's sizes are not usable. */
+fun parseRulerInfo(e: JsonElement?): RulerInfo? {
+    val o = e as? JsonObject ?: return null
+    fun n(k: String) = (o[k] as? JsonPrimitive)?.floatOrNull?.takeIf { it.isFinite() && it >= 0f }
+    val w = n("pageW")?.takeIf { it > 0f && it <= 20_000f } ?: return null
+    val left = n("marginLeft") ?: return null
+    val right = n("marginRight") ?: return null
+    if (left + right >= w) return null
+    return RulerInfo(w, left, right)
+}
+
+/** One mark of the ruler: where it is from the page's left edge in points, how long (0 short, 1 half inch, 2 inch) and the inch number under an inch mark. */
+class RulerTick(val x: Float, val size: Int, val label: String)
+
+/**
+ * The marks along [info]'s page: one every eighth of an inch, counted from the left margin as on
+ * paper rulers in word processors (so the margin itself reads backwards from zero).
+ */
+fun rulerTicks(info: RulerInfo): List<RulerTick> {
+    val step = 9f
+    val first = -(info.marginLeft / step).toInt()
+    val last = ((info.pageW - info.marginLeft) / step).toInt()
+    // A page is at most a few hundred eighths wide; the cap is for a section that claims more.
+    return (first..last).take(4000).map { i ->
+        val size = if (i % 8 == 0) 2 else if (i % 4 == 0) 1 else 0
+        RulerTick(info.marginLeft + i * step, size, if (size == 2 && i != 0) "${kotlin.math.abs(i / 8)}" else "")
+    }
+}
+
+internal val RULER_HEIGHT = 20.dp
 
 /** Indent markers snap to sixteenths of an inch while dragged. */
 private const val SNAP_PT = 4.5f
@@ -41,31 +77,29 @@ private const val SNAP_PT = 4.5f
 enum class IndentMarker { FirstLine, Left, Right }
 
 /**
- * Where the ruler's parts sit, in points from the page's left edge: the text area between the
- * margins, and the first-line, left and right indent markers of the caret's paragraph.
+ * Where the ruler's indent markers sit, in points from the page's left edge: the text area between
+ * the margins, and the first-line, left and right indents of the caret's paragraph.
  */
 data class RulerGeometry(val pageWidth: Float, val textLeft: Float, val textRight: Float, val firstLine: Float, val left: Float, val right: Float)
 
-/** The ruler for [lay], or null when the page size isn't known. */
-internal fun rulerGeometry(lay: LayoutState): RulerGeometry? {
-    val w = lay.pageWidth ?: return null
-    val ml = (lay.marginLeft ?: 72f).coerceIn(0f, w)
-    val mr = (lay.marginRight ?: 72f).coerceIn(0f, w - ml)
-    val left = ml + (lay.indentLeft ?: 0f)
+/** The markers for the caret paragraph's indents in [layout] on [info]'s page. */
+internal fun rulerGeometry(info: RulerInfo, layout: LayoutState): RulerGeometry {
+    val left = info.marginLeft + (layout.indentLeft ?: 0f)
+    val textRight = info.pageW - info.marginRight
     return RulerGeometry(
-        pageWidth = w,
-        textLeft = ml,
-        textRight = w - mr,
-        firstLine = left + (lay.firstLine ?: 0f),
+        pageWidth = info.pageW,
+        textLeft = info.marginLeft,
+        textRight = textRight,
+        firstLine = left + (layout.firstLine ?: 0f),
         left = left,
-        right = w - mr - (lay.indentRight ?: 0f),
+        right = textRight - (layout.indentRight ?: 0f),
     )
 }
 
 /**
  * The marker a press at [x] (points from the page's left) picks up, within [reach] points; [upper]
- * says the press is in the ruler's top half, where the first-line marker sits (the left and right
- * ones hang from the bottom).
+ * says the press is in the ruler's top half, where the first-line marker hangs (the left one
+ * stands on the bottom edge; the right one can be taken from either half).
  */
 internal fun markerAt(g: RulerGeometry, x: Float, upper: Boolean, reach: Float): IndentMarker? {
     val candidates = listOfNotNull(
@@ -80,9 +114,9 @@ internal fun markerAt(g: RulerGeometry, x: Float, upper: Boolean, reach: Float):
 internal fun snap(x: Float): Float = (x / SNAP_PT).roundToInt() * SNAP_PT
 
 /**
- * The `para.indents` parameters for [marker] dropped at [x] (points from the page's left). As in
- * Word, the left marker keeps the first line where it is (only the hanging part moves), and no
- * indent goes past the page's edges.
+ * The `para.indents` parameters for [marker] dropped at [x] (points from the page's left). The
+ * left marker keeps the first line where it is (only the hanging part moves), and no indent goes
+ * past the page's edges.
  */
 internal fun indentParams(g: RulerGeometry, marker: IndentMarker, x: Float): JsonObject {
     val at = snap(x).coerceIn(0f, g.pageWidth)
@@ -97,32 +131,41 @@ internal fun indentParams(g: RulerGeometry, marker: IndentMarker, x: Float): Jso
 }
 
 /**
- * The horizontal ruler over the page: the margins shaded, ticks every eighth of an inch from the
- * left margin with the inches numbered, and the caret paragraph's indent markers, which can be
- * dragged. [pageLeftPx] is where the page's left edge is in the ruler, [pxPerPt] the page's scale.
+ * The horizontal ruler (View › Ruler) over the page area: the text area light between the darker
+ * margins, inch marks from the left margin, and the caret paragraph's first-line, left and right
+ * indent markers, which drag to set its indents ([onIndents] gets the `para.indents` parameters).
+ * [leftPx] is where the page's left edge is in this ruler, so it follows a page scrolled sideways.
  */
 @Composable
-fun HorizontalRuler(lay: LayoutState, pageLeftPx: Float, pxPerPt: Float, onIndents: (JsonObject) -> Unit, modifier: Modifier = Modifier) {
-    val g = rulerGeometry(lay) ?: return
+internal fun HorizontalRuler(
+    info: RulerInfo,
+    layout: LayoutState,
+    leftPx: Float,
+    pxPerPt: Float,
+    onIndents: (JsonObject) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val measurer = rememberTextMeasurer()
-    val ink = MaterialTheme.colorScheme.onSurface
-    val shade = MaterialTheme.colorScheme.surfaceVariant
+    val margin = MaterialTheme.colorScheme.surfaceVariant
+    val paper = MaterialTheme.colorScheme.surfaceContainerLowest
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
     val accent = MaterialTheme.colorScheme.primary
-    val numberStyle = TextStyle(fontSize = 9.sp, color = ink.copy(alpha = 0.7f))
+    val style = TextStyle(fontSize = 9.sp, color = ink)
+    val g = rulerGeometry(info, layout)
     // The marker being dragged and where it is, so it follows the pointer before the engine answers.
     var dragging by remember { mutableStateOf<Pair<IndentMarker, Float>?>(null) }
     Canvas(
-        modifier.fillMaxWidth().height(RULER_HEIGHT).pointerInput(g, pageLeftPx, pxPerPt) {
+        modifier.fillMaxWidth().height(RULER_HEIGHT).pointerInput(g, leftPx, pxPerPt) {
             if (pxPerPt <= 0f) return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown()
-                val x = (down.position.x - pageLeftPx) / pxPerPt
+                val x = (down.position.x - leftPx) / pxPerPt
                 val marker = markerAt(g, x, down.position.y < size.height / 2f, reach = 8.dp.toPx() / pxPerPt) ?: return@awaitEachGesture
                 down.consume()
                 dragging = marker to x
                 drag(down.id) { change ->
                     change.consume()
-                    dragging = marker to (change.position.x - pageLeftPx) / pxPerPt
+                    dragging = marker to (change.position.x - leftPx) / pxPerPt
                 }
                 val end = dragging?.second
                 dragging = null
@@ -130,50 +173,40 @@ fun HorizontalRuler(lay: LayoutState, pageLeftPx: Float, pxPerPt: Float, onInden
             }
         },
     ) {
-        fun px(pt: Float) = pageLeftPx + pt * pxPerPt
-        drawRect(shade)
-        // The text area is white; the margins stay shaded.
-        drawRect(Color.White, Offset(px(g.textLeft), 3.dp.toPx()), Size((g.textRight - g.textLeft) * pxPerPt, size.height - 6.dp.toPx()))
-        drawTicks(g, ::px, ink, measurer, numberStyle)
-        val shown = dragging
-        fun at(m: IndentMarker, x: Float) = if (shown?.first == m) snap(shown.second) else x
-        drawMarker(px(at(IndentMarker.FirstLine, g.firstLine)), top = true, color = if (shown?.first == IndentMarker.FirstLine) accent else ink)
-        drawMarker(px(at(IndentMarker.Left, g.left)), top = false, color = if (shown?.first == IndentMarker.Left) accent else ink)
-        drawMarker(px(at(IndentMarker.Right, g.right)), top = false, color = if (shown?.first == IndentMarker.Right) accent else ink)
-        // While dragging, a line down the ruler shows where the indent lands.
-        shown?.let { (_, x) -> drawLine(accent, Offset(px(snap(x)), 0f), Offset(px(snap(x)), size.height), 1.dp.toPx()) }
-    }
-}
-
-/** Ticks every eighth of an inch from the left margin both ways, longer at halves, numbers at inches. */
-private fun DrawScope.drawTicks(
-    g: RulerGeometry,
-    px: (Float) -> Float,
-    ink: Color,
-    measurer: androidx.compose.ui.text.TextMeasurer,
-    style: TextStyle,
-) {
-    val step = 9f
-    val first = -(g.textLeft / step).toInt()
-    val last = ((g.pageWidth - g.textLeft) / step).toInt()
-    val mid = size.height / 2f
-    for (i in first..last) {
-        val x = px(g.textLeft + i * step)
-        when {
-            i != 0 && i % 8 == 0 -> {
-                val label = measurer.measure((abs(i) / 8).toString(), style)
-                drawText(label, topLeft = Offset(x - label.size.width / 2f, mid - label.size.height / 2f))
+        fun x(pt: Float) = leftPx + pt * pxPerPt
+        drawRect(margin)
+        val textLeft = x(info.marginLeft)
+        val textRight = x(info.pageW - info.marginRight)
+        drawRect(paper, Offset(textLeft, 2f), Size((textRight - textLeft).coerceAtLeast(0f), size.height - 4f))
+        // Marks closer than a few pixels would be a grey smear: at small zooms only the longer ones are drawn.
+        val every = if (9f * pxPerPt >= 5f) 0 else if (36f * pxPerPt >= 5f) 1 else 2
+        for (t in rulerTicks(info)) {
+            if (t.size < every) continue
+            val px = x(t.x)
+            if (px < 0f || px > size.width) continue
+            if (t.label.isNotEmpty()) {
+                val text = measurer.measure(t.label, style)
+                drawText(text, topLeft = Offset(px - text.size.width / 2f, (size.height - text.size.height) / 2f))
+            } else {
+                val h = if (t.size == 2) size.height * 0.5f else if (t.size == 1) size.height * 0.35f else size.height * 0.18f
+                drawLine(ink.copy(alpha = 0.7f), Offset(px, (size.height - h) / 2f), Offset(px, (size.height + h) / 2f), strokeWidth = 1f)
             }
-            i % 4 == 0 -> drawLine(ink.copy(alpha = 0.6f), Offset(x, mid - 3.dp.toPx()), Offset(x, mid + 3.dp.toPx()), 1f)
-            else -> drawLine(ink.copy(alpha = 0.4f), Offset(x, mid - 1.dp.toPx()), Offset(x, mid + 1.dp.toPx()), 1f)
         }
+        val shown = dragging
+        fun at(m: IndentMarker, pt: Float) = if (shown?.first == m) snap(shown.second) else pt
+        fun color(m: IndentMarker) = if (shown?.first == m) accent else ink
+        drawMarker(x(at(IndentMarker.FirstLine, g.firstLine)), top = true, color(IndentMarker.FirstLine), paper)
+        drawMarker(x(at(IndentMarker.Left, g.left)), top = false, color(IndentMarker.Left), paper)
+        drawMarker(x(at(IndentMarker.Right, g.right)), top = false, color(IndentMarker.Right), paper)
+        // While dragging, a line down the ruler shows where the indent lands.
+        shown?.let { (_, pt) -> drawLine(accent, Offset(x(snap(pt)), 0f), Offset(x(snap(pt)), size.height), 1.dp.toPx()) }
     }
 }
 
 /** An indent marker: a small triangle at [x], hanging from the top edge ([top]) or standing on the bottom one. */
-private fun DrawScope.drawMarker(x: Float, top: Boolean, color: Color) {
-    val half = 5.dp.toPx()
-    val h = 6.dp.toPx()
+private fun DrawScope.drawMarker(x: Float, top: Boolean, color: Color, fill: Color) {
+    val half = 4.5.dp.toPx()
+    val h = 5.5.dp.toPx()
     val base = if (top) 0f else size.height
     val tip = if (top) h else size.height - h
     val p = Path().apply {
@@ -182,6 +215,6 @@ private fun DrawScope.drawMarker(x: Float, top: Boolean, color: Color) {
         lineTo(x, tip)
         close()
     }
-    drawPath(p, Color.White)
+    drawPath(p, fill)
     drawPath(p, color, style = Stroke(1.dp.toPx()))
 }

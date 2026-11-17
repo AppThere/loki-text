@@ -15,4 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
+include(":kit")
 include(":app")
