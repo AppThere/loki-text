@@ -15,6 +15,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPlacement
@@ -92,16 +94,57 @@ private class DocWindow(val id: Int, val path: String?)
 /** Height of the title bar the app draws, in dp. */
 private const val TITLE_BAR_DP = 40f
 
-fun main() = application {
+private val IS_MAC = System.getProperty("os.name").orEmpty().startsWith("Mac")
+
+fun main() {
+    // The Mac names the application menu and the Dock entry from these, read when AWT starts;
+    // without them a `gradle run` shows the main class (MainKt). A packaged app has its bundle name.
+    if (IS_MAC) {
+        System.setProperty("apple.awt.application.name", "Loki Text")
+        System.setProperty("apple.laf.useScreenMenuBar", "true")
+    }
+    lokiApplication()
+}
+
+private fun lokiApplication() = application {
     val windows = remember { mutableStateListOf(DocWindow(0, null)) }
     var nextId by remember { mutableStateOf(1) }
+    // Closing asks about unsaved changes first; App calls onClose once that is settled. Kept here so Quit can ask every window.
+    val closeRequests = remember { mutableStateMapOf<Int, Int>() }
+    // The menu bar of each window, and the one in front, which About and Settings in the application menu act on.
+    val bridges = remember { mutableStateMapOf<Int, MenuBridge>() }
+    var front by remember { mutableStateOf(0) }
+    if (IS_MAC) LaunchedEffect(Unit) {
+        installMacAppMenu(
+            onAbout = { bridges[front]?.run("app.about") },
+            onSettings = { bridges[front]?.run("file.options") },
+            // Quit closes the windows one by one, each asking about unsaved changes; the last one ends the app.
+            onQuit = { for (w in windows) closeRequests[w.id] = (closeRequests[w.id] ?: 0) + 1 },
+        )
+    }
     // Each document has its own window, and the application ends with the last one.
     for (w in windows) key(w.id) {
-        // Closing asks about unsaved changes first; App calls onClose once that is settled.
-        var closeRequest by remember { mutableStateOf(0) }
+        val closeRequest = closeRequests[w.id] ?: 0
+        val requestClose = { closeRequests[w.id] = (closeRequests[w.id] ?: 0) + 1 }
+        val bridge = remember { MenuBridge() }
+        DisposableEffect(bridge) { bridges[w.id] = bridge; onDispose { bridges.remove(w.id); closeRequests.remove(w.id) } }
         val windowState = rememberWindowState()
         val ownFrame = remember { useOwnFrame() }
-        Window(onCloseRequest = { closeRequest++ }, title = "Loki Text", state = windowState, undecorated = ownFrame) {
+        Window(onCloseRequest = { requestClose() }, title = "Loki Text", state = windowState, undecorated = ownFrame) {
+            DisposableEffect(window) {
+                val l = object : java.awt.event.WindowAdapter() {
+                    override fun windowActivated(e: java.awt.event.WindowEvent?) { front = w.id }
+                }
+                window.addWindowListener(l)
+                onDispose { window.removeWindowListener(l) }
+            }
+            if (IS_MAC) LokiMenuBar(bridge, mac = true) { id ->
+                when (id) {
+                    MENU_MINIMIZE -> windowState.isMinimized = true
+                    MENU_ZOOM -> windowState.toggleMaximized()
+                    else -> bridge.run(id)
+                }
+            }
             // On a JetBrains Runtime with custom title bars the app draws the title bar and the system keeps the frame. Where the
             // runtime has none (Linux) the window is undecorated and the app draws the frame; elsewhere the native bar stays.
             val installed = remember(window) { if (ownFrame) null else installCustomTitleBar(window, TITLE_BAR_DP) }
@@ -117,7 +160,7 @@ fun main() = application {
                 windowButtons = {
                     WindowButtons(
                         maximized = windowState.placement == WindowPlacement.Maximized,
-                        onMinimize = { windowState.isMinimized = true }, onMaximize = maximize, onClose = { closeRequest++ },
+                        onMinimize = { windowState.isMinimized = true }, onMaximize = maximize, onClose = { requestClose() },
                     )
                 },
                 drag = Modifier.windowDrag(window, onDoubleClick = maximize),
@@ -133,7 +176,7 @@ fun main() = application {
                                 maximized = windowState.placement == WindowPlacement.Maximized,
                                 onMinimize = { windowState.isMinimized = true },
                                 onMaximize = { windowState.placement = if (windowState.placement == WindowPlacement.Maximized) WindowPlacement.Floating else WindowPlacement.Maximized },
-                                onClose = { closeRequest++ },
+                                onClose = { requestClose() },
                             )
                         }
                     },
@@ -146,6 +189,7 @@ fun main() = application {
                 initialPath = w.path,
                 onNewWindow = { path -> windows.add(DocWindow(nextId++, path)) },
                 titleBar = titleBar,
+                menuBridge = if (IS_MAC) bridge else null,
             )
             if (ownFrame && windowState.placement != WindowPlacement.Maximized) ResizeEdges(window)
             }

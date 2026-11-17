@@ -50,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -339,6 +340,8 @@ fun App(
     onNewWindow: ((String?) -> Unit)? = null,
     /** Set when the app draws the window's title bar (desktop on a JetBrains Runtime); null for a native one. */
     titleBar: TitleBarConfig? = null,
+    /** Set where the platform has a menu bar (macOS): it shows this window's commands, so the in-window menu button goes. */
+    menuBridge: MenuBridge? = null,
 ) = AppTheme { themeChoice, setTheme, darkTheme ->
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
@@ -373,6 +376,7 @@ fun App(
     // List dialogs: the multilevel definition (levels as read), and the three small ones.
     var listLevels by remember { mutableStateOf<List<LevelForm>?>(null) }
     var listDialog by remember { mutableStateOf<String?>(null) }
+    var pasteSpecial by remember { mutableStateOf<PasteSpecialRequest?>(null) }
     var stylesAlphabetical by remember { mutableStateOf(false) }
     var styleEntries by remember { mutableStateOf<List<StyleEntry>>(emptyList()) }
     var modifyStyle by remember { mutableStateOf<StyleEntry?>(null) }
@@ -551,7 +555,7 @@ fun App(
             return
         }
         var p = params
-        if (command == "edit.paste") {
+        if (command == "edit.paste" || command == "edit.pasteSpecial" && params["as"] == null) {
             val text = withContext(Dispatchers.Default) { clipboardText() }
             val ours = lastCopied
             if (text != null && ours != null && sameClipboardText(text, ours)) {
@@ -561,6 +565,13 @@ fun App(
                 if (ours != null) println("paste: clipboard text differs from last copy: [$text] vs [$ours]")
                 p = buildJsonObject { put("text", text) }
             }
+        }
+        if (command == "edit.pasteSpecial" && params["as"] == null) {
+            // The engine lists what the clipboard can be pasted as; this UI asks which.
+            val listed = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute(command, p) }.getOrNull() } }
+            val formats = parsePasteFormats(listed)
+            if (formats.isEmpty()) status = "The clipboard is empty" else pasteSpecial = PasteSpecialRequest(formats, p)
+            return
         }
         perform {
             val r = execute(command, p)
@@ -808,9 +819,19 @@ fun App(
 
     // A key's command: file commands that need a picker or a window go through the File menu's path.
     fun runKey(k: KeyCommand) {
+        // The same press may also reach the menu bar's key equivalent: whichever comes second is dropped.
+        if (menuBridge?.allow(k.command, fromMenu = false) == false) return
         scope.launch { if (k.command in FILE_MENU_COMMANDS) runFileMenu(k.command) else runCommand(k.command, k.params) }
     }
-    val fileMenu: @Composable () -> Unit = { FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } }
+    if (menuBridge != null) {
+        SideEffect {
+            menuBridge.catalog = catalogById
+            menuBridge.disabled = commandState.disabled
+            menuBridge.on = commandState.on + "app.theme.$themeChoice"
+            menuBridge.runner = { id -> scope.launch { runFileMenu(id) } }
+        }
+    }
+    val fileMenu: @Composable () -> Unit = if (menuBridge != null) ({}) else ({ FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } })
     val quickCommands: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
             CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
@@ -844,6 +865,9 @@ fun App(
             onApply = { p -> listLevels = null; scope.launch { runCommand("list.define", p) } },
             onDismiss = { listLevels = null },
         )
+    }
+    pasteSpecial?.let { req ->
+        PasteSpecialDialog(req, onPaste = { p -> pasteSpecial = null; scope.launch { runCommand("edit.pasteSpecial", p) } }, onDismiss = { pasteSpecial = null })
     }
     when (listDialog) {
         "para.defineBullet" -> DefineBulletDialog({ p -> listDialog = null; scope.launch { runCommand("para.defineBullet", p) } }, { listDialog = null })
@@ -1045,6 +1069,8 @@ fun App(
         }
         // Where each page sits in the scrolled content (top, pixels per point), to find the caret on screen.
         val pageGeo = remember { mutableMapOf<Int, Pair<Float, Float>>() }
+        // The ruler covers the top of the page area: the caret is kept below it.
+        val rulerPx = if (rulerShown) with(density) { RULER_HEIGHT.toPx() } else 0f
         val vScroll = rememberScrollState()
         // Keep the caret in view as it moves, and when the keyboard shrinks the viewport.
         val viewportPx = constraints.maxHeight
@@ -1056,7 +1082,7 @@ fun App(
             val caretBottom = caretTop + c.h * pxPerPt
             val target = when {
                 caretBottom + margin > vScroll.value + viewportPx -> (caretBottom + margin - viewportPx).toInt()
-                caretTop - margin < vScroll.value -> (caretTop - margin).toInt()
+                caretTop - margin - rulerPx < vScroll.value -> (caretTop - margin - rulerPx).toInt()
                 else -> return@LaunchedEffect
             }
             vScroll.animateScrollTo(target.coerceAtLeast(0))
@@ -1250,7 +1276,7 @@ fun App(
         }
         if (rulerShown) rulerInfo?.let { info ->
             val left = (pageOrigin[0]?.x ?: 0f) - viewportOrigin.x
-            HorizontalRuler(info, commandState.layout, left, scale * pinch, Modifier.align(Alignment.TopStart))
+            HorizontalRuler(info, commandState.layout, left, scale * pinch, { p -> scope.launch { runCommand("para.indents", p) } }, Modifier.align(Alignment.TopStart))
         }
         selection.hf?.let { kind ->
             HeaderFooterBar(kind, { scope.launch { runCommand("insert.closeHeader") } }, Modifier.align(Alignment.TopCenter).padding(top = if (rulerShown) 8.dp + RULER_HEIGHT else 8.dp))

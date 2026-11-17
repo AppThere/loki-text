@@ -184,6 +184,36 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
     json!({"caret": caret, "rects": rects, "pages": l.pages.len(), "object": object, "hf": hf})
 }
 
+/// How the session's view draws its pages: formatting marks (Show/Hide ¶ and the always-shown
+/// ones), markup, ink, the dark page and Read Mode's paper, and the body dimmed while a header or
+/// footer is edited. The egui front end builds the same options from the same view state.
+fn render_options(sess: &wordcraft_engine::Session) -> wordcraft_render::RenderOptions {
+    use wordcraft_engine::cmd::view::ReadPageColor;
+    let v = &sess.view;
+    let mut opts = wordcraft_render::RenderOptions { text_darkening: cfg!(target_os = "macos"), ..Default::default() };
+    opts.display.marks = v.marks;
+    opts.display.always = sess.prefs.marks;
+    opts.display.placeholders = true;
+    opts.display.markup = v.show_markup;
+    // Ink Replay draws the ink stroke by stroke over pages without it.
+    opts.display.hide_ink = v.hide_ink || v.draw.replay;
+    opts.display.revisions = sess.prefs.markup.clone();
+    // In Read Mode the Page color decides; elsewhere View › Dark Mode does.
+    opts.dark = if v.read_mode { v.read_page_color == ReadPageColor::Inverse } else { v.dark_mode };
+    opts.dark_paper = wordcraft_render::DARK_PAPER;
+    if v.read_mode {
+        let sepia = v.read_page_color == ReadPageColor::Sepia;
+        opts.read_paper = Some(if sepia { wordcraft_render::SEPIA_PAPER } else { wordcraft_doc::props::Rgb::WHITE });
+    }
+    let in_header_footer = match sess.sel.focus.story {
+        wordcraft_doc::StoryRef::Part(id) => sess.doc.parts.get(&id).is_some_and(|p| matches!(p.kind, wordcraft_doc::PartKind::Header | wordcraft_doc::PartKind::Footer)),
+        wordcraft_doc::StoryRef::Body => false,
+    };
+    opts.display.dim_body = in_header_footer;
+    opts.display.dim_header = !in_header_footer;
+    opts
+}
+
 /// Free a string returned by [`loki_call`]. Null is ignored.
 ///
 /// # Safety
@@ -211,7 +241,7 @@ pub unsafe extern "C" fn loki_render_page(s: *mut LokiSession, page: u32, scale:
         let sess = &mut session.inner.session;
         let l = sess.layout();
         let pg = l.pages.get(usize::try_from(page).ok()?)?;
-        let img = wordcraft_render::render_page(&sess.doc, pg, scale, &Default::default());
+        let img = wordcraft_render::render_page(&sess.doc, pg, scale, &render_options(sess));
         if u64::from(img.width) * u64::from(img.height) > MAX_PIXELS {
             return None;
         }

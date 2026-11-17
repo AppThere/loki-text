@@ -103,6 +103,9 @@ compose.desktop {
         }
         // The desktop run finds libloki_ffi next to the working dir or via -Dloki.lib.
         jvmArgs += "-Dloki.lib=${rootDir}/target/release"
+        // On a Mac the Dock and the application menu show this name instead of the main class (MainKt).
+        // `-Xdock` is a Mac-only JVM option: other systems refuse to start with it.
+        if (System.getProperty("os.name").orEmpty().startsWith("Mac")) jvmArgs += "-Xdock:name=Loki Text"
     }
 }
 
