@@ -368,4 +368,17 @@ class CommandParamsTest {
         for (bad in listOf("", "not json", "[1]", "7", "{\"ok\":")) assertTrue(runCatching { EngineClient(Fake(bad)).call("m") }.exceptionOrNull() is EngineException, bad)
         assertEquals(1, EngineClient(Fake("""{"ok":true,"result":[{"open":"x"},7]}""")).uiRequests().size)
     }
+
+    private fun cmd(label: String, params: String) = CommandInfo("x.y", label, "Image › Adjustments", params, "", true)
+
+    @Test
+    fun aLabelEndingInAnEllipsisAsksFirstEvenWhenNothingIsRequired() {
+        val optional = """{"brightness":-150..150=0,"contrast":-50..100=0,"legacy":bool=false}"""
+        assertFalse(cmd("Brightness/Contrast…", optional).needsInput)
+        assertTrue(cmd("Brightness/Contrast…", optional).asksFirst)
+        assertFalse(cmd("Desaturate", optional).asksFirst, "no ellipsis: it runs at once")
+        assertFalse(cmd("Invert…", "{}").asksFirst, "nothing to ask")
+        assertFalse(cmd("Invert…", "(no params)").asksFirst)
+        assertTrue(cmd("Open", """{"path": string}""").asksFirst, "a required value always asks")
+    }
 }

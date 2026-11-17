@@ -11,8 +11,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 
 /**
- * A window whose title bar the app draws (desktop with a JetBrains Runtime). The app puts its own
- * controls in the bar; the operating system keeps dragging, resizing and snapping.
+ * A window whose title bar the app draws: with a JetBrains Runtime custom title bar (the operating system keeps dragging,
+ * resizing and snapping) or, where the runtime has none, an undecorated window whose frame the app draws (see [drag]).
+ * The app puts its own controls in the bar.
  */
 class TitleBarConfig(
     val height: Dp,
@@ -24,6 +25,8 @@ class TitleBarConfig(
     val onControl: (Boolean) -> Unit,
     /** Minimize, maximize and close drawn by the app, where the system does not draw them (Linux); null otherwise. */
     val windowButtons: (@Composable () -> Unit)?,
+    /** Moves the window when the bar is dragged, where the app draws the whole frame (no system bar to do it); empty where the system drags. */
+    val drag: Modifier = Modifier,
 )
 
 /** Whether the pointer is on one of the title bar's controls, kept by [titleBarControl] for [titleBarArea]. */

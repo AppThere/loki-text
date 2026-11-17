@@ -348,15 +348,15 @@ fun CanvasWorkspace(
                     }
                 }
                 HorizontalDivider()
-                Row(Modifier.fillMaxWidth().background(bars), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) { tools(false) }
-                    VerticalDivider(Modifier.height(32.dp))
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        for (p in panels) StripButton(p, sheetShown && p.id == openPanel) {
-                            val closing = sheetShown && p.id == openPanel
-                            sheetShown = !closing
-                            onOpenPanel(if (closing) null else p.id)
-                        }
+                // Two rows, not one: a panel strip of nine buttons is as wide as a phone, and beside it the
+                // tools had no room at all (a phone showed no tools). Tools first, they are used most.
+                Box(Modifier.fillMaxWidth().background(bars)) { tools(false) }
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth().background(bars).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                    for (p in panels) StripButton(p, sheetShown && p.id == openPanel) {
+                        val closing = sheetShown && p.id == openPanel
+                        sheetShown = !closing
+                        onOpenPanel(if (closing) null else p.id)
                     }
                 }
             }

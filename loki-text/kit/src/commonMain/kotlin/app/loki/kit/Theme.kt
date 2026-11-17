@@ -8,6 +8,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,9 +54,18 @@ fun CraftTheme(
         else -> isSystemInDarkTheme()
     }
     val colors = if (isDark) dark else light
+    val frame = LocalWindowFrame.current
     MaterialTheme(colorScheme = colors, typography = typography) {
         CompositionLocalProvider(LocalBaseColors provides colors, LocalContentColor provides colors.onBackground) {
-            content(choice, { c -> if (c in THEME_CHOICES) choice = c }, isDark)
+            val body: @Composable () -> Unit = { content(choice, { c -> if (c in THEME_CHOICES) choice = c }, isDark) }
+            if (frame == null) body() else frame(body)
         }
     }
 }
+
+/**
+ * A window frame the app draws around everything it shows (a title bar, resize edges), for a window the system gives no
+ * title bar. Provided by the platform's `main`, null where the system draws the frame. [CraftTheme] composes it inside the
+ * theme, so the frame wears the app's colours. See `OwnFrame` in the desktop source set.
+ */
+val LocalWindowFrame = compositionLocalOf<(@Composable (content: @Composable () -> Unit) -> Unit)?> { null }

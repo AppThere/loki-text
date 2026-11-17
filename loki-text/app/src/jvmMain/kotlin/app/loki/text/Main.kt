@@ -1,6 +1,15 @@
 package app.loki.text
 
 import androidx.compose.foundation.layout.Row
+import app.loki.kit.windowDrag
+import app.loki.kit.useOwnFrame
+import app.loki.kit.toggleMaximized
+import app.loki.kit.WindowButtons
+import app.loki.kit.ResizeEdges
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -91,16 +100,28 @@ fun main() = application {
         // Closing asks about unsaved changes first; App calls onClose once that is settled.
         var closeRequest by remember { mutableStateOf(0) }
         val windowState = rememberWindowState()
-        Window(onCloseRequest = { closeRequest++ }, title = "Loki Text", state = windowState) {
-            // On a JetBrains Runtime the app draws the title bar; otherwise the native one stays.
-            val installed = remember(window) { installCustomTitleBar(window, TITLE_BAR_DP) }
+        val ownFrame = remember { useOwnFrame() }
+        Window(onCloseRequest = { closeRequest++ }, title = "Loki Text", state = windowState, undecorated = ownFrame) {
+            // On a JetBrains Runtime with custom title bars the app draws the title bar and the system keeps the frame. Where the
+            // runtime has none (Linux) the window is undecorated and the app draws the frame; elsewhere the native bar stays.
+            val installed = remember(window) { if (ownFrame) null else installCustomTitleBar(window, TITLE_BAR_DP) }
             var insets by remember { mutableStateOf(0f to 0f) }
             LaunchedEffect(installed, windowState.placement) {
                 if (installed != null) { delay(150); insets = installed.leftInset to installed.rightInset }
             }
             // Linux has no system caption buttons in a custom bar, so the app draws them.
             val ownButtons = System.getProperty("os.name").orEmpty().startsWith("Linux")
-            val titleBar = installed?.let { bar ->
+            val maximize = { windowState.toggleMaximized() }
+            val titleBar = if (ownFrame) TitleBarConfig(
+                height = TITLE_BAR_DP.dp, leftInset = 0.dp, rightInset = 0.dp, onControl = {},
+                windowButtons = {
+                    WindowButtons(
+                        maximized = windowState.placement == WindowPlacement.Maximized,
+                        onMinimize = { windowState.isMinimized = true }, onMaximize = maximize, onClose = { closeRequest++ },
+                    )
+                },
+                drag = Modifier.windowDrag(window, onDoubleClick = maximize),
+            ) else installed?.let { bar ->
                 TitleBarConfig(
                     height = TITLE_BAR_DP.dp,
                     leftInset = insets.first.dp,
@@ -118,6 +139,7 @@ fun main() = application {
                     },
                 )
             }
+            Box(Modifier.fillMaxSize().then(if (ownFrame && windowState.placement != WindowPlacement.Maximized) Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant) else Modifier)) {
             App(
                 closeRequest,
                 onClose = { windows.remove(w); if (windows.isEmpty()) exitApplication() },
@@ -125,19 +147,9 @@ fun main() = application {
                 onNewWindow = { path -> windows.add(DocWindow(nextId++, path)) },
                 titleBar = titleBar,
             )
+            if (ownFrame && windowState.placement != WindowPlacement.Maximized) ResizeEdges(window)
+            }
         }
-    }
-}
-
-/** Minimize, maximize/restore and close, for a custom title bar on a platform whose system does not draw them. */
-@Composable
-private fun WindowButtons(maximized: Boolean, onMinimize: () -> Unit, onMaximize: () -> Unit, onClose: () -> Unit) {
-    Row {
-        IconButton(onClick = onMinimize, modifier = Modifier.size(32.dp)) { Icon(Lucide.Minus, contentDescription = "Minimize", modifier = Modifier.size(16.dp)) }
-        IconButton(onClick = onMaximize, modifier = Modifier.size(32.dp)) {
-            Icon(if (maximized) Lucide.Copy else Lucide.Square, contentDescription = if (maximized) "Restore" else "Maximize", modifier = Modifier.size(14.dp))
-        }
-        IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) { Icon(Lucide.X, contentDescription = "Close", modifier = Modifier.size(16.dp)) }
     }
 }
 
