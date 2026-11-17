@@ -546,12 +546,25 @@ fn a_header_or_footer_is_entered_by_point_and_left_again() {
 
 /// The engine's command list as the Kotlin tests read it (`app/src/jvmTest/resources`). They check
 /// that every command is reachable from the Compose UI against this copy, so it must follow the engine.
+/// Shortcuts are left out: the engine picks them for the platform it is built for (`non_mac`), so a
+/// Mac and Linux would each write a different file, and the Kotlin tests don't read them.
 #[test]
 fn kotlin_command_fixture_follows_the_engine() {
     let s = loki_session_new();
     let cmds = call(s, "engine.commands", None)["result"].clone();
     unsafe { loki_session_free(s) };
-    let lines: Vec<String> = cmds.as_array().into_iter().flatten().map(|c| serde_json::to_string(c).unwrap()).collect();
+    let lines: Vec<String> = cmds
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            let mut c = c.clone();
+            if let Some(o) = c.as_object_mut() {
+                o.remove("shortcut");
+            }
+            serde_json::to_string(&c).unwrap()
+        })
+        .collect();
     let now = format!("[\n{}\n]\n", lines.join(",\n"));
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/src/jvmTest/resources/engine-commands.json");
     if std::env::var_os("LOKI_UPDATE_FIXTURES").is_some() {
