@@ -2,6 +2,13 @@ package app.loki.text
 
 import androidx.compose.foundation.layout.Row
 import app.loki.kit.windowDrag
+import app.loki.kit.IS_MAC
+import app.loki.kit.MENU_MINIMIZE
+import app.loki.kit.MENU_ZOOM
+import app.loki.kit.LokiMenuBar
+import app.loki.kit.MenuBridge
+import app.loki.kit.installMacAppMenu
+import app.loki.kit.nameMacApplication
 import app.loki.kit.useOwnFrame
 import app.loki.kit.toggleMaximized
 import app.loki.kit.WindowButtons
@@ -97,15 +104,8 @@ private class DocWindow(val id: Int, val path: String?)
 /** Height of the title bar the app draws, in dp. */
 private const val TITLE_BAR_DP = 40f
 
-private val IS_MAC = System.getProperty("os.name").orEmpty().startsWith("Mac")
-
 fun main() {
-    // The Mac names the application menu and the Dock entry from these, read when AWT starts;
-    // without them a `gradle run` shows the main class (MainKt). A packaged app has its bundle name.
-    if (IS_MAC) {
-        System.setProperty("apple.awt.application.name", "Loki Text")
-        System.setProperty("apple.laf.useScreenMenuBar", "true")
-    }
+    nameMacApplication("Loki Text")
     lokiApplication()
 }
 
@@ -141,7 +141,7 @@ private fun lokiApplication() = application {
                 window.addWindowListener(l)
                 onDispose { window.removeWindowListener(l) }
             }
-            if (IS_MAC) LokiMenuBar(bridge, mac = true) { id ->
+            if (IS_MAC) LokiMenuBar(bridge, mac = true, menus = { b, mac -> appMenus(b.catalog, mac) }) { id ->
                 when (id) {
                     MENU_MINIMIZE -> windowState.isMinimized = true
                     MENU_ZOOM -> windowState.toggleMaximized()
