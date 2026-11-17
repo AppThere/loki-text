@@ -920,7 +920,7 @@ fun App(
             // The title bar is the top row at every width: Undo/Redo, the document's name, the menu, window buttons.
             val hits = remember { TitleBarHits() }
             Row(
-                Modifier.fillMaxWidth().height(titleBar.height).titleBarArea(titleBar, hits)
+                Modifier.fillMaxWidth().height(titleBar.height).titleBarArea(titleBar, hits).then(titleBar.drag)
                     .padding(start = titleBar.leftInset + 8.dp, end = titleBar.rightInset + 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
