@@ -50,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -339,6 +340,8 @@ fun App(
     onNewWindow: ((String?) -> Unit)? = null,
     /** Set when the app draws the window's title bar (desktop on a JetBrains Runtime); null for a native one. */
     titleBar: TitleBarConfig? = null,
+    /** Set where the platform has a menu bar (macOS): it shows this window's commands, so the in-window menu button goes. */
+    menuBridge: MenuBridge? = null,
 ) = AppTheme { themeChoice, setTheme, darkTheme ->
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
@@ -816,9 +819,19 @@ fun App(
 
     // A key's command: file commands that need a picker or a window go through the File menu's path.
     fun runKey(k: KeyCommand) {
+        // The same press may also reach the menu bar's key equivalent: whichever comes second is dropped.
+        if (menuBridge?.allow(k.command, fromMenu = false) == false) return
         scope.launch { if (k.command in FILE_MENU_COMMANDS) runFileMenu(k.command) else runCommand(k.command, k.params) }
     }
-    val fileMenu: @Composable () -> Unit = { FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } }
+    if (menuBridge != null) {
+        SideEffect {
+            menuBridge.catalog = catalogById
+            menuBridge.disabled = commandState.disabled
+            menuBridge.on = commandState.on + "app.theme.$themeChoice"
+            menuBridge.runner = { id -> scope.launch { runFileMenu(id) } }
+        }
+    }
+    val fileMenu: @Composable () -> Unit = if (menuBridge != null) ({}) else ({ FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } })
     val quickCommands: @Composable () -> Unit = {
         for ((label, command, shortcut) in QUICK_ACCESS) {
             CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }

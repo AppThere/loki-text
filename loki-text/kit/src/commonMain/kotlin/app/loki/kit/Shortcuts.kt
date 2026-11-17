@@ -52,6 +52,9 @@ private val KEY_NAMES: Map<String, Key> = buildMap {
     put("[", Key.LeftBracket); put("]", Key.RightBracket); put("/", Key.Slash); put(";", Key.Semicolon)
 }
 
+/** The key an engine shortcut names (`O`, `F12`, `Left`, `=`), or null when this app doesn't know it. */
+fun keyNamed(name: String): Key? = KEY_NAMES[name] ?: KEY_NAMES[name.uppercase()]
+
 private val F_KEYS = (1..12).mapNotNull { KEY_NAMES["F$it"] }.toSet()
 
 /** One chord of an engine shortcut, or null when it names a key this app doesn't know. */
