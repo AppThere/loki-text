@@ -1,4 +1,4 @@
-package app.loki.text
+package app.loki.kit
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -9,17 +9,17 @@ import androidx.compose.ui.window.MenuScope
 import java.awt.Desktop
 
 /**
- * The window's menu bar from [appMenus]: on a Mac it is the screen's menu bar while the window is
- * in front. Entries are enabled and checked as the engine reports; [onRun] gets the chosen id.
+ * The window's menu bar from the app's menus: on a Mac it is the screen's menu bar while the window is
+ * in front. [menus] is the app's layout (see [buildMenus]). Entries are enabled and checked as the engine reports; [onRun] gets the chosen id.
  */
 @Composable
-fun FrameWindowScope.LokiMenuBar(bridge: MenuBridge, mac: Boolean, onRun: (String) -> Unit) {
+fun FrameWindowScope.LokiMenuBar(bridge: MenuBridge, mac: Boolean, menus: (MenuBridge, Boolean) -> List<BarMenu>, onRun: (String) -> Unit) {
     val catalog = bridge.catalog
-    val menus = remember(catalog, mac) { appMenus(catalog, mac) }
+    val bar = remember(catalog, bridge.ribbon, mac) { menus(bridge, mac) }
     val disabled = bridge.disabled
     val on = bridge.on
     MenuBar {
-        for (m in menus) Menu(m.title) { entries(m.entries, disabled, on, onRun) }
+        for (m in bar) Menu(m.title) { entries(m.entries, disabled, on, onRun) }
     }
 }
 
@@ -31,7 +31,7 @@ private fun MenuScope.entries(list: List<BarEntry>, disabled: Map<String, String
         is MenuCommand -> {
             val key = e.shortcut?.let { KeyShortcut(it.key, ctrl = it.ctrl, meta = it.meta, alt = it.alt, shift = it.shift) }
             val enabled = disabled[e.id] == null
-            if (e.check) {
+            if (e.check || e.id in on) {
                 CheckboxItem(e.label, checked = e.id in on, enabled = enabled, shortcut = key, onCheckedChange = { onRun(e.id) })
             } else {
                 Item(e.label, enabled = enabled, shortcut = key, onClick = { onRun(e.id) })
@@ -52,4 +52,17 @@ fun installMacAppMenu(onAbout: () -> Unit, onSettings: () -> Unit, onQuit: () ->
     runCatching {
         if (d.isSupported(Desktop.Action.APP_QUIT_HANDLER)) d.setQuitHandler { _, response -> response.cancelQuit(); onQuit() }
     }
+}
+
+/** True on macOS. */
+val IS_MAC: Boolean = System.getProperty("os.name").orEmpty().startsWith("Mac")
+
+/**
+ * Names the Mac's application menu and Dock entry, and puts the menus in the screen's menu bar. Call it first in `main`: AWT reads
+ * these when it starts, and without them a `gradle run` shows the main class (MainKt). A packaged app has its bundle name.
+ */
+fun nameMacApplication(name: String) {
+    if (!IS_MAC) return
+    System.setProperty("apple.awt.application.name", name)
+    System.setProperty("apple.laf.useScreenMenuBar", "true")
 }
