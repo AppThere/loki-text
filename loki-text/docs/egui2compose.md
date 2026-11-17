@@ -156,6 +156,34 @@ command from another function. So:
   parameters. It is built from the params doc, so its keys are right by construction. The
   hand-shaped dialog is worth finishing only where its layout or preview matters.
 
+#### What the menu offers
+
+The reader also emits helper widgets (rows, fields, checkboxes) as if they were dialogs, and cannot always
+find which command a dialog runs. Offering one whose OK only closes it is a dead button, so each
+dialog in `TranslatedDialogs.kt` is one of three kinds:
+
+| Kind | Registry row | The menu |
+|---|---|---|
+| own | `TranslatedDialog(title, source)` | opens the translated dialog; its OK runs the command the reader found |
+| form | `... command = "id")` | opens that command's form (`CommandFormDialog`, from the params doc) |
+| hidden | `... hidden = true)` | leaves it out; the file stays |
+
+A dialog with no command found is hidden unless `dialog-commands.json` names one. Put that file
+beside the generated project (`<out>/dialog-commands.json`, or `--dialog-commands PATH`):
+
+```json
+{ "BasicBrightnessContrast": "image.adjustments.brightnessContrast" }
+```
+
+Keys are the Kotlin dialog names (the file name without `Dialog.kt`; `REPORT.md`'s Dialogs table
+shows each one's kind). A command the engine does not list is dropped, with a note in the report.
+Keep the file in the repository: a regeneration then keeps the bindings. Bind only a whole dialog
+whose command you checked, not a fragment. `DialogsWiredTest` is generated with the app and fails
+if a dialog in the menu runs nothing or names an unknown command.
+
+A hand-wired `onRun` in a generated dialog file is overwritten by a regeneration, and the reader
+cannot see it: add the command to `dialog-commands.json` first, or the dialog turns hidden.
+
 ## After running it
 
 Generated paths to Loki Kit are relative to `--out` (the two checkouts side by side), and with

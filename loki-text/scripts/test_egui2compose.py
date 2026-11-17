@@ -188,6 +188,57 @@ class Chrome(unittest.TestCase):
             self.assertIn('START_THEME = "dark"', app)
 
 
+class DialogTargets(unittest.TestCase):
+    BY_ID = {"image.adjust": {"id": "image.adjust"}, "file.save": {"id": "file.save"}}
+
+    def dialog(self, name, command=None):
+        widgets = [{"kind": "button", "label": "OK", "command": command}] if command else []
+        return {"name": name, "title": name, "file": f"dialogs/{name}.rs", "line": 1, "widgets": widgets, "commands": []}
+
+    def test_a_dialog_with_its_own_command_keeps_its_body(self):
+        self.assertEqual(e.dialog_target(self.dialog("save", "file.save"), self.BY_ID, {}), ("own", "file.save"))
+
+    def test_a_dialog_without_one_is_hidden_unless_a_command_is_named(self):
+        d = self.dialog("adjust")
+        self.assertEqual(e.dialog_target(d, self.BY_ID, {}), ("hidden", ""))
+        self.assertEqual(e.dialog_target(d, self.BY_ID, {"Adjust": "image.adjust"}), ("form", "image.adjust"))
+        self.assertEqual(e.dialog_target(d, self.BY_ID, {"Adjust": "no.such"}), ("hidden", ""))
+
+    def test_the_registry_says_which(self):
+        ds = [self.dialog("save", "file.save"), self.dialog("adjust"), self.dialog("row")]
+        text = e.gen_dialog_index("app.loki.x", ds, self.BY_ID, {"Adjust": "image.adjust"})
+        self.assertIn("class TranslatedDialog(val title: String, val source: String, val command: String? = null, val hidden: Boolean = false", text)
+        rows = [l for l in text.split("\n") if l.lstrip().startswith("TranslatedDialog(\"")]
+        self.assertEqual(len(rows), 3)
+        self.assertNotIn("command =", rows[0] + "hidden", "own")
+        self.assertIn('command = "image.adjust")', rows[1])
+        self.assertIn("hidden = true)", rows[2])
+
+    def test_the_bindings_file_drops_unknown_commands_with_a_note(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "dialog-commands.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"A": "image.adjust", "B": "no.such"}, f)
+            notes = []
+            self.assertEqual(e.load_dialog_commands(path, self.BY_ID, notes), {"A": "image.adjust"})
+            self.assertEqual(len(notes), 1)
+            self.assertEqual(e.load_dialog_commands(os.path.join(d, "missing.json"), self.BY_ID, notes), {})
+
+    def test_the_menu_skips_hidden_dialogs_and_opens_command_forms(self):
+        self.assertIn("TRANSLATED_DIALOGS.filter { !it.hidden }", e.APP_KT)
+        self.assertIn("val c = d.command?.let { byId[it] }", e.RIBBON_LAYOUT)
+        self.assertIn("val c = d.command?.let { byId[it] }", e.WORKSPACE_LAYOUT)
+        self.assertNotIn("onDialog = { dialog = it }", e.APP_KT + e.RIBBON_LAYOUT + e.WORKSPACE_LAYOUT)
+
+    def test_a_generated_project_carries_the_wiring_test(self):
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "3", "--package", "app.loki.x"]), 0)
+            with open(os.path.join(out, "app/src/jvmTest/kotlin/app/loki/x/DialogsWiredTest.kt"), encoding="utf-8") as f:
+                self.assertIn("noDialogInTheMenuRunsNothing", f.read())
+            with open(os.path.join(out, "app/src/commonMain/kotlin/app/loki/x/dialogs/TranslatedDialogs.kt"), encoding="utf-8") as f:
+                self.assertIn("hidden", f.read())
+
+
 class AgainstWordCraft(unittest.TestCase):
     """The source reader against the engine's own listing. These floors may rise, not fall."""
 
