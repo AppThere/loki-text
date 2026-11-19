@@ -577,3 +577,29 @@ fn ui_requests_are_handed_over_once() {
     assert_eq!(call(s, "loki.uiRequests", None)["result"], serde_json::json!([]));
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn pointer_hit_tests_report_positions_and_table_spots() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    run("text.insert", r#"{"text":"Some text"}"#);
+    // A point on the first line of text: a position and its line; no table, no text box.
+    let r = call(s, "loki.hit", Some(r#"{"page":0,"x":80,"y":90}"#));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(r["result"]["pos"].is_object() && r["result"]["line"].is_object() && r["result"]["textBox"].is_null(), "{r}");
+    assert!(call(s, "loki.tableSpot", Some(r#"{"page":0,"x":80,"y":90}"#))["result"]["kind"].is_null());
+    // Draw a table, then a press on its left border grabs it for resizing.
+    run("table.draw", r#"{"page":0,"x0":100,"y0":100,"x1":400,"y1":220}"#);
+    let spot = |x: f64, y: f64| call(s, "loki.tableSpot", Some(&format!(r#"{{"page":0,"x":{x},"y":{y},"reach":4}}"#)))["result"].clone();
+    assert_eq!(spot(100.0, 160.0)["kind"], "resize", "{}", spot(100.0, 160.0));
+    assert_eq!(spot(90.0, 87.0)["kind"], "handle", "{}", spot(90.0, 87.0));
+    assert_eq!(spot(300.0, 150.0)["kind"], serde_json::Value::Null);
+    assert!(spot(600.0, 700.0)["kind"].is_null());
+    // Hostile input is an empty answer, not a crash.
+    for bad in [r#"{}"#, r#"{"page":"a","x":1,"y":1}"#, r#"{"page":99999999999,"x":1e300,"y":-1e300}"#, r#"{"page":0,"x":null,"y":1}"#] {
+        for m in ["loki.hit", "loki.tableSpot"] {
+            assert_eq!(call(s, m, Some(bad))["ok"], true, "{m} {bad}");
+        }
+    }
+    unsafe { loki_session_free(s) };
+}
