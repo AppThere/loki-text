@@ -17,20 +17,21 @@ internal val PARAM_DOCS = mapOf(
 
 /**
  * Commands a pointer drives: their parameters are page positions that only a press or a drag on
- * the page can supply, so a form for them would be noise. The page's own gestures issue the ones
- * in [POINTER_GESTURES]; the rest are gestures this front end doesn't have yet ([POINTER_GAPS]),
- * each with ribbon controls that reach the same result.
+ * the page can supply, so a form for them would be noise. The page's own gestures issue them
+ * (`PageMouse.kt`, `ObjectFrameOverlay.kt`): a press on a table's border, handle, insert button or
+ * selection area, a double-click on a border, dragging by units, Alt+drag, Ctrl+drag of an object, and
+ * dragging a connector's end. `shape.link` is not here: it has a ribbon button, which waits for a tap on
+ * the text box to link to.
  */
 internal val POINTER_GESTURES = setOf(
     "caret.set", "select.range", "select.objectAt", "select.grabEnd", "hf.enterAt",
     "table.draw", "table.eraser", "draw.stroke", "draw.erase",
+    "select.dragUnit", "select.column", "table.resizeDrag", "table.selectAt", "table.insertAt",
+    "table.moveDrag", "table.fitColumn", "arrange.copyTo", "shape.connect",
 )
 
 /** Mouse gestures of the desktop front end with no counterpart here yet; see `docs/parity.md`. */
-internal val POINTER_GAPS = setOf(
-    "select.dragUnit", "select.column", "table.resizeDrag", "table.selectAt", "table.insertAt",
-    "table.moveDrag", "table.fitColumn", "arrange.copyTo", "shape.link", "shape.connect",
-)
+internal val POINTER_GAPS = emptySet<String>()
 
 /**
  * Commands that only make sense as part of typing or of a control that tracks its own state, so

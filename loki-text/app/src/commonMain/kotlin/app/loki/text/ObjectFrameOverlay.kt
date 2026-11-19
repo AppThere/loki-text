@@ -3,7 +3,14 @@ package app.loki.text
 import app.loki.kit.*
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.offset
@@ -122,10 +129,13 @@ internal fun boundsParams(from: ObjectFrame, to: FrameRect): JsonObject = buildJ
  * The frame of the selected object over its page: an outline turned with the object, eight resize handles and a
  * rotation handle. Dragging the body moves a floating object; a handle resizes; the rotation handle turns it.
  * While a finger is down only the outline follows, and the change is one command when it lifts ([onCommit]).
- * [pxPerPt] turns page points into the page image's pixels.
+ * With Ctrl held a drag of the body makes a copy where it lands instead (`arrange.copyTo`); an object in the text is moved or copied
+ * to the text position under the drop ([onDropAt]). [pxPerPt] turns page points into the page image's pixels.
  */
 @Composable
-fun BoxScope.ObjectFrameOverlay(frame: ObjectFrame, pxPerPt: Float, onCommit: (String, JsonObject) -> Unit) {
+fun BoxScope.ObjectFrameOverlay(frame: ObjectFrame, pxPerPt: Float, onDropAt: (x: Float, y: Float, copy: Boolean) -> Unit = { _, _, _ -> }, onCommit: (String, JsonObject) -> Unit) {
+    // A connector is dragged by its two ends, not framed.
+    frame.ends?.let { ends -> ConnectorEnds(frame.page, ends, pxPerPt, onCommit); return }
     val density = LocalDensity.current
     val target = with(density) { TOUCH_TARGET.roundToPx() }
     val knob = with(density) { KNOB.toPx() }
@@ -148,25 +158,40 @@ fun BoxScope.ObjectFrameOverlay(frame: ObjectFrame, pxPerPt: Float, onCommit: (S
         drawCircle(FRAME_COLOR, knob * 1.3f, rotateHandlePoint(shown, gap) * k)
     }
 
-    // Dragging the body moves a floating object. The area turns with the frame, so its drags are in the frame's axes.
-    if (frame.floating) {
+    // Dragging the body moves a floating object, or with Ctrl copies it; an object in the text is dropped at a text position. The
+    // area turns with the frame, so its drags are in the frame's axes.
+    run {
+        val inline = !frame.floating
         Box(
             Modifier
                 .offset { IntOffset((real.x * pxPerPt).roundToInt(), (real.y * pxPerPt).roundToInt()) }
                 .size(with(density) { (real.w * pxPerPt).toDp() }, with(density) { (real.h * pxPerPt).toDp() })
                 .graphicsLayer { rotationZ = real.rotation }
-                .pointerInput(Unit) {
-                    var total = Offset.Zero
-                    detectDragGestures(
-                        onDragStart = { total = Offset.Zero },
-                        onDrag = { change, amount ->
+                .pointerInput(inline) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var total = Offset.Zero
+                        var copy = false
+                        var moved = false
+                        val first = awaitTouchSlopOrCancellation(down.id) { change, over -> change.consume(); total += rotateVec(over, latestFrame.rotation); moved = true }
+                        if (first == null) return@awaitEachGesture
+                        fun show() { if (!inline) preview = moveFrame(latestFrame.rect(), total.x / latestScale, total.y / latestScale) }
+                        show()
+                        drag(first.id) { change ->
                             change.consume()
-                            total += rotateVec(amount, latestFrame.rotation)
-                            preview = moveFrame(latestFrame.rect(), total.x / latestScale, total.y / latestScale)
-                        },
-                        onDragEnd = { preview?.let { onCommit("arrange.bounds", boundsParams(latestFrame, it)) }; preview = null },
-                        onDragCancel = { preview = null },
-                    )
+                            copy = currentEvent.keyboardModifiers.let { it.isCtrlPressed || it.isMetaPressed }
+                            total += rotateVec(change.positionChange(), latestFrame.rotation)
+                            show()
+                        }
+                        val f = latestFrame
+                        if (inline) {
+                            // Dropped where the pointer ended, in page points.
+                            onDropAt(f.x + f.w / 2f + total.x / latestScale, f.y + f.h / 2f + total.y / latestScale, copy)
+                        } else {
+                            preview?.let { p -> if (copy) onCommit("arrange.copyTo", buildJsonObject { put("page", f.page); put("x", p.x); put("y", p.y) }) else onCommit("arrange.bounds", boundsParams(f, p)) }
+                        }
+                        preview = null
+                    }
                 },
         )
     }
@@ -213,6 +238,52 @@ fun BoxScope.ObjectFrameOverlay(frame: ObjectFrame, pxPerPt: Float, onCommit: (S
                         },
                         onDragEnd = { preview?.let { onCommit("arrange.rotation", buildJsonObject { put("degrees", it.rotation) }) }; preview = null },
                         onDragCancel = { preview = null },
+                    )
+                },
+        )
+    }
+}
+
+/** How near (dp) a press must be to a connector's end to grab it. */
+private val END_TOUCH = 40.dp
+
+/**
+ * A selected connector: a handle at each end. Dragging one shows a line from the other end to the pointer, and on release
+ * `shape.connect` glues the end to a shape's connection site near there, or leaves it free there.
+ */
+@Composable
+private fun BoxScope.ConnectorEnds(page: Int, ends: List<Pair<Float, Float>>, pxPerPt: Float, onCommit: (String, JsonObject) -> Unit) {
+    val density = LocalDensity.current
+    val target = with(density) { END_TOUCH.roundToPx() }
+    val knob = with(density) { KNOB.toPx() }
+    val latestScale by rememberUpdatedState(pxPerPt)
+    val latestEnds by rememberUpdatedState(ends)
+    // The end being dragged (0 start, 1 end) and where it is now, in page points.
+    var dragging by remember(ends) { mutableStateOf<Pair<Int, Offset>?>(null) }
+    fun place(i: Int): Offset = dragging?.takeIf { it.first == i }?.second ?: ends[i].let { Offset(it.first, it.second) }
+    Canvas(Modifier.matchParentSize()) {
+        drawLine(FRAME_COLOR, place(0) * pxPerPt, place(1) * pxPerPt, strokeWidth = 2f)
+        for (i in 0..1) drawCircle(FRAME_COLOR, knob * 1.3f, place(i) * pxPerPt)
+    }
+    for (i in 0..1) {
+        val at = Offset(ends[i].first, ends[i].second) * pxPerPt
+        Box(
+            Modifier
+                .offset { IntOffset(at.x.roundToInt() - target / 2, at.y.roundToInt() - target / 2) }
+                .size(END_TOUCH)
+                .pointerInput(i) {
+                    var finger = Offset.Zero
+                    detectDragGestures(
+                        onDragStart = { finger = latestEnds[i].let { Offset(it.first, it.second) }; dragging = i to finger },
+                        onDrag = { change, amount -> change.consume(); finger += amount / latestScale; dragging = i to finger },
+                        onDragEnd = {
+                            val to = dragging?.second
+                            dragging = null
+                            if (to != null) onCommit("shape.connect", buildJsonObject {
+                                put(if (i == 0) "start" else "end", buildJsonObject { put("x", to.x); put("y", to.y); put("page", page) })
+                            })
+                        },
+                        onDragCancel = { dragging = null },
                     )
                 },
         )
