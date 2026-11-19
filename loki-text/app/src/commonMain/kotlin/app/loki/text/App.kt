@@ -100,6 +100,12 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import app.loki.text.engine.SelectionGeometry
 import androidx.compose.ui.unit.dp
 import app.loki.text.engine.Engine
+import androidx.compose.ui.input.pointer.isAltPressed
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import app.loki.text.engine.PointerHit
+import app.loki.text.engine.TableSpot
 import app.loki.kit.*
 import app.loki.text.engine.EngineException
 import kotlinx.coroutines.Dispatchers
@@ -247,6 +253,11 @@ private fun DrawScope.drawPenStroke(st: PenStroke, pxPerPt: Float, ink: Color) {
     val dash = Stroke(width = 1.5f * density, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * density, 4f * density)))
     if (penPreviewIsLine(st)) drawLine(ink, a, b, strokeWidth = dash.width, pathEffect = dash.pathEffect)
     else drawRect(ink, topLeft = Offset(minOf(a.x, b.x), minOf(a.y, b.y)), size = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y)), style = dash)
+}
+
+/** The line from a press to the pointer while a table border or move handle is dragged. */
+private fun DrawScope.drawMouseGuide(g: MouseGuide, ink: Color) {
+    drawLine(ink, g.from, g.to, strokeWidth = 1.5f * density, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * density, 4f * density)))
 }
 
 /** The ink being drawn: the pen's own colour and width for a pen, a dashed loop for the lasso. */
@@ -420,9 +431,15 @@ fun App(
     // pages re-rendered sharply) when they lift.
     var pinch by remember { mutableStateOf(1f) }
     // The last tap on a page, to tell a double tap from two single ones.
-    var lastTapMark by remember { mutableStateOf<TimeSource.Monotonic.ValueTimeMark?>(null) }
-    var lastTapAt by remember { mutableStateOf(Offset.Zero) }
     val tapSlopPx = with(LocalDensity.current) { 40.dp.toPx() }
+    val tapCounter = remember { ClickCounter() }
+    val mouseCounter = remember { ClickCounter() }
+    // Set while the engine is asked about a mouse press: the press is a gesture of its own (a table's border, the selection
+    // bar), and the tap that follows must leave the caret alone. Plain, not state: read once the engine has answered.
+    val mousePressOwned = remember { booleanArrayOf(false) }
+    var mouseGuide by remember { mutableStateOf<MouseGuide?>(null) }
+    // Create Link was asked for: the next tap on a text box is the one the selected box's text continues in.
+    var linkMode by remember { mutableStateOf(false) }
     // The context menu (right-click, or long-press on a selection or a misspelled word), over a page.
     var ctxMenu by remember { mutableStateOf<ContextMenuData?>(null) }
     // The floating toolbar hides while a handle or the mouse is moving the selection.
@@ -468,6 +485,28 @@ fun App(
         }
         if (picked) revision++
         return picked
+    }
+
+    // What the mouse gestures of PageMouse.kt ask of the app: the engine, in order, and the state they show.
+    val mouseHost = object : MouseHost {
+        override suspend fun probe(p: MousePress): Probe = engineLock.withLock {
+            val got = withContext(Dispatchers.Default) {
+                runCatching { Probe(engine.tableSpot(p.page, p.x, p.y, p.reachPt), engine.hit(p.page, p.x, p.y)) }
+                    .getOrDefault(Probe(TableSpot(null, false), PointerHit(null, null, null, null)))
+            }
+            mousePressOwned[0] = ownsPress(got, p)
+            got
+        }
+        override suspend fun hit(page: Int, x: Float, y: Float): PointerHit =
+            engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.hit(page, x, y) }.getOrDefault(PointerHit(null, null, null, null)) } }
+        override suspend fun exec(id: String, params: JsonObject): JsonElement? {
+            var out: JsonElement? = null
+            perform { out = execute(id, params) }
+            return out
+        }
+        override suspend fun setCaret(page: Int, at: Offset, pxPerPt: Float, extend: Boolean) = perform { setCaret(page, at, pxPerPt, extend) }
+        override fun guide(page: Int, from: Offset?, to: Offset?) { mouseGuide = if (from != null && to != null) MouseGuide(page, from, to) else null }
+        override fun selecting(on: Boolean) { mouseSelecting = on }
     }
 
     // Enters the header or footer under a double tap (Print Layout only), and leaves it again from the body.
@@ -747,6 +786,8 @@ fun App(
     suspend fun runFromUi(id: String) {
         val c = catalogById[id]
         when {
+            // Create Link: the text box to continue in is the next one tapped.
+            id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
             c.needsInput -> commandForm = c
             !c.mutates -> executeFromUi(c, JsonObject(emptyMap()))?.let { status = it }
@@ -1136,6 +1177,7 @@ fun App(
                             drawContent()
                             if (viewState.gridlines && !flat) drawGridlines(pxPerPt, gridInk)
                             drawSelection(selection, i, pxPerPt, caretColor)
+                            mouseGuide?.takeIf { it.page == i }?.let { drawMouseGuide(it, caretColor) }
                             penStroke?.takeIf { it.page == i }?.let { drawPenStroke(it, pxPerPt, penInk) }
                             if (inkTool != null && inkPage == i) drawInkPreview(inkTool, inkPoints, pxPerPt, penInk)
                         }
@@ -1217,36 +1259,53 @@ fun App(
                                 },
                             ) { o ->
                                 pageFocus.requestFocus()
-                                // A second tap close to the first: in a header or footer area it edits that one; in the body, while one
-                                // is being edited, it goes back to the body.
-                                val twice = lastTapMark?.let { isDoubleTap(it.elapsedNow().inWholeMilliseconds, lastTapAt, o, tapSlopPx) } == true
-                                lastTapMark = if (twice) null else TimeSource.Monotonic.markNow()
-                                lastTapAt = o
-                                // A picture, shape or text box under the finger is selected (its frame appears); anything else puts the caret there.
+                                // Taps close together count up: the second selects a word (or enters a header or footer), the third a paragraph.
+                                val taps = tapCounter.press(o, tapSlopPx)
+                                val twice = taps == 2
                                 scope.launch {
+                                    // A mouse press the engine is asked about first belongs to its own gesture (a table's border, the
+                                    // selection bar): wait for the answer, which queues ahead of this, and leave the caret alone.
+                                    engineLock.withLock { }
+                                    if (mousePressOwned[0]) return@launch
+                                    if (linkMode) {
+                                        linkMode = false
+                                        val box = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.hit(i, o.x / pxPerPt, o.y / pxPerPt).textBox }.getOrNull() } }
+                                        if (box == null) status = "Not linked: tap a text box"
+                                        else perform { execute("shape.link", buildJsonObject { put("target", box) }) }
+                                        return@launch
+                                    }
                                     if (twice && enterHeaderFooterAt(i, o, pxPerPt)) return@launch
                                     if (twice && selection.hf != null) { perform { execute("insert.closeHeader"); setCaret(i, o, pxPerPt, false) }; return@launch }
-                                    if (selectObjectAt(i, o, pxPerPt)) keyboard?.hide()
-                                    else { keyboard?.show(); perform { setCaret(i, o, pxPerPt, false) } }
+                                    // A picture, shape or text box under the finger is selected (its frame appears); anything else puts the caret there.
+                                    if (taps == 1 && selectObjectAt(i, o, pxPerPt)) keyboard?.hide()
+                                    else {
+                                        keyboard?.show()
+                                        perform { setCaret(i, o, pxPerPt, false); if (taps == 2) execute("select.word") else if (taps == 3) execute("select.paragraph") }
+                                    }
                                 }
                             }
                         }
                         .pointerInput(i, pxPerPt) {
-                            // Dragging selects with a mouse or pen. A finger's drag is left alone so it scrolls.
+                            // A mouse or pen press: on a table's border, handle or selection area, in the selection bar, a double or
+                            // triple click, Alt held. The gesture runs in PageMouse.kt, fed the pointer's place as it moves. A finger's
+                            // drag is left alone so it scrolls, and a move inside the touch slop is still a click.
+                            val reachPt = 5f * density.density / pxPerPt
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
-                                if (down.type == PointerType.Touch) return@awaitEachGesture
-                                var started = false
-                                drag(down.id) { change ->
-                                    if (!started) {
-                                        started = true
-                                        mouseSelecting = true
-                                        scope.launch { perform { setCaret(i, down.position, pxPerPt, false) } }
-                                    }
-                                    change.consume()
-                                    scope.launch { perform { setCaret(i, change.position, pxPerPt, true) } }
+                                mousePressOwned[0] = false
+                                if (down.type == PointerType.Touch || currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
+                                val mods = currentEvent.keyboardModifiers
+                                val press = MousePress(i, pxPerPt, down.position, mouseCounter.press(down.position, tapSlopPx), mods.isShiftPressed, mods.isCtrlPressed || mods.isMetaPressed, mods.isAltPressed, reachPt)
+                                val moves = Channel<Offset>(Channel.CONFLATED)
+                                scope.launch { with(mouseHost) { mouseGesture(press, moves) } }
+                                var dragging = false
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) dragging = true
+                                    if (dragging) { change.consume(); moves.trySend(change.position) }
+                                    if (!change.pressed) break
                                 }
-                                mouseSelecting = false
+                                moves.close()
                             }
                         }),
                 )
@@ -1264,7 +1323,14 @@ fun App(
                 }
                 // The selected object's frame: move, resize and rotate it.
                 selection.obj?.takeIf { it.page == i }?.let { o ->
-                    ObjectFrameOverlay(o, pxPerPt) { id, p -> scope.launch { runCommand(id, p) } }
+                    ObjectFrameOverlay(
+                        o, pxPerPt,
+                        onDropAt = { x, y, copy -> scope.launch {
+                            // An object in the text moves (or is copied) to the text position under the drop.
+                            val to = mouseHost.hit(o.page, x, y).pos
+                            if (to != null) mouseHost.exec(if (copy) "arrange.copyTo" else "arrange.bounds", buildJsonObject { put("to", to) })
+                        } },
+                    ) { id, p -> scope.launch { runCommand(id, p) } }
                 }
                 ctxMenu?.takeIf { it.page == i }?.let { m ->
                     Box(Modifier.offset { IntOffset(m.x.roundToInt(), m.y.roundToInt()) }) {

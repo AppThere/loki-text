@@ -19,6 +19,7 @@ use std::ptr;
 use serde_json::{Value, json};
 use wordcraft_mcp::{Backend, Headless};
 
+mod pointer;
 mod state;
 
 /// Opaque to C. One per open window/document tab.
@@ -96,6 +97,16 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
         return match catch_unwind(AssertUnwindSafe(|| selection_geometry(&mut session.inner.session))) {
             Ok(v) => reply(json!({"ok": true, "result": v})),
             Err(_) => err("internal error (panic caught) reading the selection"),
+        };
+    }
+    if method == "loki.hit" || method == "loki.tableSpot" {
+        // What is under a pointer press (see `pointer`): read-only, so no undo step and no dirty flag.
+        let sess = &mut session.inner.session;
+        return match catch_unwind(AssertUnwindSafe(|| {
+            if method == "loki.hit" { pointer::hit(sess, &params) } else { pointer::table_spot(sess, &params) }
+        })) {
+            Ok(v) => reply(json!({"ok": true, "result": v})),
+            Err(_) => err("internal error (panic caught) hit-testing the page"),
         };
     }
     if method == "loki.commandState" {
@@ -176,7 +187,15 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
             };
             let r = hit.rect;
             let finite = [r.x, r.y, r.w, r.h, hit.spin.deg].iter().all(|n| n.is_finite());
-            finite.then(|| json!({"page": hit.page, "x": r.x, "y": r.y, "w": r.w, "h": r.h, "rotation": hit.spin.deg, "floating": hit.floating(), "kind": kind}))
+            // A connector is dragged by its two ends, not framed: where they are (page points).
+            let ends = match &o {
+                wordcraft_doc::para::InlineObject::Shape { kind, float, .. } if kind.is_connector() => {
+                    let (s, e) = wordcraft_doc::connector::ends(r.x, r.y, r.w, r.h, float.flip_h, float.flip_v);
+                    json!([{"x": s.0, "y": s.1}, {"x": e.0, "y": e.1}])
+                }
+                _ => Value::Null,
+            };
+            finite.then(|| json!({"page": hit.page, "x": r.x, "y": r.y, "w": r.w, "h": r.h, "rotation": hit.spin.deg, "floating": hit.floating(), "kind": kind, "ends": ends}))
         })
     } else {
         None

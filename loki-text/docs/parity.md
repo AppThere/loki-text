@@ -1,6 +1,6 @@
 # Loki Text: parity with the WordCraft desktop front end
 
-Status: November 2026. Measured against the engine's own command list (678 commands) and the egui
+Status: November 2026 (pointer gestures added). Measured against the engine's own command list (678 commands) and the egui
 front end (`crates/ui-egui`). Checked by `:app:jvmTest` (`EngineCoverageTest`) and looked at with
 the off-screen screenshot harness at phone (390 dp), tablet (760–800 dp) and desktop (1280 dp)
 widths, light and dark. **Not built for Android or iOS in this round** (no SDK on the build
@@ -21,10 +21,10 @@ Everything in WordCraft is a command, so parity here is a question with a number
 
 | | Before | Now |
 |---|---|---|
-| Commands with a way to them | roughly 500 of 678 by a source scan, and fewer on a phone (value controls were desktop-only) | 668 of 678, at every size |
+| Commands with a way to them | roughly 500 of 678 by a source scan, and fewer on a phone (value controls were desktop-only) | 678 of 678, at every size |
 | Commands outside the ribbon tabs (File › Info/Export/Options, Navigation, Reading…) | 5 (the File menu) | all, in the all-commands list |
 | Commands that take a value | only those with a hand-built control | every one: its control, or a form built from its params doc |
-| Not reachable | not counted | 10 pointer gestures, named in `POINTER_GAPS` (below) |
+| Not reachable | not counted | none: `POINTER_GAPS` is empty (below) |
 
 ## What gives every command a way in
 
@@ -73,15 +73,34 @@ Text now does the same from `view.state` (`ViewState.kt`):
 * **File menu**: Save as Template, Export PDF, Export Page as PNG (each asks where to write, with
   the right name and type on Android), Info, Properties, Options, the theme, All Commands.
 
+## Pointer gestures
+
+The commands whose parameters are page positions are driven by the page itself (`POINTER_GESTURES`).
+What is under the pointer is the engine's to say: `loki.hit` (text position, line, selection-bar
+line, text box) and `loki.tableSpot` (border, move handle, insert button, selection area), in
+`ffi/src/pointer.rs`. `PageMouse.kt` turns a mouse or pen press, its moves and its release into
+commands; a finger's drag still scrolls.
+
+| Gesture | Command |
+|---|---|
+| Drag a table border or the corner resize handle (Shift: only the column on the left; Ctrl: share by proportion) | `table.resizeDrag` |
+| Double-click a column border | `table.fitColumn` |
+| Press above a column, left of a row, along a cell's edge; drag to go on selecting; Ctrl or triple-click beside a row selects the document | `table.selectAt` |
+| Press an insert button (the "+" at a border) | `table.insertAt` |
+| Drag the move handle past a table's top-left corner (a click selects the table) | `table.moveDrag` |
+| Double-click or triple-click, then drag: grow by words, paragraphs; Ctrl+click: sentences; the selection bar (left margin): lines, paragraphs, document | `select.dragUnit` |
+| Alt+drag | `select.column` |
+| Ctrl+drag a picture, shape or text box (an object in the text lands at the text position under the drop) | `arrange.copyTo` |
+| Drag either end of a selected connector | `shape.connect` |
+| Create Link, then tap the empty text box to continue in | `shape.link` |
+
+The Android build compiles with these gestures, but they have not been tried on a device with a mouse: they are covered by
+`PageMouseTest` (a fake host records the commands) and `pointer_hit_tests_report_positions_and_table_spots`
+(the hit-testing against a real table). A dashed line follows the pointer while a border or handle is
+dragged; the egui front end's live preview of the new widths is not drawn. The dashed move outline of
+the table, alignment guides while an object moves, and crop handles are not either.
+
 ## Known gaps (do not assume these are solved)
-
-Pointer gestures of the desktop front end with no counterpart here (`POINTER_GAPS`; the test lets
-this list shrink, not grow). The ribbon reaches the same results for the table ones (column width,
-row height, Insert, Select, AutoFit):
-
-`table.resizeDrag`, `table.selectAt`, `table.insertAt`, `table.moveDrag`, `table.fitColumn`,
-`select.dragUnit` (double-click-drag by words), `select.column` (Alt+drag), `arrange.copyTo`
-(Ctrl+drag an object), `shape.link`, `shape.connect`.
 
 Things the egui front end does itself (`ui.*` commands and its own widgets) that this app does not:
 
