@@ -1415,7 +1415,7 @@ private fun StatusBar(
     Row(Modifier.fillMaxWidth().background(BarBlue).padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         val small = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
         if (status.isNotEmpty()) {
-            Text(status, style = small, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(status, style = small, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).announces())
         } else {
             val compact = sizeClass == SizeClass.Compact
             val text = buildList {
