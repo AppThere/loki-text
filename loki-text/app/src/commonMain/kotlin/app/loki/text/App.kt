@@ -333,7 +333,10 @@ expect fun clipboardText(): String?
 /** Puts [text] on the system clipboard. */
 expect fun setClipboardText(text: String)
 
-/** Quick-access buttons above the ribbon: command ids with no parameters. */
+/** The commands that change the ribbon, the toolbar or the keys: after one runs, the app reads them again. */
+internal val CUSTOMIZE_COMMANDS = setOf("tools.customizeRibbon", "tools.customizeKeyboard")
+
+/** Quick-access buttons above the ribbon until the engine's toolbar list has been read: command ids with no parameters. */
 private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple("Redo", "edit.redo", "Ctrl+Y"))
 
 /**
@@ -368,6 +371,10 @@ fun App(
     // Which commands can't run now and which toggles are on; refreshed with every render.
     var commandState by remember { mutableStateOf(CommandState.EMPTY) }
     var ribbon by remember { mutableStateOf<List<RibbonTab>>(emptyList()) }
+    // The person's ribbon layout and key changes, and a count that moves when they change them (see readCustomization).
+    var ribbonLayout by remember { mutableStateOf<RibbonLayout?>(null) }
+    var keyCustom by remember { mutableStateOf(KeyCustom(emptyList())) }
+    var customRevision by remember { mutableStateOf(0) }
     // The selection's font, size and colours, for the Home tab's boxes; and the families to pick from.
     var formatState by remember { mutableStateOf(FormatState.EMPTY) }
     var fontFamilies by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -548,6 +555,7 @@ fun App(
     // and Paste passes its text in (the engine pastes its own richer copy when the text matches).
     var lastCopied by remember { mutableStateOf<String?>(null) }
     suspend fun runCommand(command: String, params: JsonObject = JsonObject(emptyMap())) {
+        if (command in CUSTOMIZE_COMMANDS) customRevision++
         if (command == "format.fontDialog") {
             // The engine only asks a UI to open it; this UI shows its own dialog from the selection's formatting.
             val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("format.state") as? JsonObject }.getOrNull() } }
@@ -646,6 +654,7 @@ fun App(
     // worth reading is shown; a file the command wrote is handed to the place the person picked.
     suspend fun executeFromUi(c: CommandInfo, params: JsonObject, showResult: Boolean = true): String? {
         var result: JsonElement? = null
+        if (c.id in CUSTOMIZE_COMMANDS) customRevision++
         perform {
             result = execute(c.id, params)
             if (c.id == "view.paperColor") paperColor = (result as? JsonObject)?.get("paperColor")?.jsonPrimitive?.contentOrNull
@@ -734,6 +743,56 @@ fun App(
         catalog = runCatching { parseCommands(commands) }.getOrDefault(emptyList())
         shortcuts = commands?.let { runCatching { parseShortcuts(it) }.getOrNull() }.orEmpty()
     }
+
+    // The person's ribbon layout and key changes (Customize Ribbon, Customize Keyboard, the Quick Access Toolbar), as the
+    // engine holds them. They are read after start-up and after each change, kept in the settings file, and put back
+    // into a fresh engine at start-up, since the engine itself forgets them.
+    // The layout a fresh engine starts with, so an unchanged one isn't saved (and doesn't pin today's tabs).
+    var defaultLayout by remember { mutableStateOf<RibbonLayout?>(null) }
+    suspend fun readCustomization(save: Boolean) {
+        val (layout, keys) = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val l = runCatching { parseRibbonLayout(engine.execute("tools.customizeRibbon")) }.getOrNull()
+                val k = runCatching { parseKeyCustom(engine.execute("tools.customizeKeyboard")) }.getOrDefault(KeyCustom(emptyList()))
+                // Both also ask a front end to open their dialog; reading them is not asking for that.
+                runCatching { engine.uiRequests() }
+                l to k
+            }
+        }
+        ribbonLayout = layout
+        keyCustom = keys
+        if (save) AppSettings.update { s ->
+            s.copy(
+                ribbon = layout?.takeIf { it != defaultLayout }?.toJson(),
+                keys = keys.takeIf { it.commands.isNotEmpty() }?.toJson(),
+            )
+        }
+    }
+    LaunchedEffect(catalog.isNotEmpty()) {
+        if (catalog.isEmpty()) return@LaunchedEffect
+        defaultLayout = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching { parseRibbonLayout(engine.execute("tools.customizeRibbon")) }.getOrNull().also { runCatching { engine.uiRequests() } }
+            }
+        }
+        val saved = AppSettings.value
+        engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                saved.ribbon?.let { layout -> runCatching { engine.execute("tools.customizeRibbon", buildJsonObject { put("layout", layout) }) } }
+                saved.keys?.let { keys ->
+                    for (op in keyReplay(parseKeyCustom(JsonObject(mapOf("custom" to keys))), builtInKeys(catalog))) {
+                        runCatching { engine.execute("tools.customizeKeyboard", op) }
+                    }
+                }
+                runCatching { engine.uiRequests() }
+            }
+        }
+        // Not saved here: what was just put back is what the file says.
+        readCustomization(save = false)
+    }
+    LaunchedEffect(customRevision) { if (customRevision > 0) readCustomization(save = true) }
+    val shownRibbon = remember(ribbon, ribbonLayout, catalogById) { ribbonLayout?.let { applyRibbonLayout(ribbon, it, catalogById) } ?: ribbon }
+    val keyMap = remember(shortcuts, keyCustom) { applyKeyOverrides(shortcuts, keyCustom) }
 
     // The Equation tab's structures and symbols don't change while the app runs.
     var equationGallery by remember { mutableStateOf(EquationGallery.EMPTY) }
@@ -943,6 +1002,7 @@ fun App(
         var r: JsonElement? = null
         perform(requests = false) { r = execute("tools.customizeKeyboard", params) }
         if (status.isNotEmpty()) return Result.failure(IllegalStateException(status.also { status = "" }))
+        if (params.isNotEmpty()) customRevision++
         return Result.success(parseKeyCustom(r))
     }
     suspend fun openKeyboard() {
@@ -1045,8 +1105,12 @@ fun App(
     }
     val fileMenu: @Composable () -> Unit = if (menuBridge != null) ({}) else ({ FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } })
     val quickCommands: @Composable () -> Unit = {
-        for ((label, command, shortcut) in QUICK_ACCESS) {
-            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
+        // The Quick Access Toolbar's commands as the person arranged them (the engine's list); Undo and Redo until it is read.
+        val qat = ribbonLayout?.qat?.mapNotNull { id -> catalogById[id]?.let { Triple(it.label, id, displayShortcut(it.shortcut)) } } ?: QUICK_ACCESS
+        for ((label, command, shortcut) in qat) {
+            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) {
+                scope.launch { if (command in FILE_MENU_COMMANDS) runFileMenu(command) else runFromUi(command) }
+            }
         }
         // Every command by name, at every window size: the way to what the ribbon has no room for.
         IconButton(onClick = { showCommands = "" }, modifier = Modifier.size(32.dp)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
@@ -1172,7 +1236,7 @@ fun App(
     }
     // Shortcuts work wherever focus is (the ribbon, the title bar): keys a focused text box doesn't
     // use come up to here. The page handles its own keys first (see its onPreviewKeyEvent).
-    Column(Modifier.fillMaxSize().onKeyEvent { e -> shortcutCommand(e, shortcuts)?.let { runKey(it); true } ?: false }) {
+    Column(Modifier.fillMaxSize().onKeyEvent { e -> shortcutCommand(e, keyMap)?.let { runKey(it); true } ?: false }) {
         if (titleBar != null) {
             // The title bar is the top row at every width: Undo/Redo, the document's name, the menu, window buttons.
             val hits = remember { TitleBarHits() }
@@ -1192,7 +1256,7 @@ fun App(
             }
         } else if (sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
         Ribbon(
-            tabs = ribbon,
+            tabs = shownRibbon,
             styles = styles,
             state = commandState,
             sizeClass = sizeClass,
@@ -1336,7 +1400,7 @@ fun App(
                         return@onPreviewKeyEvent true
                     }
                     // The engine's shortcuts first (Ctrl+O, F7, …), then typing and moving the caret.
-                    val k = shortcutCommand(e, shortcuts) ?: keyCommand(e) ?: return@onPreviewKeyEvent false
+                    val k = shortcutCommand(e, keyMap) ?: keyCommand(e) ?: return@onPreviewKeyEvent false
                     runKey(k)
                     true
                 }
