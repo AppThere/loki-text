@@ -661,6 +661,7 @@ fun App(
     // Local recovery: the engine keeps a copy of unsaved work in the app's folder and is ticked now and then to do it.
     var recovery by remember { mutableStateOf(RecoveryState.NONE) }
     var recoverDialog by remember { mutableStateOf(false) }
+    var keyboard by remember { mutableStateOf<KeyCustom?>(null) }
     var recipients by remember { mutableStateOf<RecipientTable?>(null) }
     var recipientsError by remember { mutableStateOf<String?>(null) }
     // The current values a command's form starts with: read with the command's reader (see FORM_DEFAULTS), never by running the command.
@@ -936,6 +937,18 @@ fun App(
         }
     }
 
+    // Customize Keyboard: what the person changed, read (the command reports it, and its request to open a dialog is
+    // dropped, since this is that dialog), then changed a step at a time.
+    suspend fun keyboardCall(params: JsonObject): Result<KeyCustom> {
+        var r: JsonElement? = null
+        perform(requests = false) { r = execute("tools.customizeKeyboard", params) }
+        if (status.isNotEmpty()) return Result.failure(IllegalStateException(status.also { status = "" }))
+        return Result.success(parseKeyCustom(r))
+    }
+    suspend fun openKeyboard() {
+        keyboardCall(JsonObject(emptyMap())).onSuccess { keyboard = it }.onFailure { status = it.message.orEmpty() }
+    }
+
     // Runs a command picked from the ribbon, a menu or the all-commands list. One the app has its own
     // dialog or pane for goes there; one that needs values opens its form; one that only reports
     // shows what it answered.
@@ -945,6 +958,7 @@ fun App(
             // Create Link: the text box to continue in is the next one tapped.
             id == "file.recover" -> recoverDialog = true
             id == "mailings.editRecipients" -> openRecipients()
+            id == "tools.customizeKeyboard" -> openKeyboard()
             id == "file.info" || id == "file.properties" -> infoDialog = true
             id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
@@ -1000,6 +1014,7 @@ fun App(
             "saveAs" -> runFileMenu("file.saveAs")
             "print" -> runFileMenu("file.print")
             "openFile" -> runFileMenu("file.open")
+            "customizeKeyboard" -> openKeyboard()
             "exportPdf" -> exportTo("file.exportPdf")
             "exportPng" -> exportTo("file.exportPng")
             "newWindow" -> if (onNewWindow != null) onNewWindow(null) else status = "This device shows one document at a time"
@@ -1047,6 +1062,7 @@ fun App(
     )
     if (infoDialog) InfoDialog(docInfo, infoError, ::saveProperties) { infoDialog = false; docInfo = null }
     recipients?.let { RecipientsDialog(it, recipientsError, ::saveRecipients) { recipients = null } }
+    keyboard?.let { k -> KeyboardDialog(k, catalogById, ::keyboardCall, launch = { b -> scope.launch { b() } }) { keyboard = null } }
     if (recoverDialog) RecoveryDialog(recovery, ::restoreCopy, ::discardCopy) { recoverDialog = false }
     if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->

@@ -105,15 +105,22 @@ the table, alignment guides while an object moves, and crop handles are not eith
 Things the egui front end does itself (`ui.*` commands and its own widgets) that this app does not:
 
 * **Bespoke dialogs.** The desktop has about sixty; this app has its own Font, Paragraph, Page
-  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info and Recipient List dialogs, and
-  the generated form for everything else. The form is complete but plain. It starts with the document's
-  current values for the commands in `FORM_DEFAULTS` (`FormDefaults.kt`: File › Options, tracking
-  options, privacy options, margins, page layout, paper size, orientation, columns, indents, paragraph
-  spacing, font size and font; `FormDefaultsFixtureTest` checks every entry against the engine's own
-  parameter docs), and those commands open their form directly. Every other command's form starts blank,
-  and list or object parameters are still typed as JSON (Chart data, Customize Keyboard, Customize
-  Ribbon, filter and sort rules). Defaults come only from read-only commands: calling a setter with no
-  values to read it back changes the document.
+  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info, Recipient List and Customize
+  Keyboard dialogs, and the generated form for everything else.
+  * Object and list parameters are fields, not JSON (the kit's `StructuredParams.kt`): an object is a
+    nested form, a list is rows to add, remove and reorder, `where X = {…}` types are followed, fixed
+    pairs (`[[width pt, space after pt], …]`) are side-by-side fields, and chart data is a grid. Each
+    keeps "Edit as JSON". `StructuredFieldsTest` fails when a written-out object or list in the engine's
+    docs has no fields; left as JSON on purpose: engine positions (set by pressing on the page), types a
+    doc names without spelling out (`CharProps`, `ParaProps`, `SectionProps`, `Source`), a map from style
+    names (TOC style levels), rows of any length (spreadsheet values) and table-style parts with names.
+  * Forms start with the document's current values only for the commands in `FORM_DEFAULTS` (Options,
+    tracking and privacy options, margins, page layout, paper size, orientation, columns, indents,
+    paragraph spacing, font size and font); others start blank. The engine has no read command for a
+    chart's data, so Edit Data starts with an empty grid and replaces the data.
+  * Customize Keyboard edits the engine's key changes; the app's own key map does not read them yet
+    (see Customize Ribbon below). The engine answers `{custom: [{command, keys}]}`, not the
+    `{assigned, removed}` its params doc describes; the dialog reads both.
 * **Backstage pages**: File › Options is the generic form with the current values, not the desktop's panes. Done: the start screen (`StartScreen.kt`: New, Open, templates, recent documents, unsaved
   documents), File › New from Template (`TemplateGallery.kt`: five built-in templates with first-page
   pictures, personal templates from `file.listTemplates`, Browse), File › Print (`PrintDialog.kt`: page
