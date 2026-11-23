@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="Loki Text" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <application android:label="Loki Text" android:icon="@mipmap/ic_loki_text" android:theme="@style/Theme.LokiText">
         <!-- Resizing the window (a Chromebook, split screen, rotation) must not recreate the activity:
              the open document lives in the engine session, which recreation would drop. -->
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize"

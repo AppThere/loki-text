@@ -37,6 +37,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import app.loki.text.res.Res
+import app.loki.text.res.loki_text_icon
+import org.jetbrains.compose.resources.painterResource
 import java.awt.FileDialog
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
@@ -130,7 +133,7 @@ private fun lokiApplication() = application {
         DisposableEffect(bridge) { bridges[w.id] = bridge; onDispose { bridges.remove(w.id); closeRequests.remove(w.id) } }
         val windowState = rememberWindowState()
         val ownFrame = remember { useOwnFrame() }
-        Window(onCloseRequest = { requestClose() }, title = "Loki Text", state = windowState, undecorated = ownFrame) {
+        Window(onCloseRequest = { requestClose() }, title = "Loki Text", icon = painterResource(Res.drawable.loki_text_icon), state = windowState, undecorated = ownFrame) {
             DisposableEffect(window) {
                 val l = object : java.awt.event.WindowAdapter() {
                     override fun windowActivated(e: java.awt.event.WindowEvent?) { front = w.id }
@@ -182,6 +185,8 @@ private fun lokiApplication() = application {
                     },
                 )
             }
+            // The first window shows the splash while the engine starts; windows opened later start at once.
+            WithSplash(enabled = w.id == 0) {
             Box(Modifier.fillMaxSize().then(if (ownFrame && windowState.placement != WindowPlacement.Maximized) Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant) else Modifier)) {
             App(
                 closeRequest,
@@ -192,6 +197,7 @@ private fun lokiApplication() = application {
                 menuBridge = if (IS_MAC) bridge else null,
             )
             if (ownFrame && windowState.placement != WindowPlacement.Maximized) ResizeEdges(window)
+            }
             }
         }
     }

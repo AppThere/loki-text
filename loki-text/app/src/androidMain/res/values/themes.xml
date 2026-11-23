@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="loki_splash_background">#FF3A6BE6</color>
+    <style name="Theme.LokiText" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_window</item>
+    </style>
+</resources>

@@ -100,6 +100,10 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Loki Text"
             packageVersion = "1.0.0"
+            // The installer and launcher icon (the Loki Text icon, from icons/).
+            linux { iconFile.set(project.file("icons/loki-text.png")) }
+            windows { iconFile.set(project.file("icons/loki-text.ico")) }
+            macOS { iconFile.set(project.file("icons/loki-text.icns")) }
         }
         // The desktop run finds libloki_ffi next to the working dir or via -Dloki.lib.
         jvmArgs += "-Dloki.lib=${rootDir}/target/release"
