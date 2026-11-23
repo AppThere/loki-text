@@ -123,6 +123,8 @@ fn layout_state(sess: &Session) -> Value {
         "indentLeft": para.as_ref().map_or(Value::Null, |r| num(r.indent_left)),
         "indentRight": para.as_ref().map_or(Value::Null, |r| num(r.indent_right)),
         "firstLine": para.as_ref().map_or(Value::Null, |r| num(r.indent_first)),
+        // The paragraph's tab stops for the ruler, in points from the text column's left edge.
+        "tabs": para.as_ref().map_or(Value::Null, |r| serde_json::to_value(&r.tabs).unwrap_or(Value::Null)),
         "spaceBefore": para.as_ref().map_or(Value::Null, |r| num(r.space_before)),
         "spaceAfter": para.as_ref().map_or(Value::Null, |r| num(r.space_after)),
         "lineSpacing": multiple.map_or(Value::Null, num),
