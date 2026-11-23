@@ -658,7 +658,12 @@ fun App(
 
     LaunchedEffect(Unit) {
         if (installDocumentFonts(engine, engineLock)) revision++
-        if (initialPath != null) {
+        val fromTemplate = templateOfRequest(initialPath)
+        if (fromTemplate != null) {
+            val (id, params) = fromTemplate.command()
+            perform { execute(id, params) }
+            stylesRevision++
+        } else if (initialPath != null) {
             perform { execute("file.open", buildJsonObject { put("path", initialPath) }) }
             stylesRevision++
         }
@@ -750,7 +755,7 @@ fun App(
         formatState = snap.format
         unsaved = snap.dirty
         docPath = snap.path
-        snap.path?.let { p -> if (AppSettings.value.recents.firstOrNull()?.path != p) AppSettings.update { it.withRecent(p, nowMillis()) } }
+        snap.path?.let { p -> if (AppSettings.value.recents.firstOrNull()?.path != p) AppSettings.update { it.withRecent(p, nowMillis(), documentSource(p)) } }
         pages = snap.pages
     }
 
@@ -783,6 +788,42 @@ fun App(
     LaunchedEffect(closeRequest) { if (closeRequest > 0) guarded(onClose) }
     // A document is blank when nothing was typed and it has no file; opening another then reuses this window.
     fun isBlank() = docPath == null && !unsaved && (counts?.characters ?: 0) == 0
+
+    // The gallery over the document (File › New from Template), and the personal templates it and the start screen list.
+    var templateDialog by remember { mutableStateOf(false) }
+    var personalTemplates by remember { mutableStateOf<List<TemplateChoice.File>>(emptyList()) }
+    LaunchedEffect(start, templateDialog) {
+        if (!start && !templateDialog) return@LaunchedEffect
+        personalTemplates = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val listed = runCatching { engine.execute("file.listTemplates") }.getOrNull()
+                runCatching { engine.uiRequests() }
+                parsePersonalTemplates(listed)
+            }
+        }
+    }
+
+    // A new document from [t]: here when this window is blank, else in a window of its own where there are windows.
+    fun newFromTemplate(t: TemplateChoice) {
+        templateDialog = false
+        start = false
+        if (onNewWindow != null && !isBlank()) { onNewWindow(t.asRequest()); return }
+        guarded {
+            scope.launch {
+                val (id, params) = t.command()
+                perform { execute(id, params) }
+                stylesRevision++
+            }
+        }
+    }
+
+    // Asks for a template file, then makes a document from it.
+    fun browseTemplate() {
+        scope.launch {
+            val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
+            newFromTemplate(TemplateChoice.File(path, path.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.')))
+        }
+    }
 
     suspend fun openHere(path: String) {
         perform { execute("file.open", buildJsonObject { put("path", path) }) }
@@ -835,6 +876,7 @@ fun App(
                 if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
             }
             "app.about" -> showAbout = true
+            "app.templates" -> templateDialog = true
             "app.commands" -> showCommands = ""
             "app.theme.system", "app.theme.light", "app.theme.dark" -> setTheme(id.substringAfterLast('.'))
             in EXPORTS -> exportTo(id)
@@ -893,6 +935,7 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->
         AllCommandsDialog(
             catalog, LOKI_PROFILE, section.ifEmpty { null }, commandState.disabled, commandState.on,
@@ -1402,8 +1445,12 @@ fun App(
         )
     }
     if (start) StartScreen(
-        recents = remember(recentsRevision, start) { AppSettings.value.recents }, exists = ::fileExists, now = nowMillis(),
+        recents = remember(recentsRevision, start) { AppSettings.value.recents }, exists = ::recentAvailable, now = nowMillis(),
+        personalTemplates = personalTemplates,
         onNew = { start = false },
+        onTemplate = ::newFromTemplate,
+        onBrowseTemplate = ::browseTemplate,
+        onMoreTemplates = { templateDialog = true },
         onOpen = {
             scope.launch {
                 // Cancelling the picker leaves the start screen where it is.
@@ -1413,10 +1460,14 @@ fun App(
             }
         },
         onOpenRecent = { r ->
-            start = false
-            scope.launch { openHere(r.path) }
+            scope.launch {
+                val path = withContext(Dispatchers.Default) { materializeRecent(r) }
+                if (path == null) { AppSettings.update { it.withoutRecent(r) }; recentsRevision++; return@launch }
+                start = false
+                openHere(path)
+            }
         },
-        onForget = { r -> AppSettings.update { it.withoutRecent(r.path) }; recentsRevision++ },
+        onForget = { r -> AppSettings.update { it.withoutRecent(r) }; recentsRevision++ },
         modifier = Modifier.padding(top = titleBar?.height ?: 0.dp),
     )
     }

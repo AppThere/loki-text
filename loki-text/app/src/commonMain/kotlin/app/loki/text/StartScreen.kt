@@ -11,8 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.key
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -38,22 +39,30 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun StartScreen(
     recents: List<RecentDocument>,
-    exists: (String) -> Boolean,
+    exists: (RecentDocument) -> Boolean,
     now: Long,
+    personalTemplates: List<TemplateChoice.File>,
     onNew: () -> Unit,
+    onTemplate: (TemplateChoice) -> Unit,
+    onBrowseTemplate: () -> Unit,
+    onMoreTemplates: () -> Unit,
     onOpen: () -> Unit,
     onOpenRecent: (RecentDocument) -> Unit,
     onForget: (RecentDocument) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 640.dp).fillMaxSize().padding(horizontal = 20.dp, vertical = 24.dp)) {
+        Column(Modifier.widthIn(max = 640.dp).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 24.dp)) {
             Text(APP_NAME, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { contentDescription = "$APP_NAME start" })
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onNew) { Text("New document") }
                 OutlinedButton(onClick = onOpen) { Text("Open…") }
             }
+            Spacer(Modifier.height(24.dp))
+            Text("Templates", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            TemplateGallery(personalTemplates, onTemplate, onBrowseTemplate, limit = 4, onMore = onMoreTemplates)
             Spacer(Modifier.height(24.dp))
             Text("Recent", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
@@ -65,9 +74,9 @@ internal fun StartScreen(
                     modifier = Modifier.padding(vertical = 16.dp),
                 )
             } else {
-                LazyColumn(Modifier.fillMaxWidth()) {
-                    items(recents, key = { it.path }) { r ->
-                        val present = exists(r.path)
+                Column(Modifier.fillMaxWidth()) {
+                    for (r in recents) key(r.key) {
+                        val present = exists(r)
                         Row(
                             Modifier.fillMaxWidth().clickable(enabled = present) { onOpenRecent(r) }.padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,

@@ -31,6 +31,7 @@ internal class FileMenuItem(val id: String, val label: String, val shortcut: Str
 internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("file.new", "New", "Ctrl+N"),
     FileMenuItem("file.open", "Open…", "Ctrl+O"),
+    FileMenuItem("app.templates", "New from Template…"),
     null,
     FileMenuItem("file.save", "Save", "Ctrl+S"),
     FileMenuItem("file.saveAs", "Save As…"),

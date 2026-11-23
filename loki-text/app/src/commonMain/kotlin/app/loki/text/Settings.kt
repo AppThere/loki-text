@@ -17,18 +17,30 @@ expect fun loadSettingsText(): String?
 /** Replaces the settings file. Failure is silent: a setting that can't be saved is only forgotten. */
 expect fun saveSettingsText(text: String)
 
-/** Whether a document that was opened earlier is still where it was. */
-expect fun fileExists(path: String): Boolean
+/**
+ * Where the document open at [path] really lives, when that is not a file path (Android: the content URI the user picked,
+ * which [path] is a copy of); null when the path is the document.
+ */
+expect fun documentSource(path: String): String?
+
+/** Whether [r] can still be opened: its file is there, or the system still lets the app read where it came from. */
+expect fun recentAvailable(r: RecentDocument): Boolean
+
+/** A path the engine can open for [r] (on Android a fresh copy of the document, so edits made elsewhere show), or null when it can't be had. */
+expect fun materializeRecent(r: RecentDocument): String?
 
 /** Milliseconds since 1970. */
 expect fun nowMillis(): Long
 
 /** A document that was opened lately: where it is and when it was last opened. */
-data class RecentDocument(val path: String, val openedAt: Long) {
+data class RecentDocument(val path: String, val openedAt: Long, val uri: String? = null) {
+    /** What identifies the document: where it came from when that is not a file path, else the path. */
+    val key: String get() = uri ?: path
+
     /** The file's name, as the start screen lists it. */
     val name: String get() = path.substringAfterLast('/').substringAfterLast('\\').ifBlank { path }
     /** The folder it is in, for telling apart two files of the same name. */
-    val folder: String get() = path.lastIndexOfAny(charArrayOf('/', '\\')).let { if (it < 0) "" else path.substring(0, it) }
+    val folder: String get() = if (uri != null) "" else path.lastIndexOfAny(charArrayOf('/', '\\')).let { if (it < 0) "" else path.substring(0, it) }
 }
 
 /** What the app keeps between launches: the interface theme, the screen paper colour, and the recent documents. */
@@ -38,17 +50,19 @@ data class Settings(
     val recents: List<RecentDocument> = emptyList(),
 ) {
     /** These settings with [path] first in the recent list (once, whatever it was before). */
-    fun withRecent(path: String, at: Long): Settings =
-        copy(recents = (listOf(RecentDocument(path, at)) + recents.filter { it.path != path }).take(MAX_RECENTS))
+    fun withRecent(path: String, at: Long, uri: String? = null): Settings {
+        val r = RecentDocument(path, at, uri)
+        return copy(recents = (listOf(r) + recents.filter { it.key != r.key }).take(MAX_RECENTS))
+    }
 
-    /** These settings without [path] in the recent list. */
-    fun withoutRecent(path: String): Settings = copy(recents = recents.filter { it.path != path })
+    /** These settings without [r] in the recent list. */
+    fun withoutRecent(r: RecentDocument): Settings = copy(recents = recents.filter { it.key != r.key })
 
     fun toJson(): String = buildJsonObject {
         put("theme", theme)
         paperColor?.let { put("paperColor", it) }
         put("recents", buildJsonArray {
-            for (r in recents) add(buildJsonObject { put("path", r.path); put("openedAt", r.openedAt) })
+            for (r in recents) add(buildJsonObject { put("path", r.path); put("openedAt", r.openedAt); r.uri?.let { put("uri", it) } })
         })
     }.toString()
 
@@ -62,8 +76,11 @@ data class Settings(
             val recents = (o["recents"] as? JsonArray).orEmpty().mapNotNull { e ->
                 val r = e as? JsonObject ?: return@mapNotNull null
                 val path = (r["path"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                RecentDocument(path, r["openedAt"]?.jsonPrimitive?.longOrNull ?: 0L)
-            }.distinctBy { it.path }.take(MAX_RECENTS)
+                RecentDocument(
+                    path, r["openedAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+                    (r["uri"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.takeIf { it.isNotBlank() },
+                )
+            }.distinctBy { it.key }.take(MAX_RECENTS)
             return Settings(
                 theme = str("theme")?.takeIf { it in setOf("system", "light", "dark") } ?: "system",
                 paperColor = str("paperColor")?.takeIf { it.matches(Regex("[0-9A-Fa-f]{6}")) },

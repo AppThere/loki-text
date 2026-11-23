@@ -37,7 +37,7 @@ class SettingsTest {
     }
 
     @Test fun forgettingRemovesOnlyThatDocument() {
-        val s = Settings().withRecent("/a", 1).withRecent("/b", 2).withoutRecent("/a")
+        val s = Settings().withRecent("/a", 1).withRecent("/b", 2).withoutRecent(RecentDocument("/a", 1))
         assertEquals(listOf("/b"), s.recents.map { it.path })
     }
 
@@ -54,5 +54,14 @@ class SettingsTest {
         assertEquals("Yesterday", ageLabel(9 * day, 10 * day))
         assertEquals("3 days ago", ageLabel(7 * day, 10 * day))
         assertEquals("2 months ago", ageLabel(0 + 1, 61 * day + 1))
+    }
+
+    @Test fun aDocumentFromAnotherPlaceIsKeyedByWhereItCameFrom() {
+        // Two staged copies of different documents never share a recent entry, and one document reopened (staged elsewhere) does not duplicate.
+        val s = Settings().withRecent("/cache/a/x.docx", 1, "content://p/1").withRecent("/cache/b/x.docx", 2, "content://p/2")
+            .withRecent("/cache/c/x.docx", 3, "content://p/1")
+        assertEquals(listOf("/cache/c/x.docx", "/cache/b/x.docx"), s.recents.map { it.path })
+        assertEquals(s, Settings.parse(s.toJson()))
+        assertEquals("", s.recents.first().folder)
     }
 }

@@ -27,6 +27,10 @@ actual fun saveSettingsText(text: String) {
     }
 }
 
-actual fun fileExists(path: String): Boolean = File(path).isFile
+actual fun documentSource(path: String): String? = null
+
+actual fun recentAvailable(r: RecentDocument): Boolean = File(r.path).isFile
+
+actual fun materializeRecent(r: RecentDocument): String? = r.path.takeIf { File(it).isFile }
 
 actual fun nowMillis(): Long = System.currentTimeMillis()

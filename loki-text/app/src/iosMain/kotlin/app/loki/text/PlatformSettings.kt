@@ -13,6 +13,10 @@ actual fun saveSettingsText(text: String) {
     NSUserDefaults.standardUserDefaults.setObject(text, forKey = KEY)
 }
 
-actual fun fileExists(path: String): Boolean = NSFileManager.defaultManager.fileExistsAtPath(path)
+actual fun documentSource(path: String): String? = null
+
+actual fun recentAvailable(r: RecentDocument): Boolean = NSFileManager.defaultManager.fileExistsAtPath(r.path)
+
+actual fun materializeRecent(r: RecentDocument): String? = r.path.takeIf { recentAvailable(r) }
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000).toLong()

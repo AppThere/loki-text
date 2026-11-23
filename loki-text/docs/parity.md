@@ -108,10 +108,14 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   Setup, Styles, Lists, Table, Find/Replace/Go To and Insert dialogs, and the generated form for
   everything else. The form is complete but plain: it does not show the current values, and list or
   object parameters are typed as JSON (Edit Recipient List, Chart data, Customize Keyboard).
-* **Backstage pages**: templates gallery, the Print page with a preview, recovery of unsaved
-  documents. File › Info/Options are the result dialog and the form. (The start screen with New,
-  Open and recent documents exists: `StartScreen.kt`. On Android a recent entry is the copy made when
-  the document was opened, so it is listed as "File not found" once the system clears the cache.)
+* **Backstage pages**: the Print page with a preview, recovery of unsaved documents. File ›
+  Info/Options are the result dialog and the form. The start screen (`StartScreen.kt`: New, Open,
+  templates, recent documents) and File › New from Template (`TemplateGallery.kt`: the five built-in
+  templates with first-page pictures, personal templates from `file.listTemplates`, Browse) exist.
+  Not in the gallery: template thumbnails for personal templates, and the desktop's Home page
+  "recommended" layout. On Android a recent document keeps the system's permission to read (and
+  write) where it was picked (`takePersistableUriPermission`), and opening it from the list copies
+  it afresh; a provider that refuses a persistable grant falls back to the staged copy.
 * **Window management**: Split, Arrange All, View Side by Side, Switch Windows (the desktop opens
   new windows for New and Open; phones have one). Full Screen and Focus toggle engine state that
   this app does not act on.

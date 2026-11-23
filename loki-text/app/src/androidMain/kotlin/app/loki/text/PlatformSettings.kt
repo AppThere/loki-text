@@ -15,6 +15,4 @@ actual fun saveSettingsText(text: String) {
     }
 }
 
-actual fun fileExists(path: String): Boolean = File(path).isFile
-
 actual fun nowMillis(): Long = System.currentTimeMillis()
