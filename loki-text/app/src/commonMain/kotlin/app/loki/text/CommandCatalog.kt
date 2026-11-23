@@ -59,6 +59,8 @@ internal val QUIET_RESULTS = setOf(
     "view.state", "format.state", "para.state", "nav.headings", "nav.search", "file.save", "edit.copy", "edit.cut", "equation.gallery", "styles.manage",
     "edit.clipboardItems", "edit.clearClipboard", "review.comments", "review.changes", "arrange.selectionPane",
     "review.readAloud", "tools.recordMacro", "draw.addPen", "review.suggestions", "review.thesaurus",
+    // Its answer is the whole layout, which the ribbon now shows; with nothing given it opens its form instead.
+    "tools.customizeRibbon",
 )
 
 /**

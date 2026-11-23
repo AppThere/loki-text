@@ -139,8 +139,15 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
 * **Window management**: Split, Arrange All, View Side by Side, Switch Windows (the desktop opens
   new windows for New and Open; phones have one). Full Screen and Focus toggle engine state that
   this app does not act on.
-* **Customize Ribbon / Customize Keyboard / Quick Access Toolbar**: the engine commands run, but this
-  ribbon and key map do not read the saved customisation.
+* **Customize Ribbon / Customize Keyboard / Quick Access Toolbar** now take effect: the app reads the
+  engine's layout and key changes after start-up and after each change (`Customization.kt`), shows the
+  ribbon in the person's order with hidden tabs left out and their tabs and groups added, takes the
+  toolbar's commands from the layout, and puts their keys over the built-in ones. They are kept in the
+  settings file and put back into each fresh engine at start-up (the layout through
+  `tools.customizeRibbon`'s `layout`, the keys replayed as `tools.customizeKeyboard` removals and
+  assignments). Customize Ribbon is still the generated form, not a drag-and-drop dialog. Menus and
+  tooltips still show the built-in shortcut, and a change made in one desktop window reaches the
+  others only at the next launch.
 * **Ruler dragging, crop handles, alignment guides, keytips, interface size, interface language**
   (the UI is English only), **Format Shape and SmartArt text panes, Zotero, Read Aloud's audio,
   updates**.

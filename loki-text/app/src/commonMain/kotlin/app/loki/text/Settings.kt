@@ -46,11 +46,16 @@ data class RecentDocument(val path: String, val openedAt: Long, val uri: String?
     val folder: String get() = if (uri != null) "" else path.lastIndexOfAny(charArrayOf('/', '\\')).let { if (it < 0) "" else path.substring(0, it) }
 }
 
-/** What the app keeps between launches: the interface theme, the screen paper colour, and the recent documents. */
+/**
+ * What the app keeps between launches: the interface theme, the screen paper colour, the recent documents, and the
+ * person's key changes and ribbon layout (as the engine reports them; null while they have changed nothing).
+ */
 data class Settings(
     val theme: String = "system",
     val paperColor: String? = null,
     val recents: List<RecentDocument> = emptyList(),
+    val keys: JsonArray? = null,
+    val ribbon: JsonObject? = null,
 ) {
     /** These settings with [path] first in the recent list (once, whatever it was before). */
     fun withRecent(path: String, at: Long, uri: String? = null): Settings {
@@ -67,6 +72,8 @@ data class Settings(
         put("recents", buildJsonArray {
             for (r in recents) add(buildJsonObject { put("path", r.path); put("openedAt", r.openedAt); r.uri?.let { put("uri", it) } })
         })
+        keys?.let { put("keys", it) }
+        ribbon?.let { put("ribbon", it) }
     }.toString()
 
     companion object {
@@ -88,6 +95,8 @@ data class Settings(
                 theme = str("theme")?.takeIf { it in setOf("system", "light", "dark") } ?: "system",
                 paperColor = str("paperColor")?.takeIf { it.matches(Regex("[0-9A-Fa-f]{6}")) },
                 recents = recents,
+                keys = o["keys"] as? JsonArray,
+                ribbon = o["ribbon"] as? JsonObject,
             )
         }
     }
