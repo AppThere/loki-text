@@ -67,8 +67,12 @@ pub unsafe extern "C" fn loki_session_free(s: *mut LokiSession) {
         return;
     }
     // SAFETY: from `Box::into_raw` in `loki_session_new`, freed once (caller's contract).
-    let b = unsafe { Box::from_raw(s) };
-    drop(catch_unwind(AssertUnwindSafe(move || drop(b))));
+    let mut b = unsafe { Box::from_raw(s) };
+    // A clean close removes the recovery copies of documents that were saved or closed; a dirty document keeps its own.
+    drop(catch_unwind(AssertUnwindSafe(move || {
+        b.inner.session.finish_recovery();
+        drop(b);
+    })));
 }
 
 /// Call a control-protocol method (`engine.execute`, `engine.commands`, `document.inspect`,
@@ -113,6 +117,34 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
         return match catch_unwind(AssertUnwindSafe(|| state::command_state(&mut session.inner.session))) {
             Ok(v) => reply(json!({"ok": true, "result": v})),
             Err(_) => err("internal error (panic caught) reading command state"),
+        };
+    }
+    if method.starts_with("loki.recovery") || method == "loki.enableRecovery" {
+        // Local recovery (see docs/recovery.md): the engine keeps a copy of unsaved work in a folder this front end
+        // names, from `tick`s it is given; the front end lists and restores copies with `file.recover`.
+        let sess = &mut session.inner.session;
+        let done = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
+            match method {
+                "loki.enableRecovery" => {
+                    let dir = params.get("dir").and_then(Value::as_str).filter(|d| !d.is_empty()).ok_or("dir is required")?;
+                    sess.enable_recovery(std::path::PathBuf::from(dir), std::sync::Arc::new(|| {}))
+                }
+                "loki.recoveryTick" => {
+                    sess.recovery_tick();
+                    Ok(())
+                }
+                // The user gave up the document's unsaved changes: its copy goes with them.
+                "loki.recoveryDiscard" => {
+                    sess.discard_recovery_copy();
+                    Ok(())
+                }
+                other => Err(format!("unknown method {other}")),
+            }
+        }));
+        return match done {
+            Ok(Ok(())) => reply(json!({"ok": true, "result": null})),
+            Ok(Err(e)) => err(e),
+            Err(_) => err("internal error (panic caught) in recovery"),
         };
     }
     if method == "loki.uiRequests" {

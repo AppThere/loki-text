@@ -7,6 +7,9 @@ import platform.Foundation.timeIntervalSince1970
 
 private const val KEY = "app.loki.text.settings"
 
+actual fun profileDir(): String? =
+    platform.Foundation.NSSearchPathForDirectoriesInDomains(platform.Foundation.NSApplicationSupportDirectory, platform.Foundation.NSUserDomainMask, true).firstOrNull() as? String
+
 actual fun loadSettingsText(): String? = NSUserDefaults.standardUserDefaults.stringForKey(KEY)
 
 actual fun saveSettingsText(text: String) {

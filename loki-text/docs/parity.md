@@ -108,14 +108,22 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   Setup, Styles, Lists, Table, Find/Replace/Go To and Insert dialogs, and the generated form for
   everything else. The form is complete but plain: it does not show the current values, and list or
   object parameters are typed as JSON (Edit Recipient List, Chart data, Customize Keyboard).
-* **Backstage pages**: the Print page with a preview, recovery of unsaved documents. File ›
-  Info/Options are the result dialog and the form. The start screen (`StartScreen.kt`: New, Open,
-  templates, recent documents) and File › New from Template (`TemplateGallery.kt`: the five built-in
-  templates with first-page pictures, personal templates from `file.listTemplates`, Browse) exist.
-  Not in the gallery: template thumbnails for personal templates, and the desktop's Home page
-  "recommended" layout. On Android a recent document keeps the system's permission to read (and
-  write) where it was picked (`takePersistableUriPermission`), and opening it from the list copies
-  it afresh; a provider that refuses a persistable grant falls back to the staged copy.
+* **Backstage pages**: File › Options is still the generic form (it does not show the current values and has
+  no panes). Done: the start screen (`StartScreen.kt`: New, Open, templates, recent documents, unsaved
+  documents), File › New from Template (`TemplateGallery.kt`: five built-in templates with first-page
+  pictures, personal templates from `file.listTemplates`, Browse), File › Print (`PrintDialog.kt`: page
+  preview, range, odd/even, pages to a sheet, paper, copies, what it comes to; the options go to
+  `file.printPdf`), File › Info and Properties (`InfoDialog.kt`: the facts, and the properties to edit),
+  and recovery of unsaved documents (`Recovery.kt`).
+  Recovery: `loki-ffi` turns the engine's recovery on in the app's folder (`loki.enableRecovery`) and
+  the app ticks it every two seconds (`loki.recoveryTick`); a copy of unsaved work is kept at most once
+  in ten seconds, after a crash or a kill the start screen and File › Recover Unsaved Documents list it,
+  and Restore opens it as an unsaved document. Don't save discards the copy. Tried on a device: type, wait,
+  kill the app, relaunch, restore. Not in the gallery: pictures for personal templates. The print preview
+  shows the pages the window has drawn, so a far page may show only its number. On Android a recent
+  document keeps the system's permission to read (and write) where it was picked
+  (`takePersistableUriPermission`), and opening it from the list copies it afresh; a provider that
+  refuses a persistable grant falls back to the staged copy.
 * **Window management**: Split, Arrange All, View Side by Side, Switch Windows (the desktop opens
   new windows for New and Open; phones have one). Full Screen and Focus toggle engine state that
   this app does not act on.

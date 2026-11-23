@@ -41,6 +41,9 @@ internal fun StartScreen(
     recents: List<RecentDocument>,
     exists: (RecentDocument) -> Boolean,
     now: Long,
+    recoveryCopies: List<RecoveryCopy>,
+    onRestore: (RecoveryCopy) -> Unit,
+    onDiscard: (RecoveryCopy) -> Unit,
     personalTemplates: List<TemplateChoice.File>,
     onNew: () -> Unit,
     onTemplate: (TemplateChoice) -> Unit,
@@ -58,6 +61,13 @@ internal fun StartScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onNew) { Text("New document") }
                 OutlinedButton(onClick = onOpen) { Text("Open…") }
+            }
+            if (recoveryCopies.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                Text("Unsaved documents", style = MaterialTheme.typography.titleMedium)
+                Text("These were being edited when the app last stopped.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                RecoveryList(recoveryCopies, onRestore, onDiscard)
             }
             Spacer(Modifier.height(24.dp))
             Text("Templates", style = MaterialTheme.typography.titleMedium)

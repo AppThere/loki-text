@@ -656,6 +656,41 @@ fun App(
         return null
     }
 
+    // Local recovery: the engine keeps a copy of unsaved work in the app's folder and is ticked now and then to do it.
+    var recovery by remember { mutableStateOf(RecoveryState.NONE) }
+    var recoverDialog by remember { mutableStateOf(false) }
+    var printDialog by remember { mutableStateOf(false) }
+    var infoDialog by remember { mutableStateOf(false) }
+    var docInfo by remember { mutableStateOf<DocInfo?>(null) }
+    var infoError by remember { mutableStateOf<String?>(null) }
+    // The copy being restored: it loads in the background and opens on a tick, after which it is no longer listed.
+    var restoring by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val dir = profileDir()?.let { "$it/recovery" } ?: return@LaunchedEffect
+        engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.enableRecovery", buildJsonObject { put("dir", dir) }) } } }
+        var refreshed = false
+        while (true) {
+            val state = engineLock.withLock {
+                withContext(Dispatchers.Default) {
+                    runCatching { engine.call("loki.recoveryTick") }
+                    if (!refreshed) refreshed = runCatching { engine.execute("file.recover", buildJsonObject { put("refresh", true) }) }.isSuccess
+                    val r = runCatching { engine.execute("file.recover") }.getOrNull()
+                    runCatching { engine.uiRequests() }
+                    parseRecoveryState(r)
+                }
+            }
+            recovery = state
+            val id = restoring
+            if (id != null && !state.busy && state.copies.none { it.id == id }) {
+                restoring = null
+                start = false
+                revision++
+                stylesRevision++
+            }
+            kotlinx.coroutines.delay(2000)
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (installDocumentFonts(engine, engineLock)) revision++
         val fromTemplate = templateOfRequest(initialPath)
@@ -830,6 +865,40 @@ fun App(
         stylesRevision++
     }
 
+    fun restoreCopy(c: RecoveryCopy) {
+        scope.launch {
+            perform(requests = false) { execute("file.recover", buildJsonObject { put("restore", c.id) }) }
+            if (status.isEmpty()) restoring = c.id
+        }
+    }
+    fun discardCopy(c: RecoveryCopy) {
+        scope.launch {
+            perform(requests = false) { execute("file.recover", buildJsonObject { put("discard", c.id) }) }
+            recovery = recovery.copy(copies = recovery.copies.filter { it.id != c.id })
+        }
+    }
+
+    // The engine lays the pages out and writes the PDF with the options chosen; the platform prints it.
+    suspend fun printWith(options: PrintOptions) {
+        val path = withContext(Dispatchers.Default) { printJobPath() }
+        perform(requests = false) { execute("file.printPdf", options.toParams(path)) }
+        if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
+    }
+
+    // File › Info (and Properties): the document's facts and properties, read when the dialog opens.
+    LaunchedEffect(infoDialog, revision) {
+        if (!infoDialog) return@LaunchedEffect
+        infoError = null
+        docInfo = engineLock.withLock { withContext(Dispatchers.Default) { parseDocInfo(runCatching { engine.execute("file.info") }.getOrNull()) } }
+    }
+    fun saveProperties(changes: JsonObject) {
+        scope.launch {
+            perform(requests = false) { execute("file.properties", changes) }
+            if (status.isNotEmpty()) { infoError = status; status = ""; return@launch }
+            infoDialog = false
+        }
+    }
+
     // Runs a command picked from the ribbon, a menu or the all-commands list. One the app has its own
     // dialog or pane for goes there; one that needs values opens its form; one that only reports
     // shows what it answered.
@@ -837,6 +906,8 @@ fun App(
         val c = catalogById[id]
         when {
             // Create Link: the text box to continue in is the next one tapped.
+            id == "file.recover" -> recoverDialog = true
+            id == "file.info" || id == "file.properties" -> infoDialog = true
             id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
             c.needsInput -> commandForm = c
@@ -869,12 +940,8 @@ fun App(
                 perform { execute("file.saveAs", buildJsonObject { put("path", path) }) }
                 if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
             }
-            "file.print" -> {
-                // The engine lays the pages out and writes the PDF; the platform prints it.
-                val path = withContext(Dispatchers.Default) { printJobPath() }
-                perform { execute("file.printPdf", buildJsonObject { put("path", path) }) }
-                if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
-            }
+            // The Print dialog collects the pages and options; printing itself is [printWith].
+            "file.print" -> printDialog = true
             "app.about" -> showAbout = true
             "app.templates" -> templateDialog = true
             "app.commands" -> showCommands = ""
@@ -935,6 +1002,13 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    if (printDialog) PrintDialog(
+        pages = pages, totalPages = counts?.pages ?: pages.size, currentPage = (selection.caret?.page ?: 0) + 1, hasSelection = selection.rects.isNotEmpty(),
+        onPrint = { o -> printDialog = false; scope.launch { printWith(o) } },
+        onDismiss = { printDialog = false },
+    )
+    if (infoDialog) InfoDialog(docInfo, infoError, ::saveProperties) { infoDialog = false; docInfo = null }
+    if (recoverDialog) RecoveryDialog(recovery, ::restoreCopy, ::discardCopy) { recoverDialog = false }
     if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->
         AllCommandsDialog(
@@ -1019,7 +1093,14 @@ fun App(
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { pendingAction = null; action() }) { Text("Don't save") }
+                    TextButton(onClick = {
+                        pendingAction = null
+                        // The changes are given up, so their recovery copy goes too.
+                        scope.launch {
+                            engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.recoveryDiscard") } } }
+                            action()
+                        }
+                    }) { Text("Don't save") }
                     TextButton(onClick = { pendingAction = null }) { Text("Cancel") }
                 }
             },
@@ -1446,6 +1527,7 @@ fun App(
     }
     if (start) StartScreen(
         recents = remember(recentsRevision, start) { AppSettings.value.recents }, exists = ::recentAvailable, now = nowMillis(),
+        recoveryCopies = recovery.copies, onRestore = ::restoreCopy, onDiscard = ::discardCopy,
         personalTemplates = personalTemplates,
         onNew = { start = false },
         onTemplate = ::newFromTemplate,

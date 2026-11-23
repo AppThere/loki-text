@@ -4,6 +4,8 @@ import java.io.File
 
 private fun settingsFile(): File? = activityFilesDir()?.let { File(it, "settings.json") }
 
+actual fun profileDir(): String? = activityFilesDir()?.path
+
 actual fun loadSettingsText(): String? = runCatching { settingsFile()?.takeIf { it.isFile }?.readText() }.getOrNull()
 
 actual fun saveSettingsText(text: String) {

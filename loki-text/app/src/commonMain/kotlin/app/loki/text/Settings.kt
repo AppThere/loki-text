@@ -14,6 +14,9 @@ import kotlinx.serialization.json.put
 /** The text of the settings file, or null when there is none yet or it can't be read. Blocks briefly. */
 expect fun loadSettingsText(): String?
 
+/** A folder the app owns and keeps between runs (the one the settings file is in), or null when there is none yet. */
+expect fun profileDir(): String?
+
 /** Replaces the settings file. Failure is silent: a setting that can't be saved is only forgotten. */
 expect fun saveSettingsText(text: String)
 

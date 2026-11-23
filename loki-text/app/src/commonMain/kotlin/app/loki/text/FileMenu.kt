@@ -41,6 +41,7 @@ internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("file.exportPng", "Export Page as PNG…"),
     FileMenuItem("file.print", "Print…", "Ctrl+P"),
     null,
+    FileMenuItem("file.recover", "Recover Unsaved Documents…"),
     FileMenuItem("file.info", "Info"),
     FileMenuItem("file.properties", "Properties…"),
     FileMenuItem("file.options", "Options…"),

@@ -689,3 +689,93 @@ fn pointer_hit_tests_report_positions_and_table_spots() {
     }
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn recovery_needs_a_folder_and_then_reports_ready() {
+    let s = loki_session_new();
+    // Without a folder the engine has no recovery, and says so rather than pretending.
+    assert_eq!(call(s, "loki.enableRecovery", Some("{}"))["ok"], false);
+    let state = call(s, "engine.execute", Some(r#"{"command":"file.recover"}"#));
+    assert_ne!(state["result"]["enabled"], true, "{state}");
+
+    let dir = std::env::temp_dir().join(format!("loki-ffi-recovery-{}", std::process::id()));
+    let params = json!({"dir": dir.to_str().unwrap()}).to_string();
+    assert_eq!(call(s, "loki.enableRecovery", Some(&params))["ok"], true);
+    // The worker scans the folder in the background; ticks take its answer in.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let ready = loop {
+        assert_eq!(call(s, "loki.recoveryTick", None)["ok"], true);
+        let r = call(s, "engine.execute", Some(r#"{"command":"file.recover"}"#));
+        if r["result"]["enabled"] == true {
+            assert!(r["result"]["documents"].as_array().is_some_and(|d| d.is_empty()), "{r}");
+            break true;
+        }
+        if std::time::Instant::now() > deadline {
+            break false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert_eq!(call(s, "loki.recoveryDiscard", None)["ok"], true);
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(ready, "recovery never became ready");
+}
+
+/// Polls `done` until it holds; the engine's recovery worker answers in the background.
+fn until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// Runs `file.recover` with `params` and returns the result.
+fn recover(s: *mut LokiSession, params: Value) -> Value {
+    let p = json!({"command": "file.recover", "params": params}).to_string();
+    call(s, "engine.execute", Some(&p))
+}
+
+#[test]
+fn unsaved_work_survives_the_session_and_can_be_restored() {
+    let dir = std::env::temp_dir().join(format!("loki-ffi-recovery-e2e-{}", std::process::id()));
+    let dir_params = json!({"dir": dir.to_str().unwrap()}).to_string();
+    // A first run types and is ticked until a copy is on disk, then ends without saving.
+    let a = loki_session_new();
+    assert_eq!(call(a, "loki.enableRecovery", Some(&dir_params))["ok"], true);
+    assert_eq!(call(a, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Unsaved words worth keeping"}}"#))["ok"], true);
+    let has_copy = || {
+        std::fs::read_dir(dir.join("recovery")).into_iter().chain(std::fs::read_dir(&dir)).flatten().flatten().any(|e| e.path().is_dir() || e.path().is_file())
+    };
+    until("the first copy", || {
+        call(a, "loki.recoveryTick", None);
+        has_copy()
+    });
+    // SAFETY: freed once. A dirty document keeps its copy through a clean close.
+    unsafe { loki_session_free(a) };
+
+    // The next run lists it and restores it into its blank document.
+    let b = loki_session_new();
+    assert_eq!(call(b, "loki.enableRecovery", Some(&dir_params))["ok"], true);
+    let mut id = String::new();
+    until("the copy to be listed", || {
+        call(b, "loki.recoveryTick", None);
+        let r = recover(b, json!({}));
+        match r["result"]["documents"].as_array().and_then(|d| d.first()) {
+            Some(d) => {
+                id = d["id"].as_str().unwrap_or_default().to_string();
+                true
+            }
+            None => false,
+        }
+    });
+    assert_eq!(recover(b, json!({"restore": id}))["ok"], true);
+    until("the copy to open", || {
+        call(b, "loki.recoveryTick", None);
+        call(b, "document.inspect", None)["result"].to_string().contains("Unsaved words worth keeping")
+    });
+    // SAFETY: freed once.
+    unsafe { loki_session_free(b) };
+    let _ = std::fs::remove_dir_all(&dir);
+}

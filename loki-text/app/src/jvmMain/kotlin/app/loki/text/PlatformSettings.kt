@@ -14,6 +14,8 @@ private fun settingsFile(): File {
     return File(base, "loki-text/settings.json")
 }
 
+actual fun profileDir(): String? = settingsFile().parentFile?.path
+
 actual fun loadSettingsText(): String? = runCatching { settingsFile().takeIf { it.isFile }?.readText() }.getOrNull()
 
 actual fun saveSettingsText(text: String) {
