@@ -110,9 +110,13 @@ fun CommandFormDialog(
     writesFile: (id: String) -> Boolean,
     run: suspend (JsonObject) -> String?,
     onDismiss: () -> Unit,
+    /** The document's current values by field name, to start the form with (fields the command doesn't have are ignored). */
+    initial: Map<String, String> = emptyMap(),
 ) {
     val form = remember(command.id) { parseParamForm(command.params) }
-    val values = remember(command.id) { mutableStateMapOf<String, String>() }
+    val values = remember(command.id) {
+        mutableStateMapOf<String, String>().also { m -> for (f in form.fields) initial[f.name]?.let { m[f.name] = it } }
+    }
     var raw by remember(command.id) { mutableStateOf("") }
     var showRaw by remember(command.id) { mutableStateOf(form.fields.isEmpty()) }
     var error by remember(command.id) { mutableStateOf<String?>(null) }
