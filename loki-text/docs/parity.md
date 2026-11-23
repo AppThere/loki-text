@@ -105,11 +105,16 @@ the table, alignment guides while an object moves, and crop handles are not eith
 Things the egui front end does itself (`ui.*` commands and its own widgets) that this app does not:
 
 * **Bespoke dialogs.** The desktop has about sixty; this app has its own Font, Paragraph, Page
-  Setup, Styles, Lists, Table, Find/Replace/Go To and Insert dialogs, and the generated form for
-  everything else. The form is complete but plain: it does not show the current values, and list or
-  object parameters are typed as JSON (Edit Recipient List, Chart data, Customize Keyboard).
-* **Backstage pages**: File › Options is still the generic form (it does not show the current values and has
-  no panes). Done: the start screen (`StartScreen.kt`: New, Open, templates, recent documents, unsaved
+  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info and Recipient List dialogs, and
+  the generated form for everything else. The form is complete but plain. It starts with the document's
+  current values for the commands in `FORM_DEFAULTS` (`FormDefaults.kt`: File › Options, tracking
+  options, privacy options, margins, page layout, paper size, orientation, columns, indents, paragraph
+  spacing, font size and font; `FormDefaultsFixtureTest` checks every entry against the engine's own
+  parameter docs), and those commands open their form directly. Every other command's form starts blank,
+  and list or object parameters are still typed as JSON (Chart data, Customize Keyboard, Customize
+  Ribbon, filter and sort rules). Defaults come only from read-only commands: calling a setter with no
+  values to read it back changes the document.
+* **Backstage pages**: File › Options is the generic form with the current values, not the desktop's panes. Done: the start screen (`StartScreen.kt`: New, Open, templates, recent documents, unsaved
   documents), File › New from Template (`TemplateGallery.kt`: five built-in templates with first-page
   pictures, personal templates from `file.listTemplates`, Browse), File › Print (`PrintDialog.kt`: page
   preview, range, odd/even, pages to a sheet, paper, copies, what it comes to; the options go to

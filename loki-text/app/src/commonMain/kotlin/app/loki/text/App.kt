@@ -422,6 +422,8 @@ fun App(
     val catalogById = remember(catalog) { catalog.associateBy { it.id } }
     var showCommands by remember { mutableStateOf<String?>(null) }
     var commandForm by remember { mutableStateOf<CommandInfo?>(null) }
+    // The command a set of starting values was read for, and the values: a form waits for its own.
+    var formInitial by remember { mutableStateOf<Pair<String, Map<String, String>>?>(null) }
     var commandResult by remember { mutableStateOf<Pair<CommandInfo, JsonElement?>?>(null) }
     // Panes the engine keeps no open flag for (Reviewing, Selection).
     var localPanes by remember { mutableStateOf<Set<PaneKind>>(emptySet()) }
@@ -659,6 +661,20 @@ fun App(
     // Local recovery: the engine keeps a copy of unsaved work in the app's folder and is ticked now and then to do it.
     var recovery by remember { mutableStateOf(RecoveryState.NONE) }
     var recoverDialog by remember { mutableStateOf(false) }
+    var recipients by remember { mutableStateOf<RecipientTable?>(null) }
+    var recipientsError by remember { mutableStateOf<String?>(null) }
+    // The current values a command's form starts with: read with the command's reader (see FORM_DEFAULTS), never by running the command.
+    LaunchedEffect(commandForm) {
+        val c = commandForm ?: return@LaunchedEffect
+        val source = FORM_DEFAULTS[c.id]
+        formInitial = c.id to if (source == null) emptyMap() else engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val reported = runCatching { engine.execute(source.reader) }.getOrNull()
+                runCatching { engine.uiRequests() }
+                formDefaults(source, reported)
+            }
+        }
+    }
     var printDialog by remember { mutableStateOf(false) }
     var infoDialog by remember { mutableStateOf(false) }
     var docInfo by remember { mutableStateOf<DocInfo?>(null) }
@@ -899,6 +915,27 @@ fun App(
         }
     }
 
+    // Mailings › Edit Recipient List: read the list (the command reports it when given nothing), edit it as a table, write it back.
+    suspend fun openRecipients() {
+        val table = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val r = runCatching { engine.execute("mailings.editRecipients") }
+                runCatching { engine.uiRequests() }
+                r.map { parseRecipients(it) }
+            }
+        }
+        table.onFailure { status = it.message ?: "The recipient list could not be read"; return }
+        recipients = table.getOrNull() ?: RecipientTable(emptyList(), emptyList())
+        recipientsError = null
+    }
+    fun saveRecipients(t: RecipientTable) {
+        scope.launch {
+            perform(requests = false) { execute("mailings.editRecipients", t.toParams()) }
+            if (status.isNotEmpty()) { recipientsError = status; status = ""; return@launch }
+            recipients = null
+        }
+    }
+
     // Runs a command picked from the ribbon, a menu or the all-commands list. One the app has its own
     // dialog or pane for goes there; one that needs values opens its form; one that only reports
     // shows what it answered.
@@ -907,10 +944,11 @@ fun App(
         when {
             // Create Link: the text box to continue in is the next one tapped.
             id == "file.recover" -> recoverDialog = true
+            id == "mailings.editRecipients" -> openRecipients()
             id == "file.info" || id == "file.properties" -> infoDialog = true
             id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
-            c.needsInput -> commandForm = c
+            c.needsInput || (id in FORM_DEFAULTS && c.hasParams) -> commandForm = c
             !c.mutates -> executeFromUi(c, JsonObject(emptyMap()))?.let { status = it }
             else -> runCommand(id)
         }
@@ -1008,6 +1046,7 @@ fun App(
         onDismiss = { printDialog = false },
     )
     if (infoDialog) InfoDialog(docInfo, infoError, ::saveProperties) { infoDialog = false; docInfo = null }
+    recipients?.let { RecipientsDialog(it, recipientsError, ::saveRecipients) { recipients = null } }
     if (recoverDialog) RecoveryDialog(recovery, ::restoreCopy, ::discardCopy) { recoverDialog = false }
     if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->
@@ -1021,7 +1060,11 @@ fun App(
             onDismiss = { showCommands = null },
         )
     }
-    commandForm?.let { c -> CommandFormDialog(c, pickFile = { save -> pickFile(save) }, writesFile = ::writesFile, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }) }
+    // The form opens once the current values it starts with have been read (a moment, or none for most commands).
+    val formStart = formInitial
+    commandForm?.let { c ->
+        if (formStart != null && formStart.first == c.id) CommandFormDialog(c, pickFile = { save -> pickFile(save) }, writesFile = ::writesFile, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }, initial = formStart.second)
+    }
     commandResult?.let { (c, result) ->
         ResultDialog(c, result, onChange = if (c.hasParams) ({ commandResult = null; commandForm = c }) else null, onDismiss = { commandResult = null })
     }
