@@ -159,7 +159,9 @@ fun PictureGroup(name: String, env: RibbonEnv) {
                     InchField("app.pictureWidth", "Width", pic?.width, env.reason("picture.size")) { pt -> env.onRunWith("picture.size", pictureSizeParams("width", pt)) }
                 }
                 Column {
-                    RibbonButton("picture.crop", env.label("picture.crop", "Crop"), ButtonSize.Labeled, disabledReason = env.reason("picture.crop")) { cropping = true }
+                    // Crop puts handles on the picture; the exact amounts are in Crop Values.
+                    RibbonButton("picture.crop", env.label("picture.crop", "Crop"), ButtonSize.Labeled, disabledReason = env.reason("picture.crop")) { env.onRun(CROP_MODE) }
+                    RibbonButton("app.cropValues", "Crop Values…", ButtonSize.Labeled, disabledReason = env.reason("picture.crop")) { cropping = true }
                     RibbonButton("app.pictureOriginal", "Original Size", ButtonSize.Labeled, disabledReason = env.reason("picture.size")) {
                         env.onRunWith("picture.size", buildJsonObject { put("original", true) })
                     }

@@ -40,6 +40,12 @@ internal interface MouseHost {
     fun guide(page: Int, from: Offset?, to: Offset?)
     /** A drag is selecting (the floating toolbar waits). */
     fun selecting(on: Boolean)
+    /**
+     * Shows what a drag would do as it goes: runs [id] in the document from where the drag began (taking back the last
+     * preview first) and redraws. [endPreview] takes the last one back, before the drag's own command runs.
+     */
+    suspend fun preview(id: String, params: JsonObject)
+    suspend fun endPreview()
 }
 
 /** What is under a press: the table's spot and the text's positions. */
@@ -118,11 +124,13 @@ internal suspend fun MouseHost.mouseGesture(p: MousePress, moves: ReceiveChannel
     when (spot.kind) {
         "resize" -> {
             if (p.clicks >= 2) { exec("table.fitColumn", clickAtParams(p)); for (m in moves) {}; return }
-            val to = dragLine(p, moves) ?: return
+            // The columns take their new widths as the border moves; the drag's own command, on release, is the one undo step.
+            val to = dragLive(p, moves) { m -> preview("table.resizeDrag", resizeDragParams(p, m.x / k, m.y / k)) } ?: return
             exec("table.resizeDrag", resizeDragParams(p, to.x / k, to.y / k))
         }
         "handle" -> {
-            val to = dragLine(p, moves)
+            // A movable table goes where the pointer is as it moves; it is placed for good on release.
+            val to = if (spot.movable) dragLive(p, moves) { m -> preview("table.moveDrag", moveDragParams(p, m.x / k, m.y / k)) } else dragLine(p, moves)
             if (to != null && spot.movable) exec("table.moveDrag", moveDragParams(p, to.x / k, to.y / k)) else exec("table.selectAt", selectAtParams(p))
         }
         "insertRow", "insertColumn" -> { exec("table.insertAt", clickAtParams(p)); for (m in moves) {} }
@@ -150,6 +158,30 @@ private suspend fun MouseHost.dragLine(p: MousePress, moves: ReceiveChannel<Offs
     var last: Offset? = null
     for (m in moves) { last = m; guide(p.page, p.down, m) }
     guide(p.page, null, null)
+    val to = last ?: return null
+    return if (abs(to.x - p.down.x) / p.pxPerPt < DRAG_MIN_PT && abs(to.y - p.down.y) / p.pxPerPt < DRAG_MIN_PT) null else to
+}
+
+/**
+ * Follows a drag from the press like [dragLine], and shows its result as it goes with [show] (a preview the host takes
+ * back); the place it ended, or null when it never left the press. The preview is always taken back here: the caller runs
+ * the drag's command for good.
+ */
+private suspend fun MouseHost.dragLive(p: MousePress, moves: ReceiveChannel<Offset>, show: suspend (Offset) -> Unit): Offset? {
+    var last: Offset? = null
+    var shown: Offset? = null
+    try {
+        for (m in moves) {
+            last = m
+            guide(p.page, p.down, m)
+            val far = abs(m.x - p.down.x) / p.pxPerPt >= DRAG_MIN_PT || abs(m.y - p.down.y) / p.pxPerPt >= DRAG_MIN_PT
+            // Moves come conflated, so a slow redraw only skips places in between.
+            if (far && m != shown) { show(m); shown = m }
+        }
+    } finally {
+        guide(p.page, null, null)
+        if (shown != null) endPreview()
+    }
     val to = last ?: return null
     return if (abs(to.x - p.down.x) / p.pxPerPt < DRAG_MIN_PT && abs(to.y - p.down.y) / p.pxPerPt < DRAG_MIN_PT) null else to
 }

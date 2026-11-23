@@ -167,6 +167,8 @@ private class Snapshot(
     /** The first page's size in points, for the zoom that fits it to the window. */
     val pagePt: Size? = null,
     val ruler: RulerInfo? = null,
+    /** The section's page, for the guides an object snaps to while it moves. */
+    val section: RulerInfo? = null,
 )
 
 /** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
@@ -368,7 +370,15 @@ fun App(
     val setTheme: (String) -> Unit = { c -> setThemeChoice(c); AppSettings.update { it.copy(theme = c) } }
     var start by remember { mutableStateOf(startScreen && initialPath == null) }
     val engine = remember { Engine() }
-    DisposableEffect(Unit) { onDispose { engine.close() } }
+    // The engine is freed after any call already under way: off the UI thread, behind the lock every engine call takes, so
+    // a render or recovery tick still running when the window closes never touches a freed session.
+    val engineLock = remember { Mutex() }
+    DisposableEffect(Unit) {
+        onDispose {
+            @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.Default) { engineLock.withLock { engine.close() } }
+        }
+    }
 
     var revision by remember { mutableStateOf(0) }
     var pages by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
@@ -429,6 +439,9 @@ fun App(
     var pagePt by remember { mutableStateOf<Size?>(null) }
     var viewportPx by remember { mutableStateOf(IntSize.Zero) }
     var rulerInfo by remember { mutableStateOf<RulerInfo?>(null) }
+    var sectionInfo by remember { mutableStateOf<RulerInfo?>(null) }
+    // Picture Format › Crop: the selected picture shows crop handles instead of its frame's.
+    var cropMode by remember { mutableStateOf(false) }
     // Every engine command, for the all-commands list and the command form; and what is open of each.
     var catalog by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
     val catalogById = remember(catalog) { catalog.associateBy { it.id } }
@@ -475,7 +488,6 @@ fun App(
 
     // Engine calls block, so they run off the UI thread. The native session is not thread-safe,
     // so every call (edits, geometry, rendering) goes through this lock, in the order issued.
-    val engineLock = remember { Mutex() }
     suspend fun perform(requests: Boolean = true, block: Engine.() -> Unit) {
         status = try {
             val asked = engineLock.withLock {
@@ -527,6 +539,16 @@ fun App(
         override suspend fun setCaret(page: Int, at: Offset, pxPerPt: Float, extend: Boolean) = perform { setCaret(page, at, pxPerPt, extend) }
         override fun guide(page: Int, from: Offset?, to: Offset?) { mouseGuide = if (from != null && to != null) MouseGuide(page, from, to) else null }
         override fun selecting(on: Boolean) { mouseSelecting = on }
+        override suspend fun preview(id: String, params: JsonObject) {
+            engineLock.withLock {
+                withContext(Dispatchers.Default) { runCatching { engine.call("loki.preview", buildJsonObject { put("command", id); put("params", params) }) } }
+            }
+            revision++
+        }
+        override suspend fun endPreview() {
+            engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.endPreview") } } }
+            revision++
+        }
     }
 
     // Enters the header or footer under a double tap (Print Layout only), and leaves it again from the body.
@@ -686,6 +708,7 @@ fun App(
     // Full Screen, Focus and Full Screen view fill the screen; the platform does that to the window.
     val fullScreenWanted = wantsFullScreen(viewState)
     LaunchedEffect(fullScreenWanted) { windowHost?.setFullScreen(fullScreenWanted) }
+    LaunchedEffect(selection.obj?.kind, selection.obj?.page) { if (selection.obj?.kind != "image") cropMode = false }
     LaunchedEffect(docPath, unsaved) { windowHost?.setTitle(windowTitle(docPath, unsaved)) }
     var recipients by remember { mutableStateOf<RecipientTable?>(null) }
     var recipientsError by remember { mutableStateOf<String?>(null) }
@@ -859,7 +882,8 @@ fun App(
                 val info = runCatching { engine.execute("file.info") as? JsonObject }.getOrNull()
                 val dirty = info?.get("dirty")?.jsonPrimitive?.booleanOrNull == true
                 val path = info?.get("path")?.jsonPrimitive?.contentOrNull
-                val ruler = if (view.ruler && !view.flat) runCatching { parseRulerInfo(engine.execute("layout.section")) }.getOrNull() else null
+                val section = if (!view.flat) runCatching { parseRulerInfo(engine.execute("layout.section")) }.getOrNull() else null
+                val ruler = section.takeIf { view.ruler }
                 val first = engine.renderPage(0, renderScale) ?: return@withContext Snapshot(sel, emptyList(), view, z, counts, cmdState, dirty, fmt)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
@@ -867,7 +891,7 @@ fun App(
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, renderScale) }
                 Snapshot(
                     sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, view, z, counts, cmdState, dirty, fmt, path,
-                    pagePt = Size(first.width / renderScale, first.height / renderScale), ruler = ruler,
+                    pagePt = Size(first.width / renderScale, first.height / renderScale), ruler = ruler, section = section,
                 )
             }
         }
@@ -877,6 +901,7 @@ fun App(
         if (pinchPending) { pinch = 1f; pinchPending = false }
         snap.pagePt?.let { pagePt = it }
         rulerInfo = snap.ruler
+        sectionInfo = snap.section
         counts = snap.counts
         commandState = snap.commands
         formatState = snap.format
@@ -1058,6 +1083,7 @@ fun App(
         val c = catalogById[id]
         when {
             // Create Link: the text box to continue in is the next one tapped.
+            id == CROP_MODE -> cropMode = !cropMode && selection.obj?.kind == "image"
             id == "file.recover" -> recoverDialog = true
             id in WINDOW_COMMANDS -> runWindowCommand(id)
             id == "mailings.editRecipients" -> openRecipients()
@@ -1664,6 +1690,8 @@ fun App(
                 selection.obj?.takeIf { it.page == i }?.let { o ->
                     ObjectFrameOverlay(
                         o, pxPerPt,
+                        crop = if (cropMode && o.kind == "image") commandState.picture?.crop else null,
+                        guides = sectionInfo?.let(::pageGuides),
                         onDropAt = { x, y, copy -> scope.launch {
                             // An object in the text moves (or is copied) to the text position under the drop.
                             val to = mouseHost.hit(o.page, x, y).pos
@@ -1681,7 +1709,7 @@ fun App(
         }
         if (rulerShown) rulerInfo?.let { info ->
             val left = (pageOrigin[0]?.x ?: 0f) - viewportOrigin.x
-            HorizontalRuler(info, commandState.layout, left, scale * pinch, { p -> scope.launch { runCommand("para.indents", p) } }, Modifier.align(Alignment.TopStart))
+            HorizontalRuler(info, commandState.layout, left, scale * pinch, { id, p -> scope.launch { runCommand(id, p) } }, Modifier.align(Alignment.TopStart))
         }
         selection.hf?.let { kind ->
             HeaderFooterBar(kind, { scope.launch { runCommand("insert.closeHeader") } }, Modifier.align(Alignment.TopCenter).padding(top = if (rulerShown) 8.dp + RULER_HEIGHT else 8.dp))

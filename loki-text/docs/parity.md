@@ -156,7 +156,16 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   assignments). Customize Ribbon is still the generated form, not a drag-and-drop dialog. Menus and
   tooltips still show the built-in shortcut, and a change made in one desktop window reaches the
   others only at the next launch.
-* **Ruler dragging, crop handles, alignment guides, keytips, interface size, interface language**
+* **Direct manipulation** (item 6). The ruler drags the indent markers, the margins' edges (its middle
+  band) and the tab stops; a click in the text area sets a left tab and a tab dragged off it goes
+  (`Ruler.kt`; the paragraph's tabs come from `loki-ffi`'s layout state). Picture Format › Crop puts
+  crop handles on the picture, which trim it in one `picture.crop` (Crop Values keeps the dialog). A
+  floating object being moved snaps to the page's edges, margins and middle, with the guide drawn (Alt
+  moves freely); guides to other objects are not drawn. Dragging a table's column border or move handle
+  shows the real result as it goes: `loki.preview` runs the command and takes it back
+  (`revert_since`), so only the drag's own command is an undo step. Tried on an Android device: tab
+  stops, the margin, a live column drag undone in one step, and a crop.
+* **Keytips, interface size, interface language**
   (the UI is English only), **Format Shape and SmartArt text panes, Zotero, Read Aloud's audio,
   updates**.
 * **Saved settings** are the theme, the screen paper colour and the recent documents (`Settings.kt`;

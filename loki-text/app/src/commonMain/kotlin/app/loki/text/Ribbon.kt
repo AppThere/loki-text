@@ -146,6 +146,8 @@ class LayoutState(
     val columns: String?,
     /** The first line's indent from the left indent (negative: hanging), in points. */
     val firstLine: Float? = null,
+    /** The paragraph's tab stops, in points from the text column's left edge, as the ruler shows them. */
+    val tabs: List<TabMark> = emptyList(),
 ) {
     companion object {
         val EMPTY = LayoutState(null, null, null, null, null, null, null, null, null)
@@ -160,6 +162,7 @@ fun parseLayoutState(e: JsonElement?): LayoutState {
         f("indentLeft"), f("indentRight"), f("spaceBefore"), f("spaceAfter"), f("lineSpacing"),
         (o["landscape"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull, t("paper"), t("margins"), t("columns"),
         firstLine = f("firstLine")?.takeIf { it.isFinite() },
+        tabs = parseTabMarks(o["tabs"]),
     )
 }
 

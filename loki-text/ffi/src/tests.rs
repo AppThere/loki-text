@@ -779,3 +779,38 @@ fn unsaved_work_survives_the_session_and_can_be_restored() {
     unsafe { loki_session_free(b) };
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_preview_is_taken_back_and_never_undoes_earlier_work() {
+    let s = loki_session_new();
+    assert_eq!(call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Kept"}}"#))["ok"], true);
+    let text = |s| call(s, "document.inspect", None)["result"].to_string();
+    // A preview that changes the document is in it until the next one or the end.
+    let p = call(s, "loki.preview", Some(r#"{"command":"text.insert","params":{"text":" shown"}}"#));
+    assert_eq!(p["result"]["applied"], true, "{p}");
+    assert!(text(s).contains("Kept shown"));
+    // The next preview starts from where the drag began.
+    call(s, "loki.preview", Some(r#"{"command":"text.insert","params":{"text":" again"}}"#));
+    assert!(text(s).contains("Kept again") && !text(s).contains("shown"));
+    assert_eq!(call(s, "loki.endPreview", None)["ok"], true);
+    assert!(text(s).contains("Kept") && !text(s).contains("again"));
+    // A preview that changes nothing leaves nothing to take back, so ending it can't undo the typing before it.
+    let none = call(s, "loki.preview", Some(r#"{"command":"view.ruler","params":{}}"#));
+    assert_eq!(none["result"]["applied"], false, "{none}");
+    call(s, "loki.endPreview", None);
+    call(s, "loki.endPreview", None);
+    assert!(text(s).contains("Kept"), "earlier work survives");
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn the_caret_paragraphs_tab_stops_reach_the_ruler() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"para.tabs","params":{"set":[{"pos":72,"align":"center"}]}}"#));
+    let st = call(s, "loki.commandState", None);
+    let tabs = &st["result"]["layout"]["tabs"];
+    assert_eq!(tabs[0]["pos"].as_f64(), Some(72.0), "{st}");
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}

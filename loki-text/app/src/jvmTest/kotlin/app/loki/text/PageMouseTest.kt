@@ -28,6 +28,10 @@ class PageMouseTest {
         override suspend fun setCaret(page: Int, at: Offset, pxPerPt: Float, extend: Boolean) { carets += at to extend }
         override fun guide(page: Int, from: Offset?, to: Offset?) {}
         override fun selecting(on: Boolean) {}
+        val previews = mutableListOf<String>()
+        var ended = 0
+        override suspend fun preview(id: String, params: JsonObject) { previews += id }
+        override suspend fun endPreview() { ended++ }
     }
 
     private fun press(clicks: Int = 1, shift: Boolean = false, ctrl: Boolean = false, alt: Boolean = false) =
@@ -158,5 +162,28 @@ class PageMouseTest {
         assertEquals(null, textUnit(1, false, false))
         assertEquals(null, textUnit(2, false, true))
         assertEquals(listOf("line", "paragraph", "document", "document"), listOf(barUnit(1, false), barUnit(2, false), barUnit(3, false), barUnit(1, true)))
+    }
+
+    @Test fun aBorderDragShowsItsResultAsItGoesThenCommitsOnce() {
+        val h = Host(TableSpot("resize", false), none)
+        run(h, press(), listOf(Offset(220f, 400f), Offset(240f, 400f), Offset(260f, 400f)))
+        assertTrue(h.previews.size >= 2 && h.previews.all { it == "table.resizeDrag" }, "${h.previews}")
+        assertEquals(1, h.ended, "the preview is taken back before the drag's own command")
+        assertEquals(listOf("table.resizeDrag"), ids(h))
+    }
+
+    @Test fun aPressThatNeverMovesShowsNoPreview() {
+        val h = Host(TableSpot("resize", false), none)
+        run(h, press(), listOf(Offset(200.2f, 400f)))
+        assertTrue(h.previews.isEmpty())
+        assertEquals(0, h.ended)
+        assertTrue(h.sent.isEmpty())
+    }
+
+    @Test fun aMovableTableFollowsThePointer() {
+        val h = Host(TableSpot("handle", true), none)
+        run(h, press(), listOf(Offset(260f, 460f)))
+        assertEquals(listOf("table.moveDrag"), h.previews)
+        assertEquals(listOf("table.moveDrag"), ids(h))
     }
 }

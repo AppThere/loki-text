@@ -25,6 +25,16 @@ mod state;
 /// Opaque to C. One per open window/document tab.
 pub struct LokiSession {
     inner: Headless,
+    /// Where the undo history stood when a drag's preview began (`loki.preview`): the next preview and
+    /// `loki.endPreview` take back every step since, and nothing before it.
+    preview: Option<u64>,
+}
+
+/// Takes back the preview in the document, if there is one: the steps recorded since it began, and no others.
+fn end_preview(session: &mut LokiSession) {
+    if let Some(mark) = session.preview.take() {
+        session.inner.session.revert_since(mark);
+    }
 }
 
 /// Largest page bitmap `loki_render_page` returns (width × height, pixels): 8192² ≈ 256 MiB of RGBA.
@@ -54,7 +64,7 @@ unsafe fn str_arg<'a>(p: *const c_char) -> Option<&'a str> {
 /// Create a session holding a blank document. Free with [`loki_session_free`]. Null on failure.
 #[unsafe(no_mangle)]
 pub extern "C" fn loki_session_new() -> *mut LokiSession {
-    catch_unwind(|| Box::into_raw(Box::new(LokiSession { inner: Headless::default() }))).unwrap_or(ptr::null_mut())
+    catch_unwind(|| Box::into_raw(Box::new(LokiSession { inner: Headless::default(), preview: None }))).unwrap_or(ptr::null_mut())
 }
 
 /// Free a session. Null is ignored. The pointer must not be used afterwards.
@@ -117,6 +127,32 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
         return match catch_unwind(AssertUnwindSafe(|| state::command_state(&mut session.inner.session))) {
             Ok(v) => reply(json!({"ok": true, "result": v})),
             Err(_) => err("internal error (panic caught) reading command state"),
+        };
+    }
+    if method == "loki.preview" || method == "loki.endPreview" {
+        // A drag shown as it goes (a table's column border, its move handle): each `loki.preview` takes back the last one
+        // and runs the command afresh from where the drag began, so the pages show the real result; `loki.endPreview`
+        // takes back the last one before the drag's own command runs. Only a step the preview made is ever undone: a
+        // command that changed nothing leaves nothing to take back.
+        let done = catch_unwind(AssertUnwindSafe(|| -> Result<Value, String> {
+            end_preview(session);
+            if method == "loki.endPreview" {
+                return Ok(Value::Null);
+            }
+            // The preview is a step of its own: it must not join the typing before it, or taking it back takes that too.
+            session.inner.session.close_typing();
+            let mark = session.inner.session.undo_mark();
+            let result = session.inner.call("engine.execute", params.clone());
+            let applied = session.inner.session.undo_mark() != mark;
+            if applied {
+                session.preview = Some(mark);
+            }
+            Ok(json!({"applied": applied, "result": result?}))
+        }));
+        return match done {
+            Ok(Ok(v)) => reply(json!({"ok": true, "result": v})),
+            Ok(Err(e)) => err(e),
+            Err(_) => err("internal error (panic caught) in a preview"),
         };
     }
     if method.starts_with("loki.recovery") || method == "loki.enableRecovery" {
