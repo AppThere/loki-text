@@ -108,8 +108,10 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   Setup, Styles, Lists, Table, Find/Replace/Go To and Insert dialogs, and the generated form for
   everything else. The form is complete but plain: it does not show the current values, and list or
   object parameters are typed as JSON (Edit Recipient List, Chart data, Customize Keyboard).
-* **Start screen and Backstage pages**: recent documents, templates gallery, the Print page with a
-  preview, recovery of unsaved documents. File › Info/Options are the result dialog and the form.
+* **Backstage pages**: templates gallery, the Print page with a preview, recovery of unsaved
+  documents. File › Info/Options are the result dialog and the form. (The start screen with New,
+  Open and recent documents exists: `StartScreen.kt`. On Android a recent entry is the copy made when
+  the document was opened, so it is listed as "File not found" once the system clears the cache.)
 * **Window management**: Split, Arrange All, View Side by Side, Switch Windows (the desktop opens
   new windows for New and Open; phones have one). Full Screen and Focus toggle engine state that
   this app does not act on.
@@ -118,7 +120,9 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
 * **Ruler dragging, crop handles, alignment guides, keytips, interface size, interface language**
   (the UI is English only), **Format Shape and SmartArt text panes, Zotero, Read Aloud's audio,
   updates**.
-* **Settings are per run**: the theme choice and paper colour are not saved between launches.
+* **Saved settings** are the theme, the screen paper colour and the recent documents (`Settings.kt`;
+  `settings.json` in the platform's config folder, app storage on Android, user defaults on iOS).
+  Zoom, view mode and the other view state are still per run.
 * **System fonts** (`font.loadSystem`) are not enumerated; documents use the bundled open fonts.
 
 ## Checking it

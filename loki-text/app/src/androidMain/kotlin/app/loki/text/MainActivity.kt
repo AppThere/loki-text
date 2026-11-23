@@ -42,6 +42,9 @@ actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 /** The running activity, which hosts the file pickers; null before onCreate and after onDestroy. */
 private var activity: MainActivity? = null
 
+/** App-private storage that outlives the cache, for the settings file; null before the activity exists. */
+internal fun activityFilesDir(): File? = activity?.filesDir
+
 /** A saved document waits here, in app storage, until [publishFile] copies it to the place the user chose. */
 private val pendingSaves = HashMap<String, Uri>()
 
@@ -177,7 +180,9 @@ class MainActivity : ComponentActivity() {
         // A document opened from another window arrives as a path in app storage.
         val initial = intent?.getStringExtra(EXTRA_PATH)
         setContent {
-            App(initialPath = initial, onNewWindow = { path ->
+            // A window opened by New (a new document task) or for a file goes straight to the page; a launch shows the start screen.
+            val fresh = initial == null && (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_NEW_DOCUMENT == 0
+            App(initialPath = initial, startScreen = fresh, onNewWindow = { path ->
                 // Each document gets its own task, so it has its own entry in Recents.
                 val next = Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)

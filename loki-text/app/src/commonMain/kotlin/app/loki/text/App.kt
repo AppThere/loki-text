@@ -353,7 +353,12 @@ fun App(
     titleBar: TitleBarConfig? = null,
     /** Set where the platform has a menu bar (macOS): it shows this window's commands, so the in-window menu button goes. */
     menuBridge: MenuBridge? = null,
-) = AppTheme { themeChoice, setTheme, darkTheme ->
+    /** Show the start screen (recent documents, New, Open) first; false for a window opened for a document or a new one. */
+    startScreen: Boolean = false,
+) = AppTheme(AppSettings.value.theme) { themeChoice, setThemeChoice, darkTheme ->
+    // The choice is kept for the next launch.
+    val setTheme: (String) -> Unit = { c -> setThemeChoice(c); AppSettings.update { it.copy(theme = c) } }
+    var start by remember { mutableStateOf(startScreen && initialPath == null) }
     val engine = remember { Engine() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
@@ -421,7 +426,8 @@ fun App(
     // Panes the engine keeps no open flag for (Reviewing, Selection).
     var localPanes by remember { mutableStateOf<Set<PaneKind>>(emptySet()) }
     // The colour laid over the page (View › Screen Paper Color, and Read Mode's page colour), by the engine's name.
-    var paperColor by remember { mutableStateOf<String?>(null) }
+    var paperColor by remember { mutableStateOf(AppSettings.value.paperColor) }
+    LaunchedEffect(paperColor) { AppSettings.update { it.copy(paperColor = paperColor) } }
     // The stroke a Draw tab tool is making on a page, in pixels of that page.
     var inkPage by remember { mutableStateOf(-1) }
     val inkPoints = remember { mutableStateListOf<Offset>() }
@@ -744,10 +750,13 @@ fun App(
         formatState = snap.format
         unsaved = snap.dirty
         docPath = snap.path
+        snap.path?.let { p -> if (AppSettings.value.recents.firstOrNull()?.path != p) AppSettings.update { it.withRecent(p, nowMillis()) } }
         pages = snap.pages
     }
 
     var showAbout by remember { mutableStateOf(false) }
+    // Bumped when the recent list changes so the start screen redraws.
+    var recentsRevision by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
     // Save, or Save As for a document that has no file yet. True when the document was written
@@ -1392,6 +1401,24 @@ fun App(
             onView = { cmd -> scope.launch { runCommand(cmd) } },
         )
     }
+    if (start) StartScreen(
+        recents = remember(recentsRevision, start) { AppSettings.value.recents }, exists = ::fileExists, now = nowMillis(),
+        onNew = { start = false },
+        onOpen = {
+            scope.launch {
+                // Cancelling the picker leaves the start screen where it is.
+                val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
+                start = false
+                openHere(path)
+            }
+        },
+        onOpenRecent = { r ->
+            start = false
+            scope.launch { openHere(r.path) }
+        },
+        onForget = { r -> AppSettings.update { it.withoutRecent(r.path) }; recentsRevision++ },
+        modifier = Modifier.padding(top = titleBar?.height ?: 0.dp),
+    )
     }
 }
 
