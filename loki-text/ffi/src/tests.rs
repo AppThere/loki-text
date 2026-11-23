@@ -661,6 +661,8 @@ fn paste_special_lists_formats_then_pastes_the_chosen_one() {
     let words = call(s, "engine.execute", Some(r#"{"command":"review.wordCount","params":{}}"#))["result"]["words"].clone();
     // "Bold wordsBold words": pasted straight after the copied text.
     assert_eq!(words, 3, "the copy was pasted once more");
+    unsafe { loki_session_free(s) };
+}
 
 #[test]
 fn pointer_hit_tests_report_positions_and_table_spots() {
