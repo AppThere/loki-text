@@ -1,2 +1,9 @@
 [alias]
 xtask = "run --package xtask --"
+
+# GNU ld with LTO exhausts memory on small machines and hangs; lld links the same code in a
+# fraction of the memory.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
