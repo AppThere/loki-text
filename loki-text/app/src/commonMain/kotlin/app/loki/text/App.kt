@@ -141,6 +141,9 @@ expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 private val DESK_COLOR = Color(0xFFCCD6E3)
 private val DESK_COLOR_DARK = Color(0xFF10151B)
 
+/** Focus puts the document on black, so nothing but the page draws the eye. */
+private val FOCUS_DESK = Color(0xFF000000)
+
 /** The colour of the paper as shown: black for dark pages, the paper tint when one is set, else white. */
 private fun pagePaper(darkPages: Boolean, paper: String?): Color = if (darkPages) Color.Black else paperTint(paper)?.let { formColor(it) } ?: Color.White
 
@@ -358,6 +361,8 @@ fun App(
     menuBridge: MenuBridge? = null,
     /** Show the start screen (recent documents, New, Open) first; false for a window opened for a document or a new one. */
     startScreen: Boolean = false,
+    /** What the platform does with windows (full screen, switching, arranging); null where it does none of it. */
+    windowHost: WindowHost? = null,
 ) = AppTheme(AppSettings.value.theme) { themeChoice, setThemeChoice, darkTheme ->
     // The choice is kept for the next launch.
     val setTheme: (String) -> Unit = { c -> setThemeChoice(c); AppSettings.update { it.copy(theme = c) } }
@@ -670,7 +675,18 @@ fun App(
     // Local recovery: the engine keeps a copy of unsaved work in the app's folder and is ticked now and then to do it.
     var recovery by remember { mutableStateOf(RecoveryState.NONE) }
     var recoverDialog by remember { mutableStateOf(false) }
+    // View › Split: the page area twice, one above the other (the engine asks for it with a `toggle` request).
+    var split by remember { mutableStateOf(false) }
+    // View Side by Side: the window this one is beside, and whether they scroll together; Switch Windows' list.
+    var sideBySideWith by remember { mutableStateOf<Int?>(null) }
+    var syncScroll by remember { mutableStateOf(false) }
+    var switchWindows by remember { mutableStateOf<List<OpenWindow>?>(null) }
+    var pickSideBySide by remember { mutableStateOf<List<OpenWindow>?>(null) }
     var keyboard by remember { mutableStateOf<KeyCustom?>(null) }
+    // Full Screen, Focus and Full Screen view fill the screen; the platform does that to the window.
+    val fullScreenWanted = wantsFullScreen(viewState)
+    LaunchedEffect(fullScreenWanted) { windowHost?.setFullScreen(fullScreenWanted) }
+    LaunchedEffect(docPath, unsaved) { windowHost?.setTitle(windowTitle(docPath, unsaved)) }
     var recipients by remember { mutableStateOf<RecipientTable?>(null) }
     var recipientsError by remember { mutableStateOf<String?>(null) }
     // The current values a command's form starts with: read with the command's reader (see FORM_DEFAULTS), never by running the command.
@@ -1009,6 +1025,32 @@ fun App(
         keyboardCall(JsonObject(emptyMap())).onSuccess { keyboard = it }.onFailure { status = it.message.orEmpty() }
     }
 
+    // View › Window: the engine has one document per session and leaves windows to the front end.
+    fun startSideBySide(other: Int) {
+        val why = windowHost?.sideBySide(other, true)
+        if (why != null) status = why else { sideBySideWith = other; status = "" }
+    }
+    fun runWindowCommand(id: String) {
+        val host = windowHost
+        val others = host?.others().orEmpty()
+        when (id) {
+            "view.switchWindows" -> if (others.isEmpty()) status = "This is the only open window" else switchWindows = others
+            "view.arrangeAll" -> status = when {
+                host == null -> "This device shows one window at a time"
+                others.isEmpty() -> "This is the only open window"
+                else -> host.arrangeAll() ?: ""
+            }
+            "view.sideBySide" -> when {
+                sideBySideWith != null -> { host?.sideBySide(sideBySideWith!!, false); sideBySideWith = null; syncScroll = false; host?.setSyncScroll(false) }
+                host == null -> status = "This device shows one window at a time"
+                others.isEmpty() -> status = "Open another document to compare it with this one"
+                others.size == 1 -> startSideBySide(others.single().id)
+                else -> pickSideBySide = others
+            }
+            "view.syncScroll" -> if (sideBySideWith == null) status = "Turn on View Side by Side first" else { syncScroll = !syncScroll; host?.setSyncScroll(syncScroll) }
+        }
+    }
+
     // Runs a command picked from the ribbon, a menu or the all-commands list. One the app has its own
     // dialog or pane for goes there; one that needs values opens its form; one that only reports
     // shows what it answered.
@@ -1017,6 +1059,7 @@ fun App(
         when {
             // Create Link: the text box to continue in is the next one tapped.
             id == "file.recover" -> recoverDialog = true
+            id in WINDOW_COMMANDS -> runWindowCommand(id)
             id == "mailings.editRecipients" -> openRecipients()
             id == "tools.customizeKeyboard" -> openKeyboard()
             id == "file.info" || id == "file.properties" -> infoDialog = true
@@ -1069,6 +1112,7 @@ fun App(
         fun text(k: String) = (r[k] as? JsonPrimitive)?.contentOrNull
         if ((r["close"] as? JsonPrimitive)?.booleanOrNull == true) { guarded(onClose); return }
         text("interfaceTheme")?.let { setTheme(it); return }
+        if (text("toggle") == "split") { split = !split; return }
         if (text("toggle") == "interfaceTheme") { setTheme(if (darkTheme) "light" else "dark"); return }
         when (val open = text("open") ?: return) {
             "saveAs" -> runFileMenu("file.saveAs")
@@ -1127,6 +1171,12 @@ fun App(
     if (infoDialog) InfoDialog(docInfo, infoError, ::saveProperties) { infoDialog = false; docInfo = null }
     recipients?.let { RecipientsDialog(it, recipientsError, ::saveRecipients) { recipients = null } }
     keyboard?.let { k -> KeyboardDialog(k, catalogById, ::keyboardCall, launch = { b -> scope.launch { b() } }) { keyboard = null } }
+    switchWindows?.let { list ->
+        WindowListDialog("Switch windows", windowChoices(windowTitle(docPath, unsaved), list), onPick = { id -> switchWindows = null; if (id != null) windowHost?.focus(id) }) { switchWindows = null }
+    }
+    pickSideBySide?.let { list ->
+        WindowListDialog("Compare side by side with", list.map { it.id to it.title }, onPick = { id -> pickSideBySide = null; if (id != null) startSideBySide(id) }) { pickSideBySide = null }
+    }
     if (recoverDialog) RecoveryDialog(recovery, ::restoreCopy, ::discardCopy) { recoverDialog = false }
     if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->
@@ -1236,8 +1286,23 @@ fun App(
     }
     // Shortcuts work wherever focus is (the ribbon, the title bar): keys a focused text box doesn't
     // use come up to here. The page handles its own keys first (see its onPreviewKeyEvent).
-    Column(Modifier.fillMaxSize().onKeyEvent { e -> shortcutCommand(e, keyMap)?.let { runKey(it); true } ?: false }) {
-        if (titleBar != null) {
+    val screen = viewState.screen
+    // Focus offers the ribbon for a moment from its bar; it goes again with the next command.
+    var peekRibbon by remember { mutableStateOf(false) }
+    LaunchedEffect(screen) { peekRibbon = false }
+    val chrome = !screen.immersive
+    Column(Modifier.fillMaxSize().onKeyEvent { e ->
+        // Esc leaves Focus and Full Screen view, as their bar's button does.
+        if (screen.immersive && e.key == Key.Escape && e.type == KeyEventType.KeyDown) { screen.exitCommand?.let { scope.launch { runCommand(it) } }; return@onKeyEvent true }
+        shortcutCommand(e, keyMap)?.let { runKey(it); true } ?: false
+    }) {
+        if (screen.immersive) ImmersiveBar(
+            screen, peekRibbon,
+            onExit = { screen.exitCommand?.let { scope.launch { runCommand(it) } } },
+            onPeek = { peekRibbon = !peekRibbon },
+            onSearch = { findBar = (findBar ?: FindState()).copy(mode = FindMode.Find) },
+        )
+        if (chrome && titleBar != null) {
             // The title bar is the top row at every width: Undo/Redo, the document's name, the menu, window buttons.
             val hits = remember { TitleBarHits() }
             Row(
@@ -1254,8 +1319,8 @@ fun App(
                 Row(Modifier.titleBarControl(hits)) { fileMenu() }
                 titleBar.windowButtons?.let { buttons -> Row(Modifier.titleBarControl(hits)) { buttons() } }
             }
-        } else if (sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
-        Ribbon(
+        } else if (chrome && sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
+        if (chrome || peekRibbon) Ribbon(
             tabs = shownRibbon,
             styles = styles,
             state = commandState,
@@ -1295,7 +1360,7 @@ fun App(
         val navRun: suspend (String, JsonObject) -> Result<kotlinx.serialization.json.JsonElement?> = { cmd, p ->
             runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd != "nav.headings" && cmd != "nav.search" && cmd != "review.comments") revision++ }
         }
-        if (navOpen && sizeClass == SizeClass.Compact) {
+        if (chrome && navOpen && sizeClass == SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.fillMaxWidth().height(240.dp))
         }
         // The other task panes share one place: beside the page, or above it in a narrow window.
@@ -1305,19 +1370,23 @@ fun App(
             runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd !in PANE_READS) revision++ }
         }
         val paneUi: (String) -> Unit = { id -> scope.launch { runAny(id) } }
-        if (openPanes.isNotEmpty() && sizeClass == SizeClass.Compact) {
+        if (chrome && openPanes.isNotEmpty() && sizeClass == SizeClass.Compact) {
             PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.fillMaxWidth().height(260.dp))
         }
         Row(Modifier.weight(1f).fillMaxWidth()) {
-        if (navOpen && sizeClass != SizeClass.Compact) {
+        if (chrome && navOpen && sizeClass != SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.width(300.dp).fillMaxHeight())
         }
         val maxZoom = maxZoomFor(LocalDensity.current.density)
         val previewFonts = rememberPreviewFonts()
         val currentZoom by rememberUpdatedState(zoom)
+        // The page area; Split (View › Window) shows it twice, one above the other, each scrolled on its own. The lower
+        // one is the main one: it follows the caret and is where the page positions for the floating toolbar come from.
+        val pageArea: @Composable (Modifier, Boolean) -> Unit = { areaModifier, primary ->
+        val areaFocus = if (primary) pageFocus else remember { FocusRequester() }
         BoxWithConstraints(
-            Modifier.weight(1f).fillMaxHeight().background(if (flat) pagePaper(viewState.darkPages, paperColor) else if (darkTheme) DESK_COLOR_DARK else DESK_COLOR)
-                .onGloballyPositioned { viewportOrigin = it.positionInRoot() }
+            areaModifier.background(if (flat) pagePaper(viewState.darkPages, paperColor) else if (screen == Screen.Focus) FOCUS_DESK else if (darkTheme) DESK_COLOR_DARK else DESK_COLOR)
+                .onGloballyPositioned { if (primary) viewportOrigin = it.positionInRoot() }
                 // Two fingers zoom; one finger is left alone so it scrolls and taps. Seen before the
                 // pages are (Initial pass) and consumed only while pinching.
                 .pointerInput(maxZoom) {
@@ -1344,8 +1413,8 @@ fun App(
         val viewport = maxWidth
         val density = LocalDensity.current
         val areaPx = IntSize(constraints.maxWidth, constraints.maxHeight)
-        LaunchedEffect(areaPx) { viewportPx = areaPx }
-        val rulerShown = rulerInfo != null && viewState.ruler && !flat
+        LaunchedEffect(areaPx) { if (primary) viewportPx = areaPx }
+        val rulerShown = chrome && rulerInfo != null && viewState.ruler && !flat
         val inkTool = viewState.ink
         val gutterPx = with(density) { 32.dp.toPx() }
         val widthPt = ((constraints.maxWidth - gutterPx) / scale).coerceAtMost(MAX_WEB_WIDTH_PT)
@@ -1353,6 +1422,7 @@ fun App(
         // Reflowing views wrap to the window. Debounced so dragging a window edge doesn't re-lay-out
         // and re-render every frame.
         LaunchedEffect(widthPt, heightPt) {
+            if (!primary) return@LaunchedEffect
             delay(150)
             engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.setViewport(widthPt, heightPt) } } }
             revision++
@@ -1361,6 +1431,7 @@ fun App(
         var autoWeb by remember { mutableStateOf(false) }
         val narrow = viewport < NARROW_WINDOW
         LaunchedEffect(narrow) {
+            if (!primary) return@LaunchedEffect
             if (narrow) { autoWeb = true; runCommand("view.webLayout") }
             else if (autoWeb) { autoWeb = false; runCommand("view.printLayout") }
         }
@@ -1369,9 +1440,21 @@ fun App(
         // The ruler covers the top of the page area: the caret is kept below it.
         val rulerPx = if (rulerShown) with(density) { RULER_HEIGHT.toPx() } else 0f
         val vScroll = rememberScrollState()
+        // Synchronous Scrolling: the main pane tells the window beside it where it is, and follows it.
+        if (primary) {
+            LaunchedEffect(vScroll.value, vScroll.maxValue, syncScroll) { if (syncScroll) windowHost?.scrolled(scrollFraction(vScroll.value, vScroll.maxValue)) }
+            val follow = windowHost?.followScroll
+            LaunchedEffect(follow) {
+                if (!syncScroll || follow == null) return@LaunchedEffect
+                val target = (follow * vScroll.maxValue).roundToInt()
+                // A pixel or two is the echo of this window's own scroll coming back.
+                if (kotlin.math.abs(target - vScroll.value) > 2) vScroll.scrollTo(target)
+            }
+        }
         // Keep the caret in view as it moves, and when the keyboard shrinks the viewport.
         val viewportPx = constraints.maxHeight
         LaunchedEffect(selection, viewportPx) {
+            if (!primary) return@LaunchedEffect
             val c = selection.caret ?: return@LaunchedEffect
             val (top, pxPerPt) = pageGeo[c.page] ?: return@LaunchedEffect
             val margin = with(density) { 24.dp.toPx() }
@@ -1408,7 +1491,7 @@ fun App(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The page is a bitmap, so this hidden input is what the on-screen keyboard and IME talk to.
-            ImeInput(Modifier.focusRequester(pageFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
+            ImeInput(Modifier.focusRequester(areaFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
             val penInk = MaterialTheme.colorScheme.primary
             val pageFilter = if (viewState.darkPages) DARK_PAGE_FILTER else paperTint(paperColor)?.let { hex -> formColor(hex) }?.let { ColorFilter.tint(it, BlendMode.Multiply) }
             val caretColor = if (viewState.darkPages) Color.White else Color.Black
@@ -1419,7 +1502,7 @@ fun App(
                 // Kept per page index, not per bitmap, so a new image doesn't reset it for a frame.
                 var shown by remember(i) { mutableStateOf(IntSize.Zero) }
                 val pxPerPt = if (shown.width > 0) shown.width * scale / bitmap.width else scale
-                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt; pageOrigin[i] = it.positionInRoot() }) {
+                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt; if (primary) pageOrigin[i] = it.positionInRoot() }) {
                 Image(
                     bitmap,
                     contentDescription = "Page ${i + 1}",
@@ -1488,7 +1571,7 @@ fun App(
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                 if (down.type == PointerType.Mouse && currentEvent.buttons.isSecondaryPressed) {
                                     down.consume()
-                                    pageFocus.requestFocus()
+                                    areaFocus.requestFocus()
                                     scope.launch {
                                         if (!pointInSelection(selection.rects, i, down.position.x / pxPerPt, down.position.y / pxPerPt)) perform { setCaret(i, down.position, pxPerPt, false) }
                                         openContextMenu(i, down.position)
@@ -1499,7 +1582,7 @@ fun App(
                             detectTapGestures(
                                 // Long press selects the word under the finger; the handles then adjust it.
                                 onLongPress = { o ->
-                                    pageFocus.requestFocus()
+                                    areaFocus.requestFocus()
                                     scope.launch {
                                         // On the selection already: its menu. Elsewhere: select the word, and if it is a
                                         // misspelling offer its fixes at once (the handles and toolbar cover the rest).
@@ -1514,7 +1597,7 @@ fun App(
                                     }
                                 },
                             ) { o ->
-                                pageFocus.requestFocus()
+                                areaFocus.requestFocus()
                                 // Taps close together count up: the second selects a word (or enters a header or footer), the third a paragraph.
                                 val taps = tapCounter.press(o, tapSlopPx)
                                 val twice = taps == 2
@@ -1605,7 +1688,7 @@ fun App(
         }
         // The floating toolbar over a selection: above its first visible line, flipping below when
         // there is no room. Hidden while something else is moving the selection or has the screen.
-        val miniShown = selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
+        val miniShown = primary && selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
             pageDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
         if (miniShown) {
@@ -1632,11 +1715,19 @@ fun App(
             }
         }
         }
-        if (openPanes.isNotEmpty() && sizeClass != SizeClass.Compact) {
+        }
+        if (split) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                pageArea(Modifier.weight(1f).fillMaxWidth(), false)
+                SplitBar(onClose = { split = false })
+                pageArea(Modifier.weight(1f).fillMaxWidth(), true)
+            }
+        } else pageArea(Modifier.weight(1f).fillMaxHeight(), true)
+        if (chrome && openPanes.isNotEmpty() && sizeClass != SizeClass.Compact) {
             PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.width(320.dp).fillMaxHeight())
         }
         }
-        StatusBar(
+        if (chrome) StatusBar(
             status = status,
             page = selection.caret?.page?.plus(1),
             counts = counts,

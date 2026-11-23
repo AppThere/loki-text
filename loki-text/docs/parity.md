@@ -136,9 +136,17 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   document keeps the system's permission to read (and write) where it was picked
   (`takePersistableUriPermission`), and opening it from the list copies it afresh; a provider that
   refuses a persistable grant falls back to the staged copy.
-* **Window management**: Split, Arrange All, View Side by Side, Switch Windows (the desktop opens
-  new windows for New and Open; phones have one). Full Screen and Focus toggle engine state that
-  this app does not act on.
+* **Window management** (`WindowHost.kt`, `WindowChrome.kt`; desktop `DesktopWindows.kt`, Android in
+  `MainActivity.kt`). Split shows the page area twice, each half scrolled on its own (the lower one
+  follows the caret). Focus (the page on black) and Full Screen view (the pages alone, with Search) hide
+  the title bar, ribbon, panes, ruler and status bar behind a slim bar, and Esc leaves them; they and
+  View › Full Screen put the window in full screen (Android hides the system bars). Switch Windows lists
+  the app's other windows and brings one to the front (Android: the other document tasks). On the
+  desktop, Arrange All tiles the windows, View Side by Side puts two windows on the two halves of the
+  screen, and Synchronous Scrolling makes them scroll together; Android places windows itself, so those
+  say so. Tried on an Android device: Focus, Esc, Split, a second window and Switch Windows. The
+  desktop's tiling, side by side and synchronous scrolling are covered by `DesktopWindowsTest`, not
+  tried on a desktop. Untitled windows are all listed as "Untitled".
 * **Customize Ribbon / Customize Keyboard / Quick Access Toolbar** now take effect: the app reads the
   engine's layout and key changes after start-up and after each change (`Customization.kt`), shows the
   ribbon in the person's order with hidden tabs left out and their tabs and groups added, takes the

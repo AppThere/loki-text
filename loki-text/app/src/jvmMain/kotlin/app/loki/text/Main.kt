@@ -111,6 +111,8 @@ fun main() {
 
 private fun lokiApplication() = application {
     val windows = remember { mutableStateListOf(DocWindow(0, null)) }
+    // Every window's state and AWT window, for Switch Windows, Arrange All, Side by Side and full screen.
+    val registry = remember { DesktopWindows() }
     var nextId by remember { mutableStateOf(1) }
     // Closing asks about unsaved changes first; App calls onClose once that is settled. Kept here so Quit can ask every window.
     val closeRequests = remember { mutableStateMapOf<Int, Int>() }
@@ -133,7 +135,10 @@ private fun lokiApplication() = application {
         DisposableEffect(bridge) { bridges[w.id] = bridge; onDispose { bridges.remove(w.id); closeRequests.remove(w.id) } }
         val windowState = rememberWindowState()
         val ownFrame = remember { useOwnFrame() }
+        val host = remember(w.id) { registry.hostFor(w.id) }
+        DisposableEffect(w.id) { registry.states[w.id] = windowState; onDispose { registry.remove(w.id) } }
         Window(onCloseRequest = { requestClose() }, title = "Loki Text", icon = painterResource(Res.drawable.loki_text_icon), state = windowState, undecorated = ownFrame) {
+            DisposableEffect(window) { registry.awt[w.id] = window; onDispose { } }
             DisposableEffect(window) {
                 val l = object : java.awt.event.WindowAdapter() {
                     override fun windowActivated(e: java.awt.event.WindowEvent?) { front = w.id }
@@ -196,6 +201,7 @@ private fun lokiApplication() = application {
                 titleBar = titleBar,
                 menuBridge = if (IS_MAC) bridge else null,
                 startScreen = w.id == 0,
+                windowHost = host,
             )
             if (ownFrame && windowState.placement != WindowPlacement.Maximized) ResizeEdges(window)
             }

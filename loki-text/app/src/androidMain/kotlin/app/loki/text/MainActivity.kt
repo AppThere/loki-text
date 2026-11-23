@@ -204,7 +204,51 @@ actual fun setClipboardText(text: String) {
 
 private const val EXTRA_PATH = "app.loki.text.PATH"
 
+/**
+ * Android's side of View › Window: each document is a task of its own, which Recents and the system place. Switching
+ * brings another document's task to the front; full screen hides the system bars. Placing windows is the system's.
+ */
+private class AndroidWindowHost(private val activity: MainActivity) : WindowHost {
+    private val tasks get() = activity.getSystemService(android.app.ActivityManager::class.java)?.appTasks.orEmpty()
+
+    @Suppress("DEPRECATION")
+    private fun idOf(t: android.app.ActivityManager.AppTask): Int =
+        if (android.os.Build.VERSION.SDK_INT >= 29) t.taskInfo.taskId else t.taskInfo.persistentId
+
+    override fun setFullScreen(on: Boolean) {
+        val controller = androidx.core.view.WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        if (on) {
+            controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        } else controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+    }
+
+    override fun others(): List<OpenWindow> = runCatching {
+        tasks.mapNotNull { t ->
+            val id = idOf(t)
+            if (id == activity.taskId) null else OpenWindow(id, t.taskInfo.taskDescription?.label?.toString() ?: "Untitled")
+        }
+    }.getOrDefault(emptyList())
+
+    override fun focus(id: Int) { runCatching { tasks.firstOrNull { idOf(it) == id }?.moveToFront() } }
+
+    @Suppress("DEPRECATION")
+    override fun setTitle(title: String) { runCatching { activity.setTaskDescription(android.app.ActivityManager.TaskDescription(title)) } }
+
+    override fun arrangeAll(): String = "Android arranges the windows: use its split screen or Recents"
+
+    override fun sideBySide(other: Int, on: Boolean): String = "Android places the windows: put the two documents in its split screen"
+
+    override fun setSyncScroll(on: Boolean) {}
+
+    override fun scrolled(fraction: Float) {}
+
+    override val followScroll: Float? get() = null
+}
+
 class MainActivity : ComponentActivity() {
+    private val windowHost by lazy { AndroidWindowHost(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activity = this
@@ -215,7 +259,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // A window opened by New (a new document task) or for a file goes straight to the page; a launch shows the start screen.
             val fresh = initial == null && (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_NEW_DOCUMENT == 0
-            App(initialPath = initial, startScreen = fresh, onNewWindow = { path ->
+            App(initialPath = initial, startScreen = fresh, windowHost = windowHost, onNewWindow = { path ->
                 // Each document gets its own task, so it has its own entry in Recents.
                 val next = Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
