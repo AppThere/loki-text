@@ -50,7 +50,20 @@ class ViewState(
     val panes: List<PaneKind> = emptyList(),
     /** The Draw tab's tool while one is picked up; null when the pointer selects as usual. */
     val ink: InkTool? = null,
+    /** View › Full Screen: the window fills the screen and keeps its ribbon. */
+    val fullScreen: Boolean = false,
+    /** View › Immersive › Full Screen: the pages alone, full screen, with a slim bar. */
+    val fullScreenView: Boolean = false,
+    /** View › Immersive › Focus: the document alone on a dark desk, full screen, with a slim bar. */
+    val focusMode: Boolean = false,
 ) {
+    /** What fills the window: the usual ribbon and bars, or Focus or Full Screen view. */
+    val screen: Screen get() = when {
+        focusMode -> Screen.Focus
+        fullScreenView -> Screen.FullScreenView
+        else -> Screen.Normal
+    }
+
     /** One continuous column (Web Layout, Draft, Outline) rather than sheets of paper. */
     val flat: Boolean get() = mode != "print" && !readMode
 
@@ -113,6 +126,9 @@ fun parseViewState(e: JsonElement?): ViewState {
         navPane = flag("navPane"),
         panes = PaneKind.entries.filter { k -> k.flag != null && flag(k.flag) },
         ink = parseInkTool(o["draw"]),
+        fullScreen = flag("fullScreen"),
+        fullScreenView = flag("fullScreenView"),
+        focusMode = flag("focusMode"),
     )
 }
 
@@ -124,3 +140,16 @@ fun paperTint(name: String?): String? = when (name) {
     "sepia" -> "F4ECD8"
     else -> null
 }
+
+/**
+ * What fills the window. Focus and Full Screen view hide the title bar, ribbon, panes, ruler and status bar and take the
+ * whole screen; a slim bar leaves them ([exitCommand]). Focus also offers the ribbon for a moment, Full Screen view Search.
+ */
+enum class Screen(val exitCommand: String?) {
+    Normal(null), Focus("view.focus"), FullScreenView("view.fullScreenView");
+
+    val immersive: Boolean get() = this != Normal
+}
+
+/** Should the window fill the screen? View › Full Screen, and either immersive screen. */
+internal fun wantsFullScreen(v: ViewState): Boolean = v.fullScreen || v.screen.immersive

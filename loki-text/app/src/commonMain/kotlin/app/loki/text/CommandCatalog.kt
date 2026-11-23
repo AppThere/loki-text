@@ -61,7 +61,12 @@ internal val QUIET_RESULTS = setOf(
     "review.readAloud", "tools.recordMacro", "draw.addPen", "review.suggestions", "review.thesaurus",
     // Its answer is the whole layout, which the ribbon now shows; with nothing given it opens its form instead.
     "tools.customizeRibbon",
+    // These answer with the flag they set, which the window then shows; Split and New Window answer with the selection.
+    "view.fullScreen", "view.fullScreenView", "view.focus", "view.split", "view.newWindow",
 )
+
+/** View › Window commands this app carries out itself: the engine has one document per session and leaves windows to the front end. */
+internal val WINDOW_COMMANDS = setOf("view.switchWindows", "view.arrangeAll", "view.sideBySide", "view.syncScroll")
 
 /**
  * What Loki Text tells the shared kit about WordCraft's commands: the ribbon's tabs, the places
