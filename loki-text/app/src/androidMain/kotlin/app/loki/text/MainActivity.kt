@@ -42,6 +42,9 @@ actual fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 /** The running activity, which hosts the file pickers; null before onCreate and after onDestroy. */
 private var activity: MainActivity? = null
 
+/** App-private storage that outlives the cache, for the settings file; null before the activity exists. */
+internal fun activityFilesDir(): File? = activity?.filesDir
+
 /** A saved document waits here, in app storage, until [publishFile] copies it to the place the user chose. */
 private val pendingSaves = HashMap<String, Uri>()
 
@@ -90,24 +93,57 @@ actual fun pickFile(save: Boolean, suggestedName: String): String? {
         }
     }
     val uri = try { result.get() } catch (e: Exception) { null } ?: return null
+    // Keep access to the document after this run, so it can be reopened from the recent list. Not every provider allows it.
+    keepAccess(host, uri, write = true)
+    return stage(host, uri, save, suggestedName)
+}
+
+/** Asks Android to keep the grant on [uri] across restarts (read and write; read only when the provider won't give write). */
+private fun keepAccess(host: MainActivity, uri: Uri, write: Boolean) {
+    val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+    runCatching { host.contentResolver.takePersistableUriPermission(uri, if (write) read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION else read) }
+        .onFailure { if (write) runCatching { host.contentResolver.takePersistableUriPermission(uri, read) } }
+}
+
+/**
+ * Puts what [uri] names where the engine can reach it: for Open a fresh copy under app storage, in a folder of its own
+ * (two documents of the same name from different places must not share a file), and for Save a path to write to that
+ * [publishFile] later copies to [uri]. Returns the path, or null when the document can't be read.
+ */
+private fun stage(host: MainActivity, uri: Uri, save: Boolean, suggestedName: String): String? {
     val resolver = host.contentResolver
-    val dir = File(host.cacheDir, if (save) "save" else "open").apply { mkdirs() }
+    val dir = File(host.cacheDir, (if (save) "save/" else "open/") + Integer.toHexString(uri.toString().hashCode())).apply { mkdirs() }
     var name = safeName(resolver.displayName(uri), "document.docx")
     // A provider may drop the extension; the engine picks the format from it.
     if (save && '.' !in name) name += "." + suggestedName.substringAfterLast('.', "docx").ifEmpty { "docx" }
     val file = File(dir, name)
     return try {
-        if (save) {
-            pendingSaves[file.path] = uri
-        } else {
-            resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return null
-            // Save writes back to the document the user opened (when the provider allows writing).
-            pendingSaves[file.path] = uri
-        }
+        if (!save) resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return null
+        // Save writes back to the document the user opened (when the provider allows writing).
+        pendingSaves[file.path] = uri
         file.path
     } catch (e: Exception) {
         null
     }
+}
+
+/** The document a staged [path] came from, as a string a later run can use to find it again. */
+actual fun documentSource(path: String): String? = pendingSaves[path]?.toString()
+
+/** True while the file is still staged, or while Android still lets this app read the document it came from. */
+actual fun recentAvailable(r: RecentDocument): Boolean {
+    if (File(r.path).isFile) return true
+    val uri = r.uri ?: return false
+    val host = activity ?: return false
+    return host.contentResolver.persistedUriPermissions.any { it.uri.toString() == uri && it.isReadPermission }
+}
+
+/** A path the engine can open for [r]: a fresh copy of the document where Android still grants it, else the staged file. */
+actual fun materializeRecent(r: RecentDocument): String? {
+    val host = activity
+    val uri = r.uri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+    if (host != null && uri != null) stage(host, uri, save = false, suggestedName = "")?.let { return it }
+    return r.path.takeIf { File(it).isFile }
 }
 
 /** Copies a document Save As wrote to app storage over to the file the user picked. */
@@ -177,7 +213,9 @@ class MainActivity : ComponentActivity() {
         // A document opened from another window arrives as a path in app storage.
         val initial = intent?.getStringExtra(EXTRA_PATH)
         setContent {
-            App(initialPath = initial, onNewWindow = { path ->
+            // A window opened by New (a new document task) or for a file goes straight to the page; a launch shows the start screen.
+            val fresh = initial == null && (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_NEW_DOCUMENT == 0
+            App(initialPath = initial, startScreen = fresh, onNewWindow = { path ->
                 // Each document gets its own task, so it has its own entry in Recents.
                 val next = Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)

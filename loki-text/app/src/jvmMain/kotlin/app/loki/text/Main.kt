@@ -195,6 +195,7 @@ private fun lokiApplication() = application {
                 onNewWindow = { path -> windows.add(DocWindow(nextId++, path)) },
                 titleBar = titleBar,
                 menuBridge = if (IS_MAC) bridge else null,
+                startScreen = w.id == 0,
             )
             if (ownFrame && windowState.placement != WindowPlacement.Maximized) ResizeEdges(window)
             }

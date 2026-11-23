@@ -91,8 +91,8 @@ val LokiDarkColors = darkColorScheme(
  * with Loki Text's two palettes and its interface font.
  */
 @Composable
-internal fun AppTheme(content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit) =
-    CraftTheme(LokiColors, LokiDarkColors, typographyWith(uiFontFamily()), content)
+internal fun AppTheme(initialChoice: String = "system", content: @Composable (choice: String, setChoice: (String) -> Unit, dark: Boolean) -> Unit) =
+    CraftTheme(LokiColors, LokiDarkColors, typographyWith(uiFontFamily()), initialChoice, content)
 
 /** The ribbon's tab bar and the status bar: a deep, saturated blue with a hint of teal that frames the page. */
 val BarBlue = Color(0xFF004F93)

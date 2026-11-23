@@ -39,8 +39,8 @@ private var installed = false
  * skipped. Returns true if this call added them, so the caller can lay the document out again.
  */
 @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
-internal suspend fun installDocumentFonts(engine: Engine, lock: Mutex): Boolean {
-    if (installed) return false
+internal suspend fun installDocumentFonts(engine: Engine, lock: Mutex, force: Boolean = false): Boolean {
+    if (installed && !force) return false
     val files = DOCUMENT_FONTS.mapNotNull { name ->
         runCatching { name to Base64.encode(Res.readBytes("files/doc-fonts/$name")) }
             .onFailure { println("document font $name not read: ${it.message}") }
@@ -54,7 +54,7 @@ internal suspend fun installDocumentFonts(engine: Engine, lock: Mutex): Boolean 
             }
         }
     }
-    installed = true
+    if (!force) installed = true
     return true
 }
 
