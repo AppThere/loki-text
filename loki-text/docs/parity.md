@@ -1,11 +1,11 @@
 # Loki Text: parity with the WordCraft desktop front end
 
-Status: November 2026 (pointer gestures added). Measured against the engine's own command list (678 commands) and the egui
-front end (`crates/ui-egui`). Checked by `:app:jvmTest` (`EngineCoverageTest`) and looked at with
-the off-screen screenshot harness at phone (390 dp), tablet (760–800 dp) and desktop (1280 dp)
-widths, light and dark. **Not built for Android or iOS in this round** (no SDK on the build
-machine): the Android picker change in `MainActivity.kt` compiles only in CI or on a machine with
-the SDK, and iOS remains scaffolded.
+Status: 24 November 2026 (after PR #29, keytips). Measured against the engine's own command list (678
+commands) and the egui front end (`crates/ui-egui`). Checked by `:app:jvmTest` (`EngineCoverageTest`)
+and looked at with the off-screen screenshot harness at phone (390 dp), tablet (760–800 dp) and
+desktop (1280 dp) widths, light and dark. Android release builds are built and tried on devices (a
+Chromebook and a Fire HD 8). **iOS is scaffolded and has never been compiled**, and the desktop app has
+not been tried as a whole; see [What is left](#what-is-left).
 
 ## How parity is measured
 
@@ -61,8 +61,8 @@ Text now does the same from `view.state` (`ViewState.kt`):
 * **Dark pages** (View › Switch Modes), **Screen Paper Color** and Read Mode's page colour: a colour
   filter over the page image.
 * **Gridlines**: a grid every eighth of an inch over the page.
-* **Ruler**: margins, inch marks from the left margin and the caret paragraph's indents. It shows
-  the measures; its markers cannot be dragged yet.
+* **Ruler**: margins, inch marks from the left margin, the caret paragraph's indents and tab stops;
+  all of them can be dragged (see Direct manipulation below).
 * **Interface theme**: light, dark, or the system's (File menu, and View › Interface Theme).
 * **Task panes** (`SidePanes.kt`): Styles, Clipboard, Reviewing (accept and reject each change),
   Accessibility, Alt Text, Style Inspector and Selection join Comments in one pane host; Navigation
@@ -94,15 +94,15 @@ commands; a finger's drag still scrolls.
 | Drag either end of a selected connector | `shape.connect` |
 | Create Link, then tap the empty text box to continue in | `shape.link` |
 
-The Android build compiles with these gestures, but they have not been tried on a device with a mouse: they are covered by
-`PageMouseTest` (a fake host records the commands) and `pointer_hit_tests_report_positions_and_table_spots`
-(the hit-testing against a real table). A dashed line follows the pointer while a border or handle is
-dragged; the egui front end's live preview of the new widths is not drawn. The dashed move outline of
-the table, alignment guides while an object moves, and crop handles are not either.
+They are covered by `PageMouseTest` (a fake host records the commands) and
+`pointer_hit_tests_report_positions_and_table_spots` (the hit-testing against a real table). Column
+border and move-handle drags show the real result as they go (`loki.preview`, below). Most gestures have
+not been tried on a device with a mouse or pen; a live column drag has.
 
-## Known gaps (do not assume these are solved)
+## What is done beyond the command list
 
-Things the egui front end does itself (`ui.*` commands and its own widgets) that this app does not:
+What the egui front end does itself (`ui.*` commands and its own widgets), and how far this app has
+come with each. What is still missing is gathered in [What is left](#what-is-left).
 
 * **Bespoke dialogs.** The desktop has about sixty; this app has its own Font, Paragraph, Page
   Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info, Recipient List and Customize
@@ -179,10 +179,44 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   smaller ribbons used on phones are not done. Not done: Zotero, update checks, counted strings
   (plurals) and most of the app's own dialog text, which still show in English. The Format Shape pane
   has not been tried on a device.
-* **Saved settings** are the theme, the screen paper colour and the recent documents (`Settings.kt`;
-  `settings.json` in the platform's config folder, app storage on Android, user defaults on iOS).
-  Zoom, view mode and the other view state are still per run.
-* **System fonts** (`font.loadSystem`) are not enumerated; documents use the bundled open fonts.
+* **Saved settings** (`Settings.kt`; `settings.json` in the platform's config folder, app storage on
+  Android, user defaults on iOS): the theme, the screen paper colour, the recent documents, the
+  person's ribbon layout and key changes, the interface size and the interface language. Zoom, view
+  mode and the other view state are still per run.
+* **System fonts**: the engine's font database scans the platform's font folders (on Android
+  `/system/fonts`, `/product/fonts` and the font APEX), and `font.loadSystem` loads them into the
+  font list.
+
+## What is left
+
+Roughly largest first. Do not assume any of these are solved without checking.
+
+1. **Bespoke dialogs.** The desktop has about sixty; this app has about a dozen of its own and the
+   generated form for the rest. Forms start with the document's values only for the commands in
+   `FORM_DEFAULTS`; the others start blank. Chart Edit Data starts with an empty grid (the engine has
+   no command to read a chart's data). A few parameter types stay JSON on purpose (listed above).
+2. **Backstage and customization.** File › Options is the generic form, not the desktop's panes.
+   Customize Ribbon is the generic form, not a drag-and-drop dialog. Menus and tooltips show the
+   built-in shortcut after a key change, and a customization made in one desktop window reaches the
+   others only at the next launch. Personal templates have no first-page pictures; the print preview
+   may show a far page as only its number.
+3. **Item 7 remainders.**
+   * Keytips: the desktop's hidden legacy Alt sequences, the Search box's Q, keytips inside menus and
+     on the File menu, and keytips on the smaller (phone and tablet) ribbons.
+   * Zotero: the desktop talks to a running Zotero; nothing here yet (on the desktop it would need the
+     `zotero` crate behind `loki-ffi`; Android has no Zotero to talk to).
+   * Update checks: none. Android gets updates from its store or by sideloading; desktop builds are
+     not packaged for an updater.
+   * Translation: counted strings (plurals, "5 words") and most of the app's own dialog text still
+     show in English.
+4. **Smaller gaps.** Zoom, view mode and the other view state are not saved. Alignment guides snap
+   to the page, not to other objects. Untitled windows are all listed as "Untitled".
+5. **Platforms and testing.**
+   * iOS: scaffolded, never compiled.
+   * Desktop (JVM): the app has not been tried as a whole; tiling, side by side and synchronous
+     scrolling are covered only by `DesktopWindowsTest`.
+   * Not tried on a device: the Format Shape pane, interface size, most mouse and pen gestures, and
+     the Quick Access Toolbar's keytip numbers.
 
 ## Checking it
 
