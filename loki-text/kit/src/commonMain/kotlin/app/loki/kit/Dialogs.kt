@@ -137,8 +137,8 @@ fun CommandFormDialog(
     SheetDialog(
         command.label, command.location, onDismiss,
         buttons = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-            TextButton(onClick = ::submit, enabled = !busy) { Text("OK") }
+            TextButton(onClick = onDismiss) { Text(kt("Cancel")) }
+            TextButton(onClick = ::submit, enabled = !busy) { Text(kt("OK")) }
         },
     ) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -157,7 +157,7 @@ fun CommandFormDialog(
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                     minLines = 3, modifier = Modifier.fillMaxWidth(),
                 )
-            } else TextButton({ showRaw = true }) { Text("Enter parameters as JSON…") }
+            } else TextButton({ showRaw = true }) { Text(kt("Enter parameters as JSON…")) }
             if (form.notes.isNotEmpty() || showRaw) {
                 SelectionContainer { Text(if (showRaw) command.params.take(1200) else form.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) }
             }
@@ -198,8 +198,8 @@ fun ResultDialog(command: CommandInfo, result: JsonElement?, onChange: (() -> Un
     SheetDialog(
         command.label, command.location, onDismiss,
         buttons = {
-            if (onChange != null) TextButton(onClick = onChange) { Text("Change…") }
-            TextButton(onClick = onDismiss) { Text("Close") }
+            if (onChange != null) TextButton(onClick = onChange) { Text(kt("Change…")) }
+            TextButton(onClick = onDismiss) { Text(kt("Close")) }
         },
     ) {
         SelectionContainer {
@@ -233,7 +233,7 @@ fun FieldControl(
     shape: ParamShape?,
     set: (String, String?) -> Unit,
     browse: ((String) -> Unit) -> Unit,
-    label: String = fieldLabel(f.name) + if (required) " *" else "",
+    label: String = kt(fieldLabel(f.name)) + if (required) " *" else "",
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         when {
@@ -280,7 +280,7 @@ private fun StructuredField(label: String, shape: ParamShape, value: String, set
     var asJson by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-        TextButton({ asJson = !asJson }) { Text(if (asJson) "Edit as fields" else "Edit as JSON") }
+        TextButton({ asJson = !asJson }) { Text(kt(if (asJson) "Edit as fields" else "Edit as JSON")) }
     }
     if (asJson) {
         OutlinedTextField(
@@ -353,14 +353,14 @@ private fun ListEditor(item: ParamShape, value: String, set: (String, String?) -
                         }, browse)
                     }
                     Column {
-                        TextButton({ rows.removeAll { it.first == key }; problems.remove(key); publish() }) { Text("Remove") }
-                        if (i > 0) TextButton({ val r = rows.removeAt(i); rows.add(i - 1, r); publish() }) { Text("Up") }
+                        TextButton({ rows.removeAll { it.first == key }; problems.remove(key); publish() }) { Text(kt("Remove")) }
+                        if (i > 0) TextButton({ val r = rows.removeAt(i); rows.add(i - 1, r); publish() }) { Text(kt("Up")) }
                     }
                 }
                 if (item !is ParamShape.Scalar) HorizontalDivider()
             }
         }
-        TextButton({ rows.add(next++ to ""); publish() }) { Text("Add") }
+        TextButton({ rows.add(next++ to ""); publish() }) { Text(kt("Add")) }
     }
 }
 

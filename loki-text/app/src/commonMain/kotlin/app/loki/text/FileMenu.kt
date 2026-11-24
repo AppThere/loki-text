@@ -50,6 +50,7 @@ internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("app.theme.light", "Theme: Light"),
     FileMenuItem("app.theme.dark", "Theme: Dark"),
     null,
+    FileMenuItem("app.language", "Interface Language…"),
     FileMenuItem("app.uiSize.small", "Interface Size: Small"),
     FileMenuItem("app.uiSize.normal", "Interface Size: Normal"),
     FileMenuItem("app.uiSize.large", "Interface Size: Large"),
@@ -70,7 +71,7 @@ internal fun FileMenuButton(checked: String? = null, onRun: (String) -> Unit) {
             for (item in FILE_MENU) {
                 if (item == null) { HorizontalDivider(); continue }
                 DropdownMenuItem(
-                    text = { Text((if (item.id == checked || item.id == sizeChecked) "✓ " else "") + item.label) },
+                    text = { Text((if (item.id == checked || item.id == sizeChecked) "✓ " else "") + tr(item.label)) },
                     leadingIcon = { if (hasRibbonIcon(item.id)) RibbonIcon(item.id) },
                     trailingIcon = if (item.shortcut.isEmpty()) null else {
                         { Text(displayShortcut(item.shortcut), style = MaterialTheme.typography.labelSmall) }

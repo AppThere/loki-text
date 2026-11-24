@@ -70,8 +70,8 @@ fun AllCommandsDialog(
         Surface(Modifier.padding(8.dp).widthIn(max = 720.dp).fillMaxWidth().fillMaxHeight(0.92f), shape = RoundedCornerShape(12.dp), tonalElevation = 6.dp) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search commands") }, modifier = Modifier.weight(1f).padding(8.dp))
-                    TextButton(onClick = onDismiss) { Text("Close") }
+                    OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text(kt("Search commands")) }, modifier = Modifier.weight(1f).padding(8.dp))
+                    TextButton(onClick = onDismiss) { Text(kt("Close")) }
                 }
                 if (query.isBlank() && sections.isNotEmpty()) {
                     ScrollableTabRow(selectedTabIndex = sections.indexOf(section).coerceAtLeast(0), edgePadding = 0.dp, divider = {}) {

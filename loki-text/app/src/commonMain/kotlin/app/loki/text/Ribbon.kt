@@ -292,7 +292,11 @@ internal val GROUP_LAUNCHERS = mapOf(
  * with the groups the app adds and Home's groups in the order people expect.
  */
 fun parseRibbon(commands: JsonElement): List<RibbonTab> =
-    parseRibbon(commands, LOKI_PROFILE, ::hasCustomGroup).map { t -> RibbonTab(t.name, orderGroups(t.name, withAppGroups(t.name, t.groups))) }
+    parseRibbon(commands, LOKI_PROFILE, ::hasCustomGroup).map { t ->
+        // Item labels in the interface language; tab and group names stay English (the app goes by them) and are translated where drawn.
+        val groups = t.groups.map { g -> RibbonGroup(g.name, g.items.map { RibbonItem(it.id, tr(it.label), it.shortcut, it.needsInput) }) }
+        RibbonTab(t.name, orderGroups(t.name, withAppGroups(t.name, groups)))
+    }
 
 /** What the Styles gallery needs to draw one style's preview (from `styles.manage`). */
 class StylePreview(
@@ -447,7 +451,7 @@ private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, height: Dp, 
                 unselectedContentColor = Color.White.copy(alpha = 0.78f),
             ) {
                 Box(Modifier.height(height).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                    Text(t.name, style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
+                    Text(tr(t.name), style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
                 }
             }
         }
@@ -640,7 +644,7 @@ fun Ribbon(
                     Box(Modifier.height(GROUP_NAME_HEIGHT)) {
                         // The room either side keeps the name clear of the corner control, so the group is never narrower than both.
                         Text(
-                            g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1,
+                            tr(g.name.ifEmpty { tab.name }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1,
                             modifier = Modifier.align(Alignment.Center).padding(horizontal = if (launcher != null || hasCustomGroup(tab.name, g.name)) GROUP_NAME_HEIGHT + 2.dp else 0.dp),
                         )
                         // A group the app draws shows its chosen controls; this lists every command of the group by name.
@@ -704,7 +708,7 @@ private fun GroupPanelButton(tab: String, group: RibbonGroup, env: RibbonEnv) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, contentPadding = PaddingValues(start = 8.dp, end = 2.dp), modifier = Modifier.height(32.dp)) {
-            Text(group.name.ifEmpty { tab }, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(tr(group.name.ifEmpty { tab }), style = MaterialTheme.typography.labelLarge, maxLines = 1)
             Icon(Lucide.ChevronDown, contentDescription = null, modifier = Modifier.size(16.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

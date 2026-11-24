@@ -365,6 +365,11 @@ fun App(
     // density, since they have a zoom of their own.
     val device = LocalDensity.current
     val scale = UiSize.scale
+    // The interface language: the saved choice, or the system's; the kit's words follow it too.
+    LaunchedEffect(Unit) {
+        KitText.translate = ::tr
+        if (I18n.version == 0) I18n.load(AppSettings.value.language)
+    }
     CompositionLocalProvider(LocalDensity provides Density(device.density * scale, device.fontScale)) {
         AppContent(closeRequest, onClose, initialPath, onNewWindow, titleBar, menuBridge, startScreen, windowHost, device)
     }
@@ -727,6 +732,7 @@ private fun AppContent(
     // Local recovery: the engine keeps a copy of unsaved work in the app's folder and is ticked now and then to do it.
     var recovery by remember { mutableStateOf(RecoveryState.NONE) }
     var recoverDialog by remember { mutableStateOf(false) }
+    var languageDialog by remember { mutableStateOf(false) }
     // View › Split: the page area twice, one above the other (the engine asks for it with a `toggle` request).
     var split by remember { mutableStateOf(false) }
     // View Side by Side: the window this one is beside, and whether they scroll together; Switch Windows' list.
@@ -811,7 +817,8 @@ private fun AppContent(
 
     // Every engine command's keyboard shortcuts, by chord.
     var shortcuts by remember { mutableStateOf<Map<Chord, String>>(emptyMap()) }
-    LaunchedEffect(Unit) {
+    // Read again when the interface language changes, for the labels.
+    LaunchedEffect(I18n.version) {
         val commands = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.commands() }.getOrNull() } }
         ribbon = commands?.let { runCatching { parseRibbon(it) }.getOrNull() }.orEmpty()
         catalog = runCatching { parseCommands(commands) }.getOrDefault(emptyList())
@@ -1184,6 +1191,7 @@ private fun AppContent(
             "app.commands" -> showCommands = ""
             "app.theme.system", "app.theme.light", "app.theme.dark" -> setTheme(id.substringAfterLast('.'))
             "app.uiSize.small", "app.uiSize.normal", "app.uiSize.large", "app.uiSize.larger" -> UiSize.set(id.substringAfterLast('.'))
+            "app.language" -> languageDialog = true
             in EXPORTS -> exportTo(id)
             else -> runFromUi(id)
         }
@@ -1262,6 +1270,11 @@ private fun AppContent(
     pickSideBySide?.let { list ->
         WindowListDialog("Compare side by side with", list.map { it.id to it.title }, onPick = { id -> pickSideBySide = null; if (id != null) startSideBySide(id) }) { pickSideBySide = null }
     }
+    if (languageDialog) LanguageDialog(onPick = { code ->
+        languageDialog = false
+        AppSettings.update { it.copy(language = code) }
+        scope.launch { I18n.load(code) }
+    }) { languageDialog = false }
     if (recoverDialog) RecoveryDialog(recovery, ::restoreCopy, ::discardCopy) { recoverDialog = false }
     if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->
@@ -1882,7 +1895,7 @@ private fun StatusBar(
             val compact = sizeClass == SizeClass.Compact
             val text = buildList {
                 // Web Layout has no pages to count.
-                if (!flat && page != null && counts != null) add(if (compact) "$page/${counts.pages}" else "Page $page of ${counts.pages}")
+                if (!flat && page != null && counts != null) add(if (compact) "$page/${counts.pages}" else trf("Page {page} of {pages}", "page" to page, "pages" to counts.pages))
                 if (counts != null) {
                     val w = if (counts.words == 1) "1 word" else "${counts.words} words"
                     add(if (selected) "$w selected" else w)

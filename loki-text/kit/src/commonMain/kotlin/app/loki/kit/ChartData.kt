@@ -95,25 +95,25 @@ fun ChartDataGrid(value: String, set: (String, String?) -> Unit) {
                 Text("", Modifier.width(140.dp))
                 t.series.forEachIndexed { c, name ->
                     Column(Modifier.width(120.dp)) {
-                        OutlinedTextField(name, { update(t.withSeriesName(c, it)) }, singleLine = true, label = { Text("Series") })
-                        TextButton({ update(t.withoutColumn(c)) }) { Text("Remove") }
+                        OutlinedTextField(name, { update(t.withSeriesName(c, it)) }, singleLine = true, label = { Text(kt("Series")) })
+                        TextButton({ update(t.withoutColumn(c)) }) { Text(kt("Remove")) }
                     }
                 }
-                TextButton({ update(t.withColumn()) }) { Text("Add series") }
+                TextButton({ update(t.withColumn()) }) { Text(kt("Add series")) }
             }
             t.categories.forEachIndexed { r, cat ->
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(cat, { update(t.withCategory(r, it)) }, singleLine = true, label = { Text("Category") }, modifier = Modifier.width(140.dp))
+                    OutlinedTextField(cat, { update(t.withCategory(r, it)) }, singleLine = true, label = { Text(kt("Category")) }, modifier = Modifier.width(140.dp))
                     t.series.indices.forEach { c ->
                         OutlinedTextField(
                             t.cell(r, c), { update(t.withCell(r, c, it)) }, singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.width(120.dp),
                         )
                     }
-                    TextButton({ update(t.withoutRow(r)) }) { Text("Remove") }
+                    TextButton({ update(t.withoutRow(r)) }) { Text(kt("Remove")) }
                 }
             }
-            TextButton({ update(t.withRow()) }) { Text("Add category") }
+            TextButton({ update(t.withRow()) }) { Text(kt("Add category")) }
         }
     }
 }

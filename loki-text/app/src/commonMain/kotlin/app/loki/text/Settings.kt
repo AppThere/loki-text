@@ -60,6 +60,8 @@ data class Settings(
     val ribbon: JsonObject? = null,
     /** Interface size: how much larger the controls are drawn than the screen's own size (1 = as the system draws them). */
     val uiScale: Float = 1f,
+    /** Interface language: "auto" (the system's) or a catalog's code. */
+    val language: String = "auto",
 ) {
     /** These settings with [path] first in the recent list (once, whatever it was before). */
     fun withRecent(path: String, at: Long, uri: String? = null): Settings {
@@ -79,6 +81,7 @@ data class Settings(
         keys?.let { put("keys", it) }
         ribbon?.let { put("ribbon", it) }
         if (uiScale != 1f) put("uiScale", uiScale)
+        if (language != "auto") put("language", language)
     }.toString()
 
     companion object {
@@ -102,6 +105,7 @@ data class Settings(
                 recents = recents,
                 keys = o["keys"] as? JsonArray,
                 ribbon = o["ribbon"] as? JsonObject,
+                language = str("language")?.takeIf { it.matches(Regex("auto|[a-z]{2,3}(-[a-z0-9]{2,8})?")) } ?: "auto",
                 uiScale = (o["uiScale"] as? JsonPrimitive)?.content?.toFloatOrNull()?.takeIf { s -> UI_SIZES.any { it.second == s } } ?: 1f,
             )
         }
