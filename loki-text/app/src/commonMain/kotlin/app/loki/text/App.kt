@@ -45,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.focusable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1244,8 +1245,9 @@ private fun AppContent(
     val quickCommands: @Composable () -> Unit = {
         // The Quick Access Toolbar's commands as the person arranged them (the engine's list); Undo and Redo until it is read.
         val qat = ribbonLayout?.qat?.mapNotNull { id -> catalogById[id]?.let { Triple(it.label, id, displayShortcut(it.shortcut)) } } ?: QUICK_ACCESS
-        for ((label, command, shortcut) in qat) {
-            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) {
+        qat.forEachIndexed { i, (label, command, shortcut) ->
+            // Numbered from 1, as the toolbar's keytips are, beside the tab letters.
+            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on, keytip = if (i < 9) "${i + 1}" else null) {
                 scope.launch { if (command in FILE_MENU_COMMANDS) runFileMenu(command) else runFromUi(command) }
             }
         }
@@ -1389,7 +1391,20 @@ private fun AppContent(
     var peekRibbon by remember { mutableStateOf(false) }
     LaunchedEffect(screen) { peekRibbon = false }
     val chrome = !screen.immersive
-    Column(Modifier.fillMaxSize().onKeyEvent { e ->
+    val pageFocusRef = remember { arrayOfNulls<FocusRequester>(1) }
+    val keytips = remember { KeytipState() }
+    // A click on the page ends keytips, as any key they don't use does.
+    LaunchedEffect(selection) { keytips.off() }
+    // While keytips show, the keyboard comes to the window itself rather than the page: a page taking text hands printable
+    // keys to the system's text input first (Android), so the letters would be typed instead of choosing. Focus goes
+    // back to the page when they end.
+    val keytipFocus = remember { FocusRequester() }
+    val keytipsOn = keytips.phase != KeytipPhase.Off
+    LaunchedEffect(keytipsOn) {
+        runCatching { if (keytipsOn) keytipFocus.requestFocus() else if (!start) pageFocusRef[0]?.requestFocus() }
+    }
+    CompositionLocalProvider(LocalKeytips provides keytips) {
+    Column(Modifier.fillMaxSize().focusRequester(keytipFocus).focusable().onPreviewKeyEvent { e -> keytips.onKey(e) }.onKeyEvent { e ->
         // Esc leaves Focus and Full Screen view, as their bar's button does.
         if (screen.immersive && e.key == Key.Escape && e.type == KeyEventType.KeyDown) { screen.exitCommand?.let { scope.launch { runCommand(it) } }; return@onKeyEvent true }
         shortcutCommand(e, keyMap)?.let { runKey(it); true } ?: false
@@ -1448,6 +1463,7 @@ private fun AppContent(
             )
         }
         val pageFocus = remember { FocusRequester() }
+        pageFocusRef[0] = pageFocus
         // With a keyboard (desktop), the page takes focus at once so typing and shortcuts work
         // before the first click. On a touch screen that would pop up the on-screen keyboard.
         val inputMode = LocalInputModeManager.current
@@ -1839,6 +1855,7 @@ private fun AppContent(
             onZoom = { z -> scope.launch { setZoom(z.coerceIn(MIN_ZOOM, maxZoomFor(screenDensity))) } },
             onView = { cmd -> scope.launch { runCommand(cmd) } },
         )
+    }
     }
     if (start) StartScreen(
         recents = remember(recentsRevision, start) { AppSettings.value.recents }, exists = ::recentAvailable, now = nowMillis(),

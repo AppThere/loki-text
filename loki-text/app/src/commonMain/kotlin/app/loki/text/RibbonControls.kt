@@ -89,6 +89,8 @@ fun RibbonButton(
 ) {
     val tip = if (shortcut.isEmpty()) label else "$label  (${displayShortcut(shortcut)})"
     val bg = if (checked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    val keytip = rememberKeytip(label, disabledReason == null, onClick)
+    Box {
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(if (disabledReason == null) tip else "$tip — $disabledReason") } },
@@ -120,6 +122,8 @@ fun RibbonButton(
             }
         }
         }
+    }
+    KeytipBadge(keytip)
     }
 }
 
