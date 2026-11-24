@@ -79,7 +79,10 @@ enum class KeytipPhase { Off, Tabs, Controls }
  * A control that can be reached by keytip: its name (which picks its letters) and what pressing it does. One with a
  * [fixed] keytip (the Quick Access Toolbar's numbers) is reached from the tabs' level, beside the tab letters.
  */
-class KeytipControl(val label: String, val fixed: String? = null, val action: () -> Unit)
+class KeytipControl(val label: String, val fixed: String? = null, val action: () -> Unit) {
+    /** Whether it can be pressed now; a greyed-out control keeps its place and letter, and its keytip only ends keytips. */
+    var enabled = true
+}
 
 /**
  * The keytips of one window: the phase, what has been typed of a two-letter keytip, the open tab's controls as they
@@ -147,13 +150,13 @@ class KeytipState {
             KeytipPhase.Tabs -> {
                 val codes = tabCodes
                 codes.entries.firstOrNull { it.value == now }?.let { (tab, _) -> openTab(tab); phase = KeytipPhase.Controls; typed = ""; return }
-                controls.firstOrNull { it.fixed == now }?.let { c -> off(); c.action(); return }
+                controls.firstOrNull { it.fixed == now }?.let { c -> off(); if (c.enabled) c.action(); return }
                 if (codes.values.any { it.startsWith(now) }) typed = now else off()
             }
             KeytipPhase.Controls -> {
                 val (list, codes) = tabControls()
                 val i = codes.indexOf(now)
-                if (i >= 0) { val c = list[i]; off(); c.action(); return }
+                if (i >= 0) { val c = list[i]; off(); if (c.enabled) c.action(); return }
                 if (codes.any { it.isNotEmpty() && it.startsWith(now) }) typed = now else off()
             }
             KeytipPhase.Off -> {}
@@ -173,8 +176,10 @@ fun rememberKeytip(label: String, enabled: Boolean, onClick: () -> Unit, fixed: 
     val state = LocalKeytips.current ?: return null
     val click by rememberUpdatedState(onClick)
     val control = remember(label, fixed) { KeytipControl(label, fixed) { click() } }
-    DisposableEffect(control, enabled) {
-        if (enabled) state.controls.add(control)
+    control.enabled = enabled
+    // Registered while shown, enabled or not, so the letters follow drawing order and don't move when one greys out.
+    DisposableEffect(control) {
+        state.controls.add(control)
         onDispose { state.controls.remove(control) }
     }
     return state.codeOf(control)

@@ -46,4 +46,15 @@ class KeytipsTest {
         assertEquals("B", k.codeOf(k.controls[1]))
         k.type('B'); assertEquals("bold", ran)
     }
+
+    @Test fun aGreyedOutControlKeepsItsLetterAndDoesNothing() {
+        val k = KeytipState()
+        var ran = false
+        val cut = KeytipControl("Cut") { ran = true }.also { it.enabled = false }
+        k.controls += cut
+        k.controls += KeytipControl("Copy") {}
+        k.tabs = listOf("Home"); k.showTabs(); k.type('H')
+        assertEquals("C", k.codeOf(cut))
+        k.type('C'); assertTrue(!ran); assertEquals(KeytipPhase.Off, k.phase)
+    }
 }
