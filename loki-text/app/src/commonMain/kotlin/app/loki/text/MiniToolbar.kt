@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -73,7 +74,8 @@ internal fun miniToolbarOffset(
  * underline, strikethrough, highlight, font colour and the four alignments on the other.
  */
 @Composable
-fun MiniToolbar(env: RibbonEnv, modifier: Modifier = Modifier) {
+fun MiniToolbar(env: RibbonEnv, modifier: Modifier = Modifier) = CompositionLocalProvider(LocalKeytips provides null) {
+    // Keytips reach the ribbon's controls only; the bar's own Bold would otherwise take the ribbon Bold's letter.
     Surface(
         // Taps on the bar's own padding must not reach the page and move the selection.
         modifier = modifier.pointerInput(Unit) { detectTapGestures { } },

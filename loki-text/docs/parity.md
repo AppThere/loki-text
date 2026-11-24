@@ -172,7 +172,11 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   Format Shape pane (fill, line colour and width, size and position), and interface language
   (`I18n.kt`: craft-i18n's catalogs copied in from `CRAFT_I18N_DIR` at build time and never committed;
   command labels, tabs, groups, the File menu, the kit's dialog words and the page counter; File ›
-  Interface Language or the system's). Not done: keytips, Zotero, update checks, counted strings
+  Interface Language or the system's), and keytips (`Keytips.kt`: Alt alone or F10 shows the tabs'
+  letters, as the desktop's, and the Quick Access Toolbar's numbers; a tab's letter shows its
+  controls' letters, taken from their names in drawing order; Esc goes back a step). The desktop's
+  legacy Alt sequences, the Search box's Q, keytips inside menus and on the File menu, and the
+  smaller ribbons used on phones are not done. Not done: Zotero, update checks, counted strings
   (plurals) and most of the app's own dialog text, which still show in English. The Format Shape pane
   has not been tried on a device.
 * **Saved settings** are the theme, the screen paper colour and the recent documents (`Settings.kt`;

@@ -379,9 +379,13 @@ fun CommandIconButton(
     disabledReason: String? = null,
     /** A toggle that is on, drawn pressed. */
     checked: Boolean = false,
+    /** A keytip of its own (the Quick Access Toolbar's numbers); null to be given one with the open tab's controls. */
+    keytip: String? = null,
     onClick: () -> Unit,
 ) {
     val name = if (shortcut.isEmpty()) label else "$label  (${displayShortcut(shortcut)})"
+    val keytip = rememberKeytip(label, disabledReason == null, onClick, fixed = keytip)
+    Box {
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(if (disabledReason == null) name else "$name — $disabledReason") } },
@@ -393,6 +397,8 @@ fun CommandIconButton(
             colors = IconButtonDefaults.iconButtonColors(containerColor = if (checked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent),
             modifier = Modifier.size(32.dp),
         ) { RibbonIcon(id) }
+    }
+    KeytipBadge(keytip)
     }
 }
 
@@ -451,7 +457,13 @@ private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, height: Dp, 
                 unselectedContentColor = Color.White.copy(alpha = 0.78f),
             ) {
                 Box(Modifier.height(height).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                    Text(tr(t.name), style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(tr(t.name), style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
+                        // The tab's letters while keytips show them, beside its name: the strip is too low to hang them under it.
+                        LocalKeytips.current?.takeIf { it.phase == KeytipPhase.Tabs }?.tabCodes?.get(t.name)?.let { code ->
+                            Box(Modifier.padding(start = 4.dp)) { KeytipBadge(code, Alignment.Center) }
+                        }
+                    }
                 }
             }
         }
@@ -564,6 +576,7 @@ fun Ribbon(
     val inHeaderFooter = "Header & Footer" in state.contextual
     LaunchedEffect(inHeaderFooter) { if (inHeaderFooter) selectedName = "Header & Footer" }
     val tab = shown.firstOrNull { it.name == selectedName } ?: shown.first()
+    LocalKeytips.current?.let { k -> k.tabs = shown.map { it.name }; k.openTab = { name -> selectedName = name } }
     val previews = rememberPreviewFonts()
     val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation) {
         RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation)
