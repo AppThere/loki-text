@@ -128,18 +128,21 @@ internal fun SmartArtTextPane(items: List<SmartArtItem>?, run: suspend (String, 
             return@Column
         }
         draft.forEachIndexed { i, item ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // The text across the pane, indented by level; its buttons under it, so a narrow pane still shows the words.
+            Column(Modifier.padding(start = (item.level * 16).dp)) {
                 OutlinedTextField(
                     item.text, { t -> draft = draft.mapIndexed { j, it -> if (j == i) it.copy(text = t) else it } },
                     singleLine = true,
-                    modifier = Modifier.padding(start = (item.level * 16).dp).weight(1f)
+                    modifier = Modifier.fillMaxWidth()
                         .semantics { contentDescription = "Item ${i + 1}, level ${item.level + 1}" }
                         .onFocusChanged { if (!it.isFocused && draft != items) send(draft) },
                 )
-                TextButton({ send(promoteItem(draft, i)) }, enabled = item.level > 0) { Text("Out") }
-                TextButton({ send(demoteItem(draft, i)) }, enabled = i > 0) { Text("In") }
-                TextButton({ send(addItemAfter(draft, i)) }) { Text("Add") }
-                TextButton({ send(removeItem(draft, i)) }, enabled = draft.size > 1) { Text("Remove") }
+                FlowRow {
+                    TextButton({ send(promoteItem(draft, i)) }, enabled = item.level > 0) { Text(tr("Out")) }
+                    TextButton({ send(demoteItem(draft, i)) }, enabled = i > 0) { Text(tr("In")) }
+                    TextButton({ send(addItemAfter(draft, i)) }) { Text(app.loki.kit.kt("Add")) }
+                    TextButton({ send(removeItem(draft, i)) }, enabled = draft.size > 1) { Text(app.loki.kit.kt("Remove")) }
+                }
             }
         }
         if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
