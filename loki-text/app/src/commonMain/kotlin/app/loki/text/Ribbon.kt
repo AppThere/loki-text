@@ -123,6 +123,8 @@ class CommandState(
     val styleParagraph: String? = null,
     /** The character style of the text at the caret, if it has one. */
     val styleCharacter: String? = null,
+    /** The selected SmartArt graphic's outline, or null when none is selected. */
+    val smartArt: List<SmartArtItem>? = null,
 ) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
@@ -177,6 +179,7 @@ fun parseCommandState(state: JsonElement): CommandState {
     return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]), parsePictureState(o["picture"]), parseArrangeState(o["arrange"]),
         styleParagraph = ((o["styleAt"] as? JsonObject)?.get("paragraph") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
         styleCharacter = ((o["styleAt"] as? JsonObject)?.get("character") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+        smartArt = parseSmartArt(o["smartArt"]),
     )
 }
 

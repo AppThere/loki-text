@@ -129,6 +129,15 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(_) => err("internal error (panic caught) reading command state"),
         };
     }
+    if method == "loki.speechVoice" {
+        // A front end with a voice of its own (Android's text-to-speech) reads the sentences itself: the player then holds
+        // each one, playing, until the front end moves it on (`readAloud.next`) or stops it, instead of reaching for a
+        // speech program the platform doesn't have.
+        let own = params.get("own").and_then(Value::as_bool).unwrap_or(true);
+        session.inner.session.read_aloud.backend =
+            if own { wordcraft_engine::speech::Backend::Hold } else { wordcraft_engine::speech::Backend::System };
+        return reply(json!({"ok": true, "result": null}));
+    }
     if method == "loki.preview" || method == "loki.endPreview" {
         // A drag shown as it goes (a table's column border, its move handle): each `loki.preview` takes back the last one
         // and runs the command afresh from where the drag began, so the pages show the real result; `loki.endPreview`

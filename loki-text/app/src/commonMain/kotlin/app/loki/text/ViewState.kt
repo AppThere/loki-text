@@ -23,6 +23,8 @@ enum class PaneKind(val title: String, val flag: String?, val toggle: String) {
     AltText("Alt Text", "altTextPane", "view.altTextPane"),
     StyleInspector("Style Inspector", "styleInspector", "styles.inspector"),
     Selection("Selection", null, "arrange.selectionPane"),
+    SmartArtText("Text Pane", "smartArtPane", "smartArt.textPane"),
+    FormatShape("Format Shape", "formatShapePane", "view.formatShapePane"),
 }
 
 /** Panes the engine keeps no open flag for, by the command that brings each up. */

@@ -54,7 +54,7 @@ internal fun paneSource(kind: PaneKind): String? = when (kind) {
     PaneKind.Accessibility -> "file.accessibility"
     PaneKind.StyleInspector -> "styles.inspect"
     PaneKind.Selection -> "arrange.selectionPane"
-    PaneKind.Comments, PaneKind.AltText -> null
+    PaneKind.Comments, PaneKind.AltText, PaneKind.SmartArtText, PaneKind.FormatShape -> null
 }
 
 private fun JsonObject.text(k: String) = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull.orEmpty()
@@ -143,7 +143,7 @@ fun parsePane(kind: PaneKind, result: JsonElement?): PaneContent = when (kind) {
         },
         "This document has no pictures, shapes or text boxes.",
     )
-    PaneKind.Comments, PaneKind.AltText -> PaneContent(emptyList(), "")
+    PaneKind.Comments, PaneKind.AltText, PaneKind.SmartArtText, PaneKind.FormatShape -> PaneContent(emptyList(), "")
 }
 
 /** The Alt Text pane: what the selected object says, and the way to change it. */
@@ -171,6 +171,8 @@ internal fun PaneHost(
     onUi: (String) -> Unit,
     onClose: (PaneKind) -> Unit,
     modifier: Modifier = Modifier,
+    /** The selected object, for Format Shape. */
+    obj: app.loki.text.engine.ObjectFrame? = null,
 ) {
     if (open.isEmpty()) return
     var chosen by remember { mutableStateOf(open.last()) }
@@ -188,6 +190,8 @@ internal fun PaneHost(
                 HorizontalDivider()
             }
             if (kind == PaneKind.Comments) CommentsPane(revision, run, { onClose(kind) }, Modifier.fillMaxWidth().weight(1f))
+            else if (kind == PaneKind.SmartArtText) SmartArtTextPane(state.smartArt, run, Modifier.fillMaxWidth().weight(1f))
+            else if (kind == PaneKind.FormatShape) FormatShapePane(obj, run, Modifier.fillMaxWidth().weight(1f))
             else DataPane(kind, revision, state, run, onUi, { onClose(kind) }, Modifier.fillMaxWidth().weight(1f))
         }
     }

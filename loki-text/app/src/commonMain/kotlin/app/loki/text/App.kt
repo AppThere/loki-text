@@ -99,6 +99,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.PointerIcon
 import app.loki.text.engine.SelectionGeometry
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import app.loki.text.engine.Engine
 import androidx.compose.ui.input.pointer.isAltPressed
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -353,6 +354,26 @@ private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple(
 fun App(
     closeRequest: Int = 0,
     onClose: () -> Unit = {},
+    initialPath: String? = null,
+    onNewWindow: ((String?) -> Unit)? = null,
+    titleBar: TitleBarConfig? = null,
+    menuBridge: MenuBridge? = null,
+    startScreen: Boolean = false,
+    windowHost: WindowHost? = null,
+) {
+    // Interface size (File menu): the controls, bars and dialogs drawn larger or smaller; the pages keep the screen's own
+    // density, since they have a zoom of their own.
+    val device = LocalDensity.current
+    val scale = UiSize.scale
+    CompositionLocalProvider(LocalDensity provides Density(device.density * scale, device.fontScale)) {
+        AppContent(closeRequest, onClose, initialPath, onNewWindow, titleBar, menuBridge, startScreen, windowHost, device)
+    }
+}
+
+@Composable
+private fun AppContent(
+    closeRequest: Int = 0,
+    onClose: () -> Unit = {},
     /** A document to open at start (a new window opened for a file). */
     initialPath: String? = null,
     /** Opens a document (a path, or null for a new one) in a new window; null where the platform has only one. */
@@ -365,6 +386,8 @@ fun App(
     startScreen: Boolean = false,
     /** What the platform does with windows (full screen, switching, arranging); null where it does none of it. */
     windowHost: WindowHost? = null,
+    /** The screen's own density, which the pages are drawn at whatever the interface size. */
+    pageDensity: Density,
 ) = AppTheme(AppSettings.value.theme) { themeChoice, setThemeChoice, darkTheme ->
     // The choice is kept for the next launch.
     val setTheme: (String) -> Unit = { c -> setThemeChoice(c); AppSettings.update { it.copy(theme = c) } }
@@ -390,6 +413,11 @@ fun App(
     var ribbonLayout by remember { mutableStateOf<RibbonLayout?>(null) }
     var keyCustom by remember { mutableStateOf(KeyCustom(emptyList())) }
     var customRevision by remember { mutableStateOf(0) }
+    // Read Aloud: the engine keeps the place and the state; the platform's voice speaks the sentence, and when it has
+    // finished the next one is asked for (or reading stops after the last).
+    val speech = remember { platformSpeech() }
+    var readAloud by remember { mutableStateOf<ReadAloudState?>(null) }
+    var readAloudRevision by remember { mutableStateOf(0) }
     // The selection's font, size and colours, for the Home tab's boxes; and the families to pick from.
     var formatState by remember { mutableStateOf(FormatState.EMPTY) }
     var fontFamilies by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -481,7 +509,7 @@ fun App(
     // Where each page and the page area sit on screen, to place the floating toolbar over the selection.
     val pageOrigin = remember { mutableStateMapOf<Int, Offset>() }
     var viewportOrigin by remember { mutableStateOf(Offset.Zero) }
-    val screenDensity = LocalDensity.current.density
+    val screenDensity = pageDensity.density
     val scale = pagePxPerPt(zoom, screenDensity)
     // From the engine's word count; of the selection when there is one.
     var counts by remember { mutableStateOf<Counts?>(null) }
@@ -583,6 +611,7 @@ fun App(
     var lastCopied by remember { mutableStateOf<String?>(null) }
     suspend fun runCommand(command: String, params: JsonObject = JsonObject(emptyMap())) {
         if (command in CUSTOMIZE_COMMANDS) customRevision++
+        if (isReadAloud(command)) readAloudRevision++
         if (command == "format.fontDialog") {
             // The engine only asks a UI to open it; this UI shows its own dialog from the selection's formatting.
             val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("format.state") as? JsonObject }.getOrNull() } }
@@ -682,6 +711,7 @@ fun App(
     suspend fun executeFromUi(c: CommandInfo, params: JsonObject, showResult: Boolean = true): String? {
         var result: JsonElement? = null
         if (c.id in CUSTOMIZE_COMMANDS) customRevision++
+        if (isReadAloud(c.id)) readAloudRevision++
         perform {
             result = execute(c.id, params)
             if (c.id == "view.paperColor") paperColor = (result as? JsonObject)?.get("paperColor")?.jsonPrimitive?.contentOrNull
@@ -767,6 +797,11 @@ fun App(
             perform { execute("file.open", buildJsonObject { put("path", initialPath) }) }
             stylesRevision++
         }
+    }
+    // The font families to pick from: the bundled ones, the document's, and those installed on the system (which the font
+    // database scans as it needs them); read again when asked to load the system's.
+    var fontsRevision by remember { mutableStateOf(0) }
+    LaunchedEffect(fontsRevision) {
         fontFamilies = engineLock.withLock {
             withContext(Dispatchers.Default) {
                 runCatching { parseFontFamilies(engine.execute("font.list", buildJsonObject { put("all", true) })) }.getOrDefault(emptyList())
@@ -915,6 +950,27 @@ fun App(
     // Bumped when the recent list changes so the start screen redraws.
     var recentsRevision by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+    // With a voice of its own the app reads the sentences, and the engine's player only keeps the place.
+    LaunchedEffect(Unit) {
+        if (speech != null) engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.speechVoice", buildJsonObject { put("own", true) }) } } }
+    }
+    LaunchedEffect(readAloudRevision) {
+        if (readAloudRevision == 0) return@LaunchedEffect
+        readAloud = engineLock.withLock {
+            withContext(Dispatchers.Default) { runCatching { parseReadAloud(engine.execute("readAloud.status")) }.getOrNull() }
+        }
+    }
+    val reading = readAloud
+    LaunchedEffect(reading?.playing, reading?.index, reading?.text, reading?.rate) {
+        val r = reading
+        // Without a voice of its own the engine reads (on the desktop); the bar still shows where it is.
+        if (speech == null) return@LaunchedEffect
+        if (r == null || !r.playing || r.text == null) { speech.stop(); return@LaunchedEffect }
+        // The sentence being read is selected, so it shows and the page follows it.
+        if (r.start != null && r.end != null) perform(requests = false) { execute("select.range", buildJsonObject { put("anchor", r.start); put("focus", r.end) }) }
+        speech.speak(r.text, r.rate) { scope.launch { runCommand(if (r.last) "readAloud.stop" else "readAloud.next") } }
+    }
+    DisposableEffect(Unit) { onDispose { speech?.stop() } }
 
     // Save, or Save As for a document that has no file yet. True when the document was written
     // (and published, on platforms that need it); false when the user cancelled or it failed.
@@ -1127,6 +1183,7 @@ fun App(
             "app.templates" -> templateDialog = true
             "app.commands" -> showCommands = ""
             "app.theme.system", "app.theme.light", "app.theme.dark" -> setTheme(id.substringAfterLast('.'))
+            "app.uiSize.small", "app.uiSize.normal", "app.uiSize.large", "app.uiSize.larger" -> UiSize.set(id.substringAfterLast('.'))
             in EXPORTS -> exportTo(id)
             else -> runFromUi(id)
         }
@@ -1144,6 +1201,8 @@ fun App(
             "saveAs" -> runFileMenu("file.saveAs")
             "print" -> runFileMenu("file.print")
             "openFile" -> runFileMenu("file.open")
+            // Installed fonts are part of the font list already; reading it again picks up any added since.
+            "loadSystemFonts" -> { fontsRevision++; status = "The fonts installed on this device are in the font list" }
             "customizeKeyboard" -> openKeyboard()
             "exportPdf" -> exportTo("file.exportPdf")
             "exportPng" -> exportTo("file.exportPng")
@@ -1397,8 +1456,9 @@ fun App(
         }
         val paneUi: (String) -> Unit = { id -> scope.launch { runAny(id) } }
         if (chrome && openPanes.isNotEmpty() && sizeClass == SizeClass.Compact) {
-            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.fillMaxWidth().height(260.dp))
+            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.fillMaxWidth().height(260.dp), obj = selection.obj)
         }
+        readAloud?.takeIf { it.open }?.let { r -> ReadAloudBar(r) { id -> scope.launch { runCommand(id) } } }
         Row(Modifier.weight(1f).fillMaxWidth()) {
         if (chrome && navOpen && sizeClass != SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.width(300.dp).fillMaxHeight())
@@ -1408,7 +1468,7 @@ fun App(
         val currentZoom by rememberUpdatedState(zoom)
         // The page area; Split (View › Window) shows it twice, one above the other, each scrolled on its own. The lower
         // one is the main one: it follows the caret and is where the page positions for the floating toolbar come from.
-        val pageArea: @Composable (Modifier, Boolean) -> Unit = { areaModifier, primary ->
+        val pageArea: @Composable (Modifier, Boolean) -> Unit = { areaModifier, primary -> CompositionLocalProvider(LocalDensity provides pageDensity) {
         val areaFocus = if (primary) pageFocus else remember { FocusRequester() }
         BoxWithConstraints(
             areaModifier.background(if (flat) pagePaper(viewState.darkPages, paperColor) else if (screen == Screen.Focus) FOCUS_DESK else if (darkTheme) DESK_COLOR_DARK else DESK_COLOR)
@@ -1716,7 +1776,7 @@ fun App(
         }
         // The floating toolbar over a selection: above its first visible line, flipping below when
         // there is no room. Hidden while something else is moving the selection or has the screen.
-        val miniShown = primary && selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
+        val miniShown = primary && readAloud?.playing != true && selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
             pageDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
         if (miniShown) {
@@ -1743,7 +1803,7 @@ fun App(
             }
         }
         }
-        }
+        } }
         if (split) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 pageArea(Modifier.weight(1f).fillMaxWidth(), false)
@@ -1752,7 +1812,7 @@ fun App(
             }
         } else pageArea(Modifier.weight(1f).fillMaxHeight(), true)
         if (chrome && openPanes.isNotEmpty() && sizeClass != SizeClass.Compact) {
-            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.width(320.dp).fillMaxHeight())
+            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.width(320.dp).fillMaxHeight(), obj = selection.obj)
         }
         }
         if (chrome) StatusBar(
