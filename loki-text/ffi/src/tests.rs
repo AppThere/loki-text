@@ -814,3 +814,36 @@ fn the_caret_paragraphs_tab_stops_reach_the_ruler() {
     // SAFETY: freed once.
     unsafe { loki_session_free(s) };
 }
+
+#[test]
+fn a_front_end_voice_holds_each_sentence_until_moved_on() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"One here. Two here."}}"#));
+    assert_eq!(call(s, "loki.speechVoice", Some(r#"{"own":true}"#))["ok"], true);
+    let r = call(s, "engine.execute", Some(r#"{"command":"review.readAloud"}"#));
+    assert_eq!(r["result"]["state"], "playing", "{r}");
+    assert_eq!(r["result"]["index"], 0);
+    // Nothing speaks and nothing moves on until the front end says so.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let st = call(s, "engine.execute", Some(r#"{"command":"readAloud.status"}"#));
+    assert_eq!(st["result"]["index"], 0, "{st}");
+    assert_eq!(st["result"]["error"], Value::Null, "{st}");
+    let n = call(s, "engine.execute", Some(r#"{"command":"readAloud.next"}"#));
+    assert_eq!(n["result"]["index"], 1, "{n}");
+    call(s, "engine.execute", Some(r#"{"command":"readAloud.stop"}"#));
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn a_selected_smart_art_reports_its_outline() {
+    let s = loki_session_new();
+    let r = call(s, "engine.execute", Some(r#"{"command":"insert.smartArt","params":{"layout":"process","items":["Plan",{"text":"Detail","level":1}]}}"#));
+    assert_eq!(r["ok"], true, "{r}");
+    let st = call(s, "loki.commandState", None);
+    let items = &st["result"]["smartArt"]["items"];
+    assert_eq!(items[0]["text"], "Plan", "{st}");
+    assert_eq!(items[1]["level"], 1, "{st}");
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}

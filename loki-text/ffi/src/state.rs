@@ -98,6 +98,8 @@ pub fn command_state(sess: &mut Session) -> Value {
         "layout": layout_state(sess),
         "table": table,
         "picture": picture_state(sess),
+        // The selected SmartArt graphic (its layout, colours and outline of items), for its Text Pane; null when none is.
+        "smartArt": wordcraft_engine::cmd::smart_art::selected_smart_art(sess).map_or(Value::Null, |a| serde_json::to_value(&*a).unwrap_or(Value::Null)),
         "arrange": arrange_state(sess),
         "styleAt": style_at(sess),
         "contextual": contextual(sess),

@@ -165,9 +165,16 @@ Things the egui front end does itself (`ui.*` commands and its own widgets) that
   shows the real result as it goes: `loki.preview` runs the command and takes it back
   (`revert_since`), so only the drag's own command is an undo step. Tried on an Android device: tab
   stops, the margin, a live column drag undone in one step, and a crop.
-* **Keytips, interface size, interface language**
-  (the UI is English only), **Format Shape and SmartArt text panes, Zotero, Read Aloud's audio,
-  updates**.
+* **Item 7.** Done: system fonts on Android (the font database scans `/system/fonts` and the font
+  APEX), Read Aloud speech on Android (Android's text-to-speech; `loki.speechVoice` holds the engine's
+  player on each sentence while the app reads it; the desktop keeps the engine's own voice), interface
+  size (File menu; the pages keep the screen's density), the SmartArt Text Pane (`ShapePanes.kt`) and a
+  Format Shape pane (fill, line colour and width, size and position), and interface language
+  (`I18n.kt`: craft-i18n's catalogs copied in from `CRAFT_I18N_DIR` at build time and never committed;
+  command labels, tabs, groups, the File menu, the kit's dialog words and the page counter; File ›
+  Interface Language or the system's). Not done: keytips, Zotero, update checks, counted strings
+  (plurals) and most of the app's own dialog text, which still show in English. The Format Shape pane
+  has not been tried on a device.
 * **Saved settings** are the theme, the screen paper colour and the recent documents (`Settings.kt`;
   `settings.json` in the platform's config folder, app storage on Android, user defaults on iOS).
   Zoom, view mode and the other view state are still per run.

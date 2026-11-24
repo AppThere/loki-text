@@ -45,6 +45,9 @@ private var activity: MainActivity? = null
 /** App-private storage that outlives the cache, for the settings file; null before the activity exists. */
 internal fun activityFilesDir(): File? = activity?.filesDir
 
+/** The running activity as a context, for services that outlive it (speech); null before it exists. */
+internal fun activityContext(): android.content.Context? = activity
+
 /** A saved document waits here, in app storage, until [publishFile] copies it to the place the user chose. */
 private val pendingSaves = HashMap<String, Uri>()
 

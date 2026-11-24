@@ -1,5 +1,7 @@
 package app.loki.text
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -56,6 +58,10 @@ data class Settings(
     val recents: List<RecentDocument> = emptyList(),
     val keys: JsonArray? = null,
     val ribbon: JsonObject? = null,
+    /** Interface size: how much larger the controls are drawn than the screen's own size (1 = as the system draws them). */
+    val uiScale: Float = 1f,
+    /** Interface language: "auto" (the system's) or a catalog's code. */
+    val language: String = "auto",
 ) {
     /** These settings with [path] first in the recent list (once, whatever it was before). */
     fun withRecent(path: String, at: Long, uri: String? = null): Settings {
@@ -74,6 +80,8 @@ data class Settings(
         })
         keys?.let { put("keys", it) }
         ribbon?.let { put("ribbon", it) }
+        if (uiScale != 1f) put("uiScale", uiScale)
+        if (language != "auto") put("language", language)
     }.toString()
 
     companion object {
@@ -97,6 +105,8 @@ data class Settings(
                 recents = recents,
                 keys = o["keys"] as? JsonArray,
                 ribbon = o["ribbon"] as? JsonObject,
+                language = str("language")?.takeIf { it.matches(Regex("auto|[a-z]{2,3}(-[a-z0-9]{2,8})?")) } ?: "auto",
+                uiScale = (o["uiScale"] as? JsonPrimitive)?.content?.toFloatOrNull()?.takeIf { s -> UI_SIZES.any { it.second == s } } ?: 1f,
             )
         }
     }
@@ -127,4 +137,22 @@ internal fun ageLabel(openedAt: Long, now: Long): String {
         days < 365 -> "${days / 30} ${if (days / 30 == 1) "month" else "months"} ago"
         else -> "${days / 365} ${if (days / 365 == 1) "year" else "years"} ago"
     }
+}
+
+/** The interface sizes File offers: a name and how much larger than the system's size. */
+internal val UI_SIZES = listOf("small" to 0.85f, "normal" to 1f, "large" to 1.15f, "larger" to 1.3f)
+
+/** The interface size every window draws at, kept in the settings file; changing it redraws them all. */
+object UiSize {
+    var scale by androidx.compose.runtime.mutableStateOf(AppSettings.value.uiScale)
+        private set
+
+    fun set(name: String) {
+        val s = UI_SIZES.firstOrNull { it.first == name }?.second ?: return
+        scale = s
+        AppSettings.update { it.copy(uiScale = s) }
+    }
+
+    /** The name of the size now ("normal" when the file holds none of ours). */
+    val name: String get() = UI_SIZES.firstOrNull { it.second == scale }?.first ?: "normal"
 }

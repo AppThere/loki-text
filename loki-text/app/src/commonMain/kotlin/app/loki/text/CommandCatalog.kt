@@ -88,7 +88,9 @@ internal val LOKI_PROFILE = CommandProfile(
 )
 
 /** Every command of `engine.commands`, read with [LOKI_PROFILE]. */
-fun parseCommands(commands: JsonElement?): List<CommandInfo> = app.loki.kit.parseCommands(commands, LOKI_PROFILE)
+fun parseCommands(commands: JsonElement?): List<CommandInfo> =
+    // Labels in the interface language; ids, places and parameters as the engine gives them.
+    app.loki.kit.parseCommands(commands, LOKI_PROFILE).map { c -> CommandInfo(c.id, tr(c.label), c.location, c.params, c.shortcut, c.mutates, c.needsInput) }
 
 /** Should [c] appear in menus and the all-commands list? */
 internal fun isListed(c: CommandInfo): Boolean = LOKI_PROFILE.isListed(c)

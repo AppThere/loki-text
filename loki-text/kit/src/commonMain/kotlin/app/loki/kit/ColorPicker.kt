@@ -129,11 +129,11 @@ fun ColorPickerDialog(title: String, initial: Color?, onPick: (Color?) -> Unit, 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        confirmButton = { TextButton(onClick = { done(colour) }) { Text("OK") } },
+        confirmButton = { TextButton(onClick = { done(colour) }) { Text(kt("OK")) } },
         dismissButton = {
             Row {
-                if (allowNone) TextButton(onClick = { onPick(null) }) { Text("None") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                if (allowNone) TextButton(onClick = { onPick(null) }) { Text(kt("None")) }
+                TextButton(onClick = onDismiss) { Text(kt("Cancel")) }
             }
         },
         text = {

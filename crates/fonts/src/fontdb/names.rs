@@ -287,6 +287,10 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
                 }
             }
         }
+    } else if cfg!(target_os = "android") {
+        // Android keeps its fonts in the system image (and, since Android 12, updatable ones in an APEX); apps may read
+        // them. There is no per-user font folder.
+        dirs.extend(["/system/fonts", "/product/fonts", "/apex/com.android.fonts/fonts"].map(Into::into));
     } else if cfg!(windows) {
         let root = std::env::var_os("WINDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into());
         dirs.push(root.join("Fonts"));
