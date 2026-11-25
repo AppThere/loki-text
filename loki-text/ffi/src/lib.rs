@@ -19,6 +19,7 @@ use std::ptr;
 use serde_json::{Value, json};
 use wordcraft_mcp::{Backend, Headless};
 
+mod dialogs;
 mod pointer;
 mod state;
 
@@ -121,6 +122,18 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
         })) {
             Ok(v) => reply(json!({"ok": true, "result": v})),
             Err(_) => err("internal error (panic caught) hit-testing the page"),
+        };
+    }
+    if method == "loki.dropCap" || method == "loki.dateFormats" {
+        // What the app's Drop Cap and Date and Time dialogs open with (see `dialogs`).
+        let sess = &session.inner.session;
+        return match catch_unwind(AssertUnwindSafe(
+            || {
+                if method == "loki.dropCap" { dialogs::drop_cap(sess) } else { dialogs::date_formats(&params) }
+            },
+        )) {
+            Ok(v) => reply(json!({"ok": true, "result": v})),
+            Err(_) => err("internal error (panic caught) reading a dialog's values"),
         };
     }
     if method == "loki.commandState" {

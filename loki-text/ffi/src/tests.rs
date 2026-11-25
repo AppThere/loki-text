@@ -34,6 +34,9 @@ fn hostile_arguments_are_errors_not_crashes() {
     let s = loki_session_new();
     assert_eq!(call(s, "engine.execute", Some("not json"))["ok"], false);
     assert_eq!(call(s, "no.such.method", None)["ok"], false);
+    // Dialog reads take whatever they are given: a language that isn't a string is English.
+    assert_eq!(call(s, "loki.dateFormats", Some(r#"{"language":5}"#))["result"]["language"], "en-US");
+    assert_eq!(call(s, "loki.dateFormats", Some(r#"{"language":"p"}"#))["result"]["language"], "en-US");
     // SAFETY: null arguments are part of the contract.
     unsafe {
         let out = loki_call(ptr::null_mut(), ptr::null(), ptr::null());
@@ -845,5 +848,29 @@ fn a_selected_smart_art_reports_its_outline() {
     assert_eq!(items[0]["text"], "Plan", "{st}");
     assert_eq!(items[1]["level"], 1, "{st}");
     // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn dialog_reads_follow_the_document() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Once upon a time"}}"#));
+    let cap = |s| call(s, "loki.dropCap", None)["result"].clone();
+    assert_eq!(cap(s)["position"], "none");
+    let r = call(s, "engine.execute", Some(r#"{"command":"insert.dropCap","params":{"position":"margin","lines":2,"distance":6}}"#));
+    assert_eq!(r["ok"], true, "{r}");
+    let now = cap(s);
+    assert_eq!((now["position"].clone(), now["lines"].clone()), (serde_json::json!("margin"), serde_json::json!(2)), "{now}");
+    assert!(now["distance"].as_f64().is_some_and(|d| d > 0.0), "{now}");
+    // Any Portuguese tag reads the Brazilian list, with month names of its own.
+    let pt = call(s, "loki.dateFormats", Some(r#"{"language":"pt-PT"}"#))["result"].clone();
+    let en = call(s, "loki.dateFormats", None)["result"].clone();
+    assert_eq!(pt["language"], "pt-BR");
+    let samples = |v: &Value| {
+        v["formats"].as_array().map(|a| a.iter().map(|f| f["sample"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()).unwrap_or_default()
+    };
+    assert!(samples(&en).iter().all(|x| !x.is_empty()) && !samples(&en).is_empty());
+    assert_ne!(samples(&pt), samples(&en));
+    // SAFETY: from `loki_session_new`, freed once.
     unsafe { loki_session_free(s) };
 }
