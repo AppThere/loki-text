@@ -20,9 +20,15 @@ pub(crate) struct Runtime {
 
 impl Default for Runtime {
     fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        let updater = Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")).with_translator(translate);
+        // Tests never ask GitHub: a check (Help ▸ Check for Updates, which the interface audit clicks) finds no newer
+        // release, so its outcome does not hang on the network or GitHub's request limit.
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        let updater = updater.with_source(std::sync::Arc::new(|| Ok(None)));
         Self {
             #[cfg(not(target_arch = "wasm32"))]
-            updater: Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")).with_translator(translate),
+            updater,
             #[cfg(not(target_arch = "wasm32"))]
             startup_check: false,
         }
@@ -249,5 +255,22 @@ mod tests {
             assert!(!app.dialog_host.is_open::<UpdateCheckDialog>(), "{file}: the dialog stays closed");
             let _ = std::fs::remove_dir_all(&root);
         }
+    }
+
+    /// A check in a test build has an answer of its own, not GitHub's: the interface audit clicks Help ▸ Check for
+    /// Updates, and GitHub's request limit used to turn its outcome into untranslated text, failing CI at random.
+    #[test]
+    fn a_check_in_tests_never_asks_github() {
+        let ctx = egui::Context::default();
+        let mut rt = super::Runtime::default();
+        rt.updater.check_now();
+        for _ in 0..500 {
+            rt.updater.tick(&ctx);
+            if !matches!(rt.updater.status(), Status::Checking) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(matches!(rt.updater.status(), Status::UpToDate), "{:?}", rt.updater.status());
     }
 }
