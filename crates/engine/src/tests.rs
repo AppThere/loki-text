@@ -8062,6 +8062,23 @@ fn redrawing_a_chart_keeps_the_chart_as_read() {
 }
 
 #[test]
+fn chart_data_reads_back_what_edit_data_takes() {
+    let mut s = s();
+    let data = json!({"categories": ["North", "2024"], "series": [{"name": "Sales", "values": [1.5, null]}, {"name": "Costs", "values": [3, 4]}]});
+    run(&mut s, "insert.chart", json!({"type": "line", "data": data, "title": "Q1"}));
+    let read = run(&mut s, "chart.data", json!({}));
+    assert_eq!((read["type"].clone(), read["title"].clone()), (json!("line"), json!("Q1")));
+    assert_eq!(read["data"]["categories"], data["categories"]);
+    assert_eq!(read["data"]["series"][0]["values"], json!([1.5, null]));
+    // What it reports, given back to Edit Data, leaves the chart as it was.
+    let before = first_chart(&s.doc).unwrap();
+    run(&mut s, "chart.editData", json!({"data": read["data"]}));
+    assert_eq!(first_chart(&s.doc).unwrap(), before);
+    // Without a chart there is nothing to read.
+    assert!(self::s().run("chart.data", &json!({})).is_err());
+}
+
+#[test]
 fn chart_edits_are_one_undo_step_each() {
     use wordcraft_doc::chart::{ChartType, LegendPos};
     let mut s = s();
