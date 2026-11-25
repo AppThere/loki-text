@@ -128,10 +128,19 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
     docs has no fields; left as JSON on purpose: engine positions (set by pressing on the page), types a
     doc names without spelling out (`CharProps`, `ParaProps`, `SectionProps`, `Source`), a map from style
     names (TOC style levels), rows of any length (spreadsheet values) and table-style parts with names.
-  * Forms start with the document's current values only for the commands in `FORM_DEFAULTS` (Options,
-    tracking and privacy options, margins, page layout, paper size, orientation, columns, indents,
-    paragraph spacing, font size and font); others start blank. The engine has no read command for a
-    chart's data, so Edit Data starts with an empty grid and replaces the data.
+  * Forms start with the document's current values for the 38 commands in `FORM_DEFAULTS`: Options,
+    tracking and privacy options, AutoCorrect Options, user name; margins, page layout, paper size,
+    orientation, columns, vertical alignment, line numbers, page number format, document grid, text
+    direction and section direction; indents, spacing, alignment, the break options and paragraph
+    direction; font, size, colour, underline and its colour, character spacing, emphasis mark, paragraph
+    style and proofing language; zoom, numerals, the Styles pane's dock, reading speed and skipping
+    citations. Each is read with a command that only reports (`format.state`, `para.state`,
+    `layout.section`, `view.state`, `readAloud.status`, `file.options`, …), and
+    `FormDefaultsReadersTest` checks against a real engine that reading changes nothing. Others start
+    blank: their values have no reader (character scale and position, line spacing, shading, borders,
+    Reading Mode's layout, theme and design choices) or are a choice to make each time (break kind,
+    symbol, table size). The engine has no read command for a chart's data, so Edit Data starts with an
+    empty grid and replaces the data.
   * Customize Keyboard edits the engine's key changes; the app's own key map does not read them yet
     (see Customize Ribbon below). The engine answers `{custom: [{command, keys}]}`, not the
     `{assigned, removed}` its params doc describes; the dialog reads both.
@@ -206,8 +215,8 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
 Roughly largest first. Do not assume any of these are solved without checking.
 
 1. **Bespoke dialogs.** The desktop has about sixty; this app has sixteen of its own and the
-   generated form for the rest. Forms start with the document's values only for the commands in
-   `FORM_DEFAULTS`; the others start blank. Chart Edit Data starts with an empty grid (the engine has
+   generated form for the rest. Forms start with the document's values for the 38 commands in
+   `FORM_DEFAULTS`; the rest start blank, mostly because nothing reports their current value. Chart Edit Data starts with an empty grid (the engine has
    no command to read a chart's data). A few parameter types stay JSON on purpose (listed above).
 2. **Backstage and customization.** File › Options is the generic form, not the desktop's panes.
    Customize Ribbon is the generic form, not a drag-and-drop dialog. Menus and tooltips show the
