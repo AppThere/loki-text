@@ -1,6 +1,6 @@
 # Loki Text: parity with the WordCraft desktop front end
 
-Status: 24 November 2026 (after PR #29, keytips). Measured against the engine's own command list (678
+Status: 25 November 2026 (after the Symbol, Date and Time, Columns and Drop Cap dialogs). Measured against the engine's own command list (678
 commands) and the egui front end (`crates/ui-egui`). Checked by `:app:jvmTest` (`EngineCoverageTest`)
 and looked at with the off-screen screenshot harness at phone (390 dp), tablet (760–800 dp) and
 desktop (1280 dp) widths, light and dark. Android release builds are built and tried on devices (a
@@ -105,8 +105,22 @@ What the egui front end does itself (`ui.*` commands and its own widgets), and h
 come with each. What is still missing is gathered in [What is left](#what-is-left).
 
 * **Bespoke dialogs.** The desktop has about sixty; this app has its own Font, Paragraph, Page
-  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info, Recipient List and Customize
-  Keyboard dialogs, and the generated form for everything else.
+  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info, Recipient List, Customize
+  Keyboard, Symbol, Date and Time, Columns and Drop Cap dialogs, and the generated form for everything
+  else.
+  * Symbol (Insert › Symbol › More Symbols…, `SymbolDialog.kt`): sixteen Unicode subsets in a grid,
+    a character code box (beyond the Basic Multilingual Plane too), the symbols used lately in this
+    window, and the font to write it in; Insert keeps the dialog open. The grid is drawn in the
+    interface's font, so a symbol font's own pictures show only on the page.
+  * Date and Time (`DateTimeDialog.kt`): today in each format, English (United States) or Portuguese
+    (Brazil), from `loki.dateFormats`, and Update automatically; it opens on the last choice. There is
+    no Set as Default yet.
+  * Columns (Layout › Columns › More Columns…, `ColumnsDialog.kt`): presets, the number, each column's
+    width and spacing (a change is taken from the next column, so they still fill the text), equal
+    widths, a line between, Apply to, and a picture of the page.
+  * Drop Cap (Insert › Drop Cap, now a menu: None, Dropped, In margin, Drop Cap Options…;
+    `DropCapDialog.kt`): position, font, lines and distance, starting from the paragraph's drop cap
+    (`loki.dropCap`), with a picture.
   * Object and list parameters are fields, not JSON (the kit's `StructuredParams.kt`): an object is a
     nested form, a list is rows to add, remove and reorder, `where X = {…}` types are followed, fixed
     pairs (`[[width pt, space after pt], …]`) are side-by-side fields, and chart data is a grid. Each
@@ -114,10 +128,19 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
     docs has no fields; left as JSON on purpose: engine positions (set by pressing on the page), types a
     doc names without spelling out (`CharProps`, `ParaProps`, `SectionProps`, `Source`), a map from style
     names (TOC style levels), rows of any length (spreadsheet values) and table-style parts with names.
-  * Forms start with the document's current values only for the commands in `FORM_DEFAULTS` (Options,
-    tracking and privacy options, margins, page layout, paper size, orientation, columns, indents,
-    paragraph spacing, font size and font); others start blank. The engine has no read command for a
-    chart's data, so Edit Data starts with an empty grid and replaces the data.
+  * Forms start with the document's current values for the 39 commands in `FORM_DEFAULTS`: Options,
+    tracking and privacy options, AutoCorrect Options, user name; margins, page layout, paper size,
+    orientation, columns, vertical alignment, line numbers, page number format, document grid, text
+    direction and section direction; indents, spacing, alignment, the break options and paragraph
+    direction; font, size, colour, underline and its colour, character spacing, emphasis mark, paragraph
+    style and proofing language; zoom, numerals, the Styles pane's dock, reading speed and skipping
+    citations. Each is read with a command that only reports (`format.state`, `para.state`,
+    `layout.section`, `view.state`, `readAloud.status`, `file.options`, …), and
+    `FormDefaultsReadersTest` checks against a real engine that reading changes nothing. Others start
+    blank: their values have no reader (character scale and position, line spacing, shading, borders,
+    Reading Mode's layout, theme and design choices) or are a choice to make each time (break kind,
+    symbol, table size). Chart › Edit Data starts with the chart's categories and series, read with
+    the engine's `chart.data`.
   * Customize Keyboard edits the engine's key changes; the app's own key map does not read them yet
     (see Customize Ribbon below). The engine answers `{custom: [{command, keys}]}`, not the
     `{assigned, removed}` its params doc describes; the dialog reads both.
@@ -191,10 +214,9 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
 
 Roughly largest first. Do not assume any of these are solved without checking.
 
-1. **Bespoke dialogs.** The desktop has about sixty; this app has about a dozen of its own and the
-   generated form for the rest. Forms start with the document's values only for the commands in
-   `FORM_DEFAULTS`; the others start blank. Chart Edit Data starts with an empty grid (the engine has
-   no command to read a chart's data). A few parameter types stay JSON on purpose (listed above).
+1. **Bespoke dialogs.** The desktop has about sixty; this app has seventeen of its own and the
+   generated form for the rest. Forms start with the document's values for the 39 commands in
+   `FORM_DEFAULTS`; the rest start blank, mostly because nothing reports their current value. A few parameter types stay JSON on purpose (listed above).
 2. **Backstage and customization.** File › Options pages are not tried on a device yet; the folders are text boxes, not pickers.
    Customize Ribbon is the generic form, not a drag-and-drop dialog. Menus and tooltips show the
    built-in shortcut after a key change, and a customization made in one desktop window reaches the

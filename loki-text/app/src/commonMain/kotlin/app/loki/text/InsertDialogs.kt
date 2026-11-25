@@ -37,7 +37,6 @@ enum class InsertDialog(val title: String, val command: String, val fields: List
     NewComment("New Comment", "review.newComment", listOf(DialogField("text", "Comment", required = true))),
     AltText("Alt Text", "object.altText", listOf(DialogField("text", "Description"), DialogField("title", "Title"))),
     ChartTitle("Chart Title", "chart.title", listOf(DialogField("text", "Title", required = true))),
-    DateTime("Date & Time", "insert.dateTime", listOf(DialogField("format", "Format", "M/d/yyyy", required = true))),
 }
 
 /** Keys whose values are numbers (points) rather than text. */
