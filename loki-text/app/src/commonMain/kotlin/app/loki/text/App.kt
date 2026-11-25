@@ -443,6 +443,13 @@ private fun AppContent(
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
     var pageDialog by remember { mutableStateOf<PageForm?>(null) }
+    // Insert and Layout dialogs: Symbol (with the symbols used lately), Date and Time (with the last choice), Columns, Drop Cap.
+    var symbolDialog by remember { mutableStateOf(false) }
+    var recentSymbols by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dateDialog by remember { mutableStateOf(false) }
+    var dateChoice by remember { mutableStateOf(DateChoice(dateLanguageFor(I18n.current))) }
+    var columnsDialog by remember { mutableStateOf<ColumnsForm?>(null) }
+    var dropCapDialog by remember { mutableStateOf<DropCapForm?>(null) }
     // Manage Styles: open or not, its sort order, the list it shows, and the Modify / New dialogs over it.
     var manageStyles by remember { mutableStateOf(false) }
     // List dialogs: the multilevel definition (levels as read), and the three small ones.
@@ -664,6 +671,19 @@ private fun AppContent(
         if (command == "layout.pageSetup" && params["section"] == null) {
             val section = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("layout.section") as? JsonObject }.getOrNull() } }
             pageDialog = pageFormFrom(section ?: JsonObject(emptyMap()))
+            return
+        }
+        // Insert › Symbol, Date & Time and Drop Cap, and Layout › Columns, with nothing chosen yet: this app's dialogs.
+        if (bare && command == "insert.symbol") { symbolDialog = true; return }
+        if (bare && command == "insert.dateTime") { dateDialog = true; return }
+        if (bare && command == "layout.columns") {
+            val section = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("layout.section") as? JsonObject }.getOrNull() } }
+            columnsDialog = columnsFormFrom(section ?: JsonObject(emptyMap()), selected = selection.rects.isNotEmpty())
+            return
+        }
+        if (bare && command == "insert.dropCap") {
+            val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.dropCap") as? JsonObject }.getOrNull() } }
+            dropCapDialog = dropCapFormFrom(state ?: JsonObject(emptyMap()))
             return
         }
         if (command == "para.dialog") {
@@ -1341,6 +1361,28 @@ private fun AppContent(
             if (changes.isNotEmpty()) scope.launch { runCommand("layout.pageLayout", changes) }
         }, onDismiss = { pageDialog = null })
     }
+    if (symbolDialog) SymbolDialog(recentSymbols, fontFamilies, onInsert = { p, symbol ->
+        recentSymbols = withRecentSymbol(recentSymbols, symbol)
+        scope.launch { runCommand("insert.symbol", p) }
+    }, onDismiss = { symbolDialog = false })
+    if (dateDialog) DateTimeDialog(dateChoice, formatsFor = { language ->
+        engineLock.withLock { withContext(Dispatchers.Default) { parseDateFormats(runCatching { engine.call("loki.dateFormats", buildJsonObject { put("language", language) }) }.getOrNull()) } }
+    }, onInsert = { choice, p ->
+        dateDialog = false; dateChoice = choice
+        scope.launch { runCommand("insert.dateTime", p) }
+    }, onDismiss = { dateDialog = false })
+    columnsDialog?.let { start ->
+        ColumnsDialog(start, selected = start.apply == "selection", onApply = { p ->
+            columnsDialog = null
+            scope.launch { runCommand("layout.columns", p) }
+        }, onDismiss = { columnsDialog = null })
+    }
+    dropCapDialog?.let { start ->
+        DropCapDialog(start, fontFamilies, onApply = { p ->
+            dropCapDialog = null
+            scope.launch { runCommand("insert.dropCap", p) }
+        }, onDismiss = { dropCapDialog = null })
+    }
     paraDialog?.let { start ->
         ParagraphDialog(start, onApply = { changes ->
             paraDialog = null
@@ -1807,7 +1849,7 @@ private fun AppContent(
         // there is no room. Hidden while something else is moving the selection or has the screen.
         val miniShown = primary && readAloud?.playing != true && selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
-            pageDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
+            pageDialog == null && !symbolDialog && !dateDialog && columnsDialog == null && dropCapDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
         if (miniShown) {
             val miniEnv = remember(commandState, formatState, fontFamilies) {
                 RibbonEnv(emptyMap(), commandState, formatState, fontFamilies, previewFonts, { id -> scope.launch { runCommand(id) } }, { id, p -> scope.launch { runCommand(id, p) } })

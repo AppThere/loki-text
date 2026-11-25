@@ -1,6 +1,6 @@
 # Loki Text: parity with the WordCraft desktop front end
 
-Status: 24 November 2026 (after PR #29, keytips). Measured against the engine's own command list (678
+Status: 25 November 2026 (after the Symbol, Date and Time, Columns and Drop Cap dialogs). Measured against the engine's own command list (678
 commands) and the egui front end (`crates/ui-egui`). Checked by `:app:jvmTest` (`EngineCoverageTest`)
 and looked at with the off-screen screenshot harness at phone (390 dp), tablet (760–800 dp) and
 desktop (1280 dp) widths, light and dark. Android release builds are built and tried on devices (a
@@ -105,8 +105,22 @@ What the egui front end does itself (`ui.*` commands and its own widgets), and h
 come with each. What is still missing is gathered in [What is left](#what-is-left).
 
 * **Bespoke dialogs.** The desktop has about sixty; this app has its own Font, Paragraph, Page
-  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info, Recipient List and Customize
-  Keyboard dialogs, and the generated form for everything else.
+  Setup, Styles, Lists, Table, Find/Replace/Go To, Insert, Print, Info, Recipient List, Customize
+  Keyboard, Symbol, Date and Time, Columns and Drop Cap dialogs, and the generated form for everything
+  else.
+  * Symbol (Insert › Symbol › More Symbols…, `SymbolDialog.kt`): sixteen Unicode subsets in a grid,
+    a character code box (beyond the Basic Multilingual Plane too), the symbols used lately in this
+    window, and the font to write it in; Insert keeps the dialog open. The grid is drawn in the
+    interface's font, so a symbol font's own pictures show only on the page.
+  * Date and Time (`DateTimeDialog.kt`): today in each format, English (United States) or Portuguese
+    (Brazil), from `loki.dateFormats`, and Update automatically; it opens on the last choice. There is
+    no Set as Default yet.
+  * Columns (Layout › Columns › More Columns…, `ColumnsDialog.kt`): presets, the number, each column's
+    width and spacing (a change is taken from the next column, so they still fill the text), equal
+    widths, a line between, Apply to, and a picture of the page.
+  * Drop Cap (Insert › Drop Cap, now a menu: None, Dropped, In margin, Drop Cap Options…;
+    `DropCapDialog.kt`): position, font, lines and distance, starting from the paragraph's drop cap
+    (`loki.dropCap`), with a picture.
   * Object and list parameters are fields, not JSON (the kit's `StructuredParams.kt`): an object is a
     nested form, a list is rows to add, remove and reorder, `where X = {…}` types are followed, fixed
     pairs (`[[width pt, space after pt], …]`) are side-by-side fields, and chart data is a grid. Each
@@ -200,7 +214,7 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
 
 Roughly largest first. Do not assume any of these are solved without checking.
 
-1. **Bespoke dialogs.** The desktop has about sixty; this app has about a dozen of its own and the
+1. **Bespoke dialogs.** The desktop has about sixty; this app has sixteen of its own and the
    generated form for the rest. Forms start with the document's values for the 39 commands in
    `FORM_DEFAULTS`; the rest start blank, mostly because nothing reports their current value. A few parameter types stay JSON on purpose (listed above).
 2. **Backstage and customization.** File › Options is the generic form, not the desktop's panes.

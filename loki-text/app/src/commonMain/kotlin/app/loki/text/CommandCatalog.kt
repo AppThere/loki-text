@@ -109,6 +109,7 @@ internal val APP_DIALOGS = setOf(
     "format.fontDialog", "para.dialog", "layout.pageSetup", "styles.manage", "styles.create", "styles.modify",
     "edit.find", "edit.advancedFind", "edit.findReplace", "edit.goto", "edit.findNext", "edit.findPrevious",
     "list.define", "para.defineBullet", "para.defineNumber", "para.setNumberingValue", "review.comments",
+    "insert.symbol", "insert.dateTime", "insert.dropCap", "layout.columns",
 )
 
 /** Commands that go through the system clipboard on the way. */

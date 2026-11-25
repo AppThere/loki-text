@@ -57,7 +57,8 @@ fun LayoutGroup(name: String, env: RibbonEnv, items: List<RibbonItem> = emptyLis
                 val paper = PAPERS.getOrNull(i) ?: return@IconMenuButton
                 env.onRunWith("layout.size", buildJsonObject { put("name", paper) })
             }
-            IconMenuButton("layout.columns", env.label("layout.columns", "Columns"), COLUMN_CHOICES.map { it.first }, COLUMN_NAMES[lay.columns], env.reason("layout.columns"), ButtonSize.Big) { i ->
+            IconMenuButton("layout.columns", env.label("layout.columns", "Columns"), COLUMN_CHOICES.map { it.first } + tr("More Columns…"), COLUMN_NAMES[lay.columns], env.reason("layout.columns"), ButtonSize.Big) { i ->
+                if (i == COLUMN_CHOICES.size) { env.onRun("layout.columns"); return@IconMenuButton }
                 val params = COLUMN_CHOICES.getOrNull(i)?.second ?: return@IconMenuButton
                 env.onRunWith("layout.columns", params)
             }
