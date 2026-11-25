@@ -1,7 +1,10 @@
 package app.loki.text
 
 import app.loki.text.engine.Engine
+import app.loki.kit.ChartTable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,10 +24,11 @@ class FormDefaultsReadersTest {
             engine.execute("select.all")
             // Read each once first: whatever a first read sets up (lazily filled settings) is not a change of the person's.
             val readers = FORM_DEFAULTS.values.map { it.reader }.toSet()
-            for (r in readers) engine.execute(r)
+            // A reader with nothing to read (Chart Data with no chart selected) is an error, as the app takes it.
+            for (r in readers) runCatching { engine.execute(r) }
             val before = engine.snapshot()
             for (r in readers) {
-                engine.execute(r)
+                runCatching { engine.execute(r) }
                 assertEquals(before, engine.snapshot(), "reading with $r changed the document or the view")
             }
         }
@@ -45,6 +49,10 @@ class FormDefaultsReadersTest {
             assertEquals("restartSection", start("layout.lineNumbers")["value"])
             assertEquals("5", start("layout.lineNumbers")["countBy"])
             assertEquals("center", start("para.align")["value"])
+            // A new chart is selected: Edit Data starts with its categories.
+            engine.execute("insert.chart", Json.parseToJsonElement("""{"type":"column","data":{"categories":["North","South"],"series":[{"name":"Sales","values":[1,2]}]}}""").jsonObject)
+            val data = Json.parseToJsonElement(start("chart.editData").getValue("data")).jsonObject
+            assertEquals(listOf("North", "South"), ChartTable.from(data).categories)
         }
     }
 }

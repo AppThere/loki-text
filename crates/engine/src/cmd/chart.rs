@@ -84,6 +84,13 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .params(r#"{"data": {"categories"?: [string], "series"?: [{"name": string, "values": [number|null]}]}}"#)
         .when(has_chart),
+        CommandSpec::new("chart.data", "Chart Data", "Chart Design › Data", |s, _| {
+            let c = selected_chart(s).ok_or_else(|| CmdError::Disabled("select a chart first".into()))?;
+            Ok(chart_data(&c))
+        })
+        .params(r#"{} → {"type", "data": {"categories": [string], "series": [{"name": string, "values": [number|null]}]}, "title": string|null, "legend": "right|left|top|bottom"|null, "dataLabels": bool} (the selected chart, as chart.editData and insert.chart take it)"#)
+        .pure()
+        .when(has_chart),
         CommandSpec::new("chart.title", "Chart Title", "Chart Design › Chart Layouts › Add Chart Element", |s, v| {
             let text = match v.get("text") {
                 Some(Value::String(t)) => Some(Some(t.clone())),
@@ -152,6 +159,18 @@ fn has_chart(s: &Session) -> Option<&'static str> {
         }
         _ => Some("select a chart first"),
     }
+}
+
+/// The chart's model as the chart commands take it: its type, data, title, legend and data labels.
+fn chart_data(c: &ChartSpec) -> Value {
+    let series: Vec<Value> = c.series.iter().map(|x| json!({"name": x.name, "values": x.values})).collect();
+    json!({
+        "type": c.kind.id(),
+        "data": {"categories": c.categories, "series": series},
+        "title": c.title,
+        "legend": c.legend.map(|l| l.id()),
+        "dataLabels": c.data_labels,
+    })
 }
 
 /// The graphic for `spec` drawn `w` × `h` points in the theme's colours.
