@@ -1155,7 +1155,7 @@ private fun AppContent(
             id == "file.info" || id == "file.properties" -> infoDialog = true
             id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
-            c.needsInput || (id in FORM_DEFAULTS && c.hasParams) -> commandForm = c
+            c.needsInput || (FORM_DEFAULTS[id]?.opensForm == true && c.hasParams) -> commandForm = c
             !c.mutates -> executeFromUi(c, JsonObject(emptyMap()))?.let { status = it }
             else -> runCommand(id)
         }
