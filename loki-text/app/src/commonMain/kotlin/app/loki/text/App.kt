@@ -763,6 +763,10 @@ private fun AppContent(
     }
     var printDialog by remember { mutableStateOf(false) }
     var infoDialog by remember { mutableStateOf(false) }
+    // File › Options: the page asked for, once open, and the settings read when it opens.
+    var optionsPane by remember { mutableStateOf<OptionsPane?>(null) }
+    var optionsForm by remember { mutableStateOf<OptionsForm?>(null) }
+    var optionsError by remember { mutableStateOf<String?>(null) }
     var docInfo by remember { mutableStateOf<DocInfo?>(null) }
     var infoError by remember { mutableStateOf<String?>(null) }
     // The copy being restored: it loads in the background and opens on a tick, after which it is no longer listed.
@@ -1072,6 +1076,25 @@ private fun AppContent(
         infoError = null
         docInfo = engineLock.withLock { withContext(Dispatchers.Default) { parseDocInfo(runCatching { engine.execute("file.info") }.getOrNull()) } }
     }
+    LaunchedEffect(optionsPane) {
+        if (optionsPane == null) return@LaunchedEffect
+        optionsError = null
+        optionsForm = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val r = runCatching { engine.execute("file.options") }.getOrNull()
+                runCatching { engine.uiRequests() }
+                parseOptions(r)
+            }
+        }
+        if (optionsForm == null) optionsError = "The settings could not be read"
+    }
+    fun applyOptions(changes: JsonObject) {
+        scope.launch {
+            perform(requests = false) { execute("file.options", changes) }
+            if (status.isNotEmpty()) { optionsError = status; status = ""; return@launch }
+            optionsPane = null; optionsForm = null
+        }
+    }
     fun saveProperties(changes: JsonObject) {
         scope.launch {
             perform(requests = false) { execute("file.properties", changes) }
@@ -1153,6 +1176,7 @@ private fun AppContent(
             id == "mailings.editRecipients" -> openRecipients()
             id == "tools.customizeKeyboard" -> openKeyboard()
             id == "file.info" || id == "file.properties" -> infoDialog = true
+            id == "file.options" -> optionsPane = OptionsPane.General
             id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
             c.needsInput || (id in FORM_DEFAULTS && c.hasParams) -> commandForm = c
@@ -1217,6 +1241,7 @@ private fun AppContent(
             "exportPng" -> exportTo("file.exportPng")
             "newWindow" -> if (onNewWindow != null) onNewWindow(null) else status = "This device shows one document at a time"
             "commands" -> showCommands = ""
+            "options" -> optionsPane = OptionsPane.forId(text("pane"))
             "find" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.Find)
             "replace" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.Replace)
             "goto" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.GoTo)
@@ -1384,6 +1409,7 @@ private fun AppContent(
         maxWidth < 900.dp -> SizeClass.Medium
         else -> SizeClass.Expanded
     }
+    optionsPane?.let { OptionsDialog(optionsForm, optionsError, it, sizeClass, ::applyOptions) { optionsPane = null; optionsForm = null } }
     // Shortcuts work wherever focus is (the ribbon, the title bar): keys a focused text box doesn't
     // use come up to here. The page handles its own keys first (see its onPreviewKeyEvent).
     val screen = viewState.screen
