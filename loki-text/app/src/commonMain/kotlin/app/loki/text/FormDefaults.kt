@@ -93,6 +93,8 @@ internal val FORM_DEFAULTS: Map<String, DefaultsSource> = mapOf(
         mapOf("value" to mapOf("page" to "restartPage", "section" to "restartSection", "continuous" to "continuous")),
         opensForm = false,
     ),
+    // The selected chart's categories and series, so Edit Data changes them rather than starting over.
+    "chart.editData" to DefaultsSource("chart.data", mapOf("data" to "data")),
     // The view, Read Aloud and the person's settings.
     "view.zoom" to DefaultsSource("view.state", mapOf("value" to "zoom"), scale = mapOf("value" to 100.0)),
     "view.numeral" to DefaultsSource("view.state", mapOf("value" to "numeral"), opensForm = false),
