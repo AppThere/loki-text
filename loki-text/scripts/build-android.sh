@@ -64,9 +64,8 @@ else
     echo "No llvm-strip found: the APK carries the library's symbols" >&2
 fi
 
-if [ -x ./gradlew ]; then GRADLE=./gradlew; else GRADLE=gradle; fi
 VARIANT="${VARIANT:-Debug}"
-$GRADLE ":app:assemble$VARIANT"
+./gradlew ":app:assemble$VARIANT"
 lower=$(echo "$VARIANT" | tr 'A-Z' 'a-z')
 echo "APK: app/build/outputs/apk/$lower/app-$lower.apk"
 echo "Install: adb install -r app/build/outputs/apk/$lower/app-$lower.apk"
