@@ -197,6 +197,9 @@ private fun <T> warnOnce(what: String, e: Throwable, fallback: T): T {
 private const val MIN_ZOOM = 0.25f
 private const val MAX_ZOOM = 2f
 
+/** The zoom percentages the page area draws on a screen of [density]: what the Zoom dialog takes. */
+private fun zoomRange(density: Float): IntRange = (MIN_ZOOM * 100).roundToInt()..(maxZoomFor(density) * 100).toInt()
+
 private const val MAX_PAGES = 50
 
 /** Pixels per point the pages are rendered at; the displayed factor can be smaller. */
@@ -450,6 +453,10 @@ private fun AppContent(
     var dateChoice by remember { mutableStateOf(DateChoice(dateLanguageFor(I18n.current))) }
     var columnsDialog by remember { mutableStateOf<ColumnsForm?>(null) }
     var dropCapDialog by remember { mutableStateOf<DropCapForm?>(null) }
+    // Tabs, Borders and Shading, and Zoom: each form's starting values while it is open.
+    var tabsDialog by remember { mutableStateOf<TabsForm?>(null) }
+    var bordersDialog by remember { mutableStateOf<BordersForm?>(null) }
+    var zoomDialog by remember { mutableStateOf<ZoomForm?>(null) }
     // Manage Styles: open or not, its sort order, the list it shows, and the Modify / New dialogs over it.
     var manageStyles by remember { mutableStateOf(false) }
     // List dialogs: the multilevel definition (levels as read), and the three small ones.
@@ -684,6 +691,18 @@ private fun AppContent(
         if (bare && command == "insert.dropCap") {
             val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.dropCap") as? JsonObject }.getOrNull() } }
             dropCapDialog = dropCapFormFrom(state ?: JsonObject(emptyMap()))
+            return
+        }
+        if (bare && (command == "para.tabs" || command == "para.borders")) {
+            val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.paraLines") as? JsonObject }.getOrNull() } }
+            // Without the paragraph's own values, OK would write the dialog's blanks over them.
+            if (state == null) status = tr("The paragraph's settings could not be read")
+            else if (command == "para.tabs") tabsDialog = tabsFormFrom(state) else bordersDialog = bordersFormFrom(state)
+            return
+        }
+        if (bare && command == "view.zoom") {
+            val view = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("view.state") as? JsonObject }.getOrNull() } }
+            zoomDialog = zoomFormFrom(view ?: JsonObject(emptyMap()))
             return
         }
         if (command == "para.dialog") {
@@ -1402,6 +1421,26 @@ private fun AppContent(
             scope.launch { runCommand("layout.columns", p) }
         }, onDismiss = { columnsDialog = null })
     }
+    tabsDialog?.let { start ->
+        TabsDialog(start, onApply = { p ->
+            tabsDialog = null
+            if (p != null) scope.launch { runCommand("para.tabs", p) }
+        }, onDismiss = { tabsDialog = null })
+    }
+    bordersDialog?.let { start ->
+        BordersDialog(start, onApply = { steps ->
+            bordersDialog = null
+            // Borders and shading changed together are one Undo.
+            if (steps.size > 1) scope.launch { perform { call("loki.runSteps", stepsParams(steps)) } }
+            else steps.singleOrNull()?.let { scope.launch { runCommand(it.command, it.params) } }
+        }, onDismiss = { bordersDialog = null })
+    }
+    zoomDialog?.let { start ->
+        ZoomDialog(start, zoomRange(screenDensity), onApply = { p ->
+            zoomDialog = null
+            scope.launch { runCommand("view.zoom", p) }
+        }, onDismiss = { zoomDialog = null })
+    }
     dropCapDialog?.let { start ->
         DropCapDialog(start, fontFamilies, onApply = { p ->
             dropCapDialog = null
@@ -1875,7 +1914,7 @@ private fun AppContent(
         // there is no room. Hidden while something else is moving the selection or has the screen.
         val miniShown = primary && readAloud?.playing != true && selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
-            pageDialog == null && !symbolDialog && !dateDialog && columnsDialog == null && dropCapDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
+            pageDialog == null && !symbolDialog && !dateDialog && columnsDialog == null && dropCapDialog == null && tabsDialog == null && bordersDialog == null && zoomDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
         if (miniShown) {
             val miniEnv = remember(commandState, formatState, fontFamilies) {
                 RibbonEnv(emptyMap(), commandState, formatState, fontFamilies, previewFonts, { id -> scope.launch { runCommand(id) } }, { id, p -> scope.launch { runCommand(id, p) } })

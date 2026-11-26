@@ -1,6 +1,7 @@
 use std::ffi::{CStr, CString};
 
 use super::*;
+use serde_json::json;
 
 fn call(s: *mut LokiSession, method: &str, params: Option<&str>) -> Value {
     let m = CString::new(method).unwrap();
@@ -749,7 +750,12 @@ fn unsaved_work_survives_the_session_and_can_be_restored() {
     assert_eq!(call(a, "loki.enableRecovery", Some(&dir_params))["ok"], true);
     assert_eq!(call(a, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Unsaved words worth keeping"}}"#))["ok"], true);
     let has_copy = || {
-        std::fs::read_dir(dir.join("recovery")).into_iter().chain(std::fs::read_dir(&dir)).flatten().flatten().any(|e| e.path().is_dir() || e.path().is_file())
+        std::fs::read_dir(dir.join("recovery"))
+            .into_iter()
+            .chain(std::fs::read_dir(&dir))
+            .flatten()
+            .flatten()
+            .any(|e| e.path().is_dir() || e.path().is_file())
     };
     until("the first copy", || {
         call(a, "loki.recoveryTick", None);
@@ -841,7 +847,11 @@ fn a_front_end_voice_holds_each_sentence_until_moved_on() {
 #[test]
 fn a_selected_smart_art_reports_its_outline() {
     let s = loki_session_new();
-    let r = call(s, "engine.execute", Some(r#"{"command":"insert.smartArt","params":{"layout":"process","items":["Plan",{"text":"Detail","level":1}]}}"#));
+    let r = call(
+        s,
+        "engine.execute",
+        Some(r#"{"command":"insert.smartArt","params":{"layout":"process","items":["Plan",{"text":"Detail","level":1}]}}"#),
+    );
     assert_eq!(r["ok"], true, "{r}");
     let st = call(s, "loki.commandState", None);
     let items = &st["result"]["smartArt"]["items"];
@@ -871,6 +881,70 @@ fn dialog_reads_follow_the_document() {
     };
     assert!(samples(&en).iter().all(|x| !x.is_empty()) && !samples(&en).is_empty());
     assert_ne!(samples(&pt), samples(&en));
+    // SAFETY: from `loki_session_new`, freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn paragraph_lines_read_what_the_tabs_and_borders_dialogs_open_with() {
+    let s = loki_session_new();
+    let run = |s, p: &str| {
+        let r = call(s, "engine.execute", Some(p));
+        assert_eq!(r["ok"], true, "{r}");
+    };
+    let lines = |s| call(s, "loki.paraLines", None)["result"].clone();
+    run(s, r#"{"command":"text.insert","params":{"text":"Totals"}}"#);
+    let plain = lines(s);
+    assert_eq!(
+        (plain["tabs"].clone(), plain["borders"]["bottom"].clone(), plain["shading"].clone()),
+        (json!([]), json!(null), json!(null)),
+        "{plain}"
+    );
+    run(s, r#"{"command":"para.tabs","params":{"set":[{"pos":216,"align":"decimal","leader":"middleDot"}],"default":18}}"#);
+    run(s, r#"{"command":"para.borders","params":{"sides":{"bottom":{"style":"dotDash","width":1.5,"color":"FF0000"}}}}"#);
+    run(s, r#"{"command":"para.shading","params":{"color":"00FF00","paragraph":true}}"#);
+    let revision = call(s, "document.inspect", None)["result"].clone();
+    let now = lines(s);
+    assert_eq!(now["tabs"], json!([{"pos": 216.0, "align": "decimal", "leader": "middleDot"}]), "{now}");
+    assert_eq!(now["defaultTab"], json!(18.0), "{now}");
+    assert_eq!(now["borders"]["bottom"], json!({"style": "dotDash", "width": 1.5, "color": "FF0000"}), "{now}");
+    assert_eq!((now["borders"]["top"].clone(), now["shading"].clone()), (json!(null), json!("00FF00")), "{now}");
+    // Reading changes nothing: the one undo takes off the shading, the last thing done.
+    assert_eq!(call(s, "document.inspect", None)["result"], revision);
+    run(s, r#"{"command":"edit.undo"}"#);
+    assert_eq!(lines(s)["shading"], json!(null));
+    // SAFETY: from `loki_session_new`, freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn a_dialogs_commands_are_one_undo_step_or_none() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Totals"}}"#));
+    let lines = |s| call(s, "loki.paraLines", None)["result"].clone();
+    let text = |s| call(s, "document.inspect", None)["result"].to_string();
+    let both = r#"{"steps":[{"command":"para.borders","params":{"kind":"outside"}},{"command":"para.shading","params":{"color":"00FF00","paragraph":true}}]}"#;
+    let r = call(s, "loki.runSteps", Some(both));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(lines(s)["shading"], json!("00FF00"));
+    call(s, "engine.execute", Some(r#"{"command":"edit.undo"}"#));
+    assert_eq!((lines(s)["shading"].clone(), lines(s)["borders"]["top"].clone()), (json!(null), json!(null)));
+    assert!(text(s).contains("Totals"), "the typing before the dialog is a step of its own");
+    // A step that fails takes the ones before it back.
+    let r = call(
+        s,
+        "loki.runSteps",
+        Some(r#"{"steps":[{"command":"para.shading","params":{"color":"FF0000","paragraph":true}},{"command":"no.such"}]}"#),
+    );
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(lines(s)["shading"], json!(null));
+    // A first step that changes nothing doesn't join the next one onto the typing.
+    call(s, "loki.runSteps", Some(r#"{"steps":[{"command":"para.state"},{"command":"para.shading","params":{"color":"0000FF","paragraph":true}}]}"#));
+    call(s, "engine.execute", Some(r#"{"command":"edit.undo"}"#));
+    assert!(text(s).contains("Totals"));
+    for bad in [None, Some(r#"{"steps":5}"#), Some(r#"{"steps":[{}]}"#)] {
+        assert_eq!(call(s, "loki.runSteps", bad)["ok"], false, "{bad:?}");
+    }
     // SAFETY: from `loki_session_new`, freed once.
     unsafe { loki_session_free(s) };
 }

@@ -110,6 +110,7 @@ internal val APP_DIALOGS = setOf(
     "edit.find", "edit.advancedFind", "edit.findReplace", "edit.goto", "edit.findNext", "edit.findPrevious",
     "list.define", "para.defineBullet", "para.defineNumber", "para.setNumberingValue", "review.comments",
     "insert.symbol", "insert.dateTime", "insert.dropCap", "layout.columns",
+    "para.tabs", "para.borders", "view.zoom",
 )
 
 /** Commands that go through the system clipboard on the way. */

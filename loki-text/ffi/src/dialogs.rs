@@ -1,10 +1,13 @@
 //! What the app's own dialogs read before they open, where no engine command answers it: the
-//! paragraph's drop cap (`loki.dropCap`) and today's date in each Date and Time format
-//! (`loki.dateFormats`). Both only read, so no undo step and no dirty flag.
+//! paragraph's drop cap (`loki.dropCap`), its tab stops, borders and shading (`loki.paraLines`)
+//! and today's date in each Date and Time format (`loki.dateFormats`). All only read, so no undo
+//! step and no dirty flag. And how a dialog that needs several commands runs them as one undo step
+//! (`loki.runSteps`).
 
 use serde_json::{Value, json};
 use wordcraft_engine::Session;
 use wordcraft_engine::cmd::insert::{drop_cap_state, format_date_in};
+use wordcraft_mcp::{Backend, Headless};
 
 /// Date and time pictures (Word field pictures) offered for English (United States); the desktop
 /// front end's list (`ui-egui` `dialogs_insert::field::DATE_FORMATS`).
@@ -65,4 +68,63 @@ pub(crate) fn drop_cap(s: &Session) -> Value {
         "font": st.font,
         "textFont": st.text_font,
     })
+}
+
+/// The caret paragraph's tab stops, borders and shading, as the Tabs and the Borders and Shading
+/// dialogs open with them: `{tabs: [{pos, align, leader}], defaultTab, borders: {top, left, bottom,
+/// right, between: {style, width, color} | null}, shading: "RRGGBB" | null}`. The stops are the
+/// ones in force, the style's among them.
+pub(crate) fn para_lines(s: &Session) -> Value {
+    let rp = s.doc.para_at(&s.sel.focus).map(|p| s.doc.styles.resolve_para(&p.props));
+    let tabs: Vec<Value> = rp
+        .iter()
+        .flat_map(|r| &r.tabs)
+        .filter(|t| t.pos.is_finite())
+        .filter_map(|t| serde_json::to_value(t).ok())
+        .filter(|t| t["align"] != "clear")
+        .collect();
+    let borders = rp.as_ref().and_then(|r| r.borders).unwrap_or_default();
+    let side = |b: Option<_>| {
+        b.filter(wordcraft_doc::props::Border::is_visible)
+            .map(|b| json!({"style": b.style.ooxml(), "width": b.width, "color": b.color.map(|c| c.hex())}))
+    };
+    json!({
+        "tabs": tabs,
+        "defaultTab": s.doc.settings.default_tab,
+        "borders": {
+            "top": side(borders.top),
+            "left": side(borders.left),
+            "bottom": side(borders.bottom),
+            "right": side(borders.right),
+            "between": side(borders.between),
+        },
+        "shading": rp.and_then(|r| r.shading).map(|c| c.hex()),
+    })
+}
+
+/// Most commands one dialog runs.
+const MAX_STEPS: usize = 16;
+
+/// `{steps: [{command, params?}]}` run in order as one undo step. If one fails, the document, the
+/// selection and undo are put back as they were before the first, and its error is returned.
+pub(crate) fn run_steps(headless: &mut Headless, params: &Value) -> Result<Value, String> {
+    let steps = params.get("steps").and_then(Value::as_array).ok_or("steps is a list of {command, params}")?;
+    if steps.len() > MAX_STEPS {
+        return Err(format!("at most {MAX_STEPS} steps"));
+    }
+    headless.session.close_typing();
+    let snapshot = headless.session.edit_snapshot();
+    let start = headless.session.undo_mark();
+    for step in steps {
+        // Only a step this run made is joined: after commands that changed nothing, the next
+        // one starts its own rather than joining what the person did before.
+        if headless.session.undo_mark() != start {
+            headless.session.join_next_undo();
+        }
+        if let Err(e) = headless.call("engine.execute", step.clone()) {
+            headless.session.restore(snapshot);
+            return Err(e.to_string());
+        }
+    }
+    Ok(Value::Null)
 }

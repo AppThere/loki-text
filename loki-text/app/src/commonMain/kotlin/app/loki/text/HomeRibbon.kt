@@ -263,6 +263,11 @@ private fun BordersButton(env: RibbonEnv) {
                     )
                 }
             }
+            Text(
+                tr("Borders and Shading…"),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth().clickable { open = false; env.onRun("para.borders") }.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
             Text("Apply to", style = head, color = dim, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             for ((name, kind) in BORDER_KINDS) {
                 Text(
