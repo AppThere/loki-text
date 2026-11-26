@@ -31,6 +31,7 @@ internal class FileMenuItem(val id: String, val label: String, val shortcut: Str
 internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("file.new", "New", "Ctrl+N"),
     FileMenuItem("file.open", "Open…", "Ctrl+O"),
+    FileMenuItem("app.templates", "New from Template…"),
     null,
     FileMenuItem("file.save", "Save", "Ctrl+S"),
     FileMenuItem("file.saveAs", "Save As…"),
@@ -40,6 +41,7 @@ internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("file.exportPng", "Export Page as PNG…"),
     FileMenuItem("file.print", "Print…", "Ctrl+P"),
     null,
+    FileMenuItem("file.recover", "Recover Unsaved Documents…"),
     FileMenuItem("file.info", "Info"),
     FileMenuItem("file.properties", "Properties…"),
     FileMenuItem("file.options", "Options…"),
@@ -48,6 +50,12 @@ internal val FILE_MENU: List<FileMenuItem?> = listOf(
     FileMenuItem("app.theme.light", "Theme: Light"),
     FileMenuItem("app.theme.dark", "Theme: Dark"),
     null,
+    FileMenuItem("app.language", "Interface Language…"),
+    FileMenuItem("app.uiSize.small", "Interface Size: Small"),
+    FileMenuItem("app.uiSize.normal", "Interface Size: Normal"),
+    FileMenuItem("app.uiSize.large", "Interface Size: Large"),
+    FileMenuItem("app.uiSize.larger", "Interface Size: Larger"),
+    null,
     FileMenuItem("app.commands", "All Commands…"),
     FileMenuItem("app.about", "About $APP_NAME"),
 )
@@ -55,6 +63,7 @@ internal val FILE_MENU: List<FileMenuItem?> = listOf(
 /** The menu button in the top panel; [onRun] gets the chosen entry's id. */
 @Composable
 internal fun FileMenuButton(checked: String? = null, onRun: (String) -> Unit) {
+    val sizeChecked = "app.uiSize.${UiSize.name}"
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp)) {
         Icon(Lucide.Menu, contentDescription = "Menu", modifier = Modifier.size(18.dp))
@@ -62,7 +71,7 @@ internal fun FileMenuButton(checked: String? = null, onRun: (String) -> Unit) {
             for (item in FILE_MENU) {
                 if (item == null) { HorizontalDivider(); continue }
                 DropdownMenuItem(
-                    text = { Text((if (item.id == checked) "✓ " else "") + item.label) },
+                    text = { Text((if (item.id == checked || item.id == sizeChecked) "✓ " else "") + tr(item.label)) },
                     leadingIcon = { if (hasRibbonIcon(item.id)) RibbonIcon(item.id) },
                     trailingIcon = if (item.shortcut.isEmpty()) null else {
                         { Text(displayShortcut(item.shortcut), style = MaterialTheme.typography.labelSmall) }

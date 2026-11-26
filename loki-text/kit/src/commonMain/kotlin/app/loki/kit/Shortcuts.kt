@@ -128,3 +128,14 @@ fun Modifier.shortcutKeys(shortcuts: Map<Chord, String>, refocus: Any?, onRun: (
     return onFocusChanged { inside = it.hasFocus }.focusRequester(focus).focusable()
         .onKeyEvent { e -> chordOf(e)?.let { shortcuts[it] }?.let { onRun(it); true } ?: false }
 }
+
+/** [c] as the engine writes a shortcut (`Mod+Shift+K`, `Alt+F7`), or null for a key the engine has no name for. */
+fun chordText(c: Chord): String? {
+    val name = KEY_NAMES.entries.firstOrNull { it.value == c.key && it.key != "Esc" }?.key ?: return null
+    return buildList {
+        if (c.mod) add("Mod")
+        if (c.alt) add("Alt")
+        if (c.shift) add("Shift")
+        add(name)
+    }.joinToString("+")
+}

@@ -35,7 +35,17 @@ class PageRect(val page: Int, val x: Float, val y: Float, val w: Float, val h: F
  * The selected picture, shape or text box: its frame in page points before rotation, the turn about its
  * centre in degrees (clockwise), whether it floats (an inline one is placed by the text) and its [kind].
  */
-class ObjectFrame(val page: Int, val x: Float, val y: Float, val w: Float, val h: Float, val rotation: Float, val floating: Boolean, val kind: String)
+class ObjectFrame(
+    val page: Int, val x: Float, val y: Float, val w: Float, val h: Float, val rotation: Float, val floating: Boolean, val kind: String,
+    /** A connector's start and end in page points (a connector is dragged by its ends, not framed); null for anything else. */
+    val ends: List<Pair<Float, Float>>? = null,
+)
+
+/** What is under a page point (`loki.hit`): positions are the engine's own JSON, handed back to commands as they are. */
+class PointerHit(val pos: JsonElement?, val line: JsonElement?, val bar: JsonElement?, val textBox: JsonElement?)
+
+/** What a press at a page point grabs in a table (`loki.tableSpot`): [kind] is resize, handle, insertRow, insertColumn, column, row or cell. */
+class TableSpot(val kind: String?, val movable: Boolean)
 
 /** Where to draw the caret and selection; see `selection_geometry` in `ffi/src/lib.rs`. [obj] is set when the selection is one object, [hf] ("header" or "footer") when the caret is in one. */
 class SelectionGeometry(val caret: PageRect?, val rects: List<PageRect>, val obj: ObjectFrame? = null, val hf: String? = null)
@@ -58,6 +68,12 @@ fun parseSelectionGeometry(r: JsonObject): SelectionGeometry {
         else ObjectFrame(
             o["page"]?.jsonPrimitive?.intOrNull ?: 0, x, y, w, h, f("rotation") ?: 0f,
             o["floating"]?.jsonPrimitive?.booleanOrNull ?: false, o["kind"]?.jsonPrimitive?.contentOrNull ?: "object",
+            ((o["ends"] as? JsonArray)?.mapNotNull { e ->
+                val eo = e as? JsonObject
+                val ex = eo?.get("x")?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() }
+                val ey = eo?.get("y")?.jsonPrimitive?.floatOrNull?.takeIf { it.isFinite() }
+                if (ex != null && ey != null) ex to ey else null
+            })?.takeIf { it.size == 2 },
         )
     }
     val hf = r["hf"]?.jsonPrimitive?.contentOrNull?.takeIf { it == "header" || it == "footer" }
@@ -100,6 +116,19 @@ class Engine(private val native: NativeEngine = NativeEngine()) : EngineClient(N
 
     /** Caret and selection boxes, or empty geometry when the reply is malformed. */
     fun selection(): SelectionGeometry = parseSelectionGeometry(call("loki.selection").jsonObject)
+
+    /** The text position, line, selection-bar line and text box at a page point (points from the page's top-left). */
+    fun hit(page: Int, x: Float, y: Float): PointerHit {
+        val r = call("loki.hit", buildJsonObject { put("page", page); put("x", x); put("y", y) }) as? JsonObject
+        fun pos(k: String) = r?.get(k)?.takeIf { it is JsonObject }
+        return PointerHit(pos("pos"), pos("line"), pos("bar"), pos("textBox"))
+    }
+
+    /** What a press at a page point grabs in a table of the caret's story; [reach] is how near a border counts, in points. */
+    fun tableSpot(page: Int, x: Float, y: Float, reach: Float): TableSpot {
+        val r = call("loki.tableSpot", buildJsonObject { put("page", page); put("x", x); put("y", y); put("reach", reach) }) as? JsonObject
+        return TableSpot(r?.get("kind")?.jsonPrimitive?.contentOrNull, r?.get("movable")?.jsonPrimitive?.booleanOrNull ?: false)
+    }
 
     fun renderPage(page: Int, scale: Float): PageBitmap? = native.renderPage(page, scale)
 }

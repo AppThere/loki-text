@@ -56,7 +56,8 @@ fi
 # Gradle strips native libraries only with the NDK version it pins, so strip them here: the engine's
 # symbols add a third to the APK and nothing on a device reads them.
 STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-[ -x "$STRIP" ] || STRIP=$(command -v llvm-strip || true)
+# The NDK's tools are x86_64-only: on an aarch64 host (an ARM Chromebook) use the host's.
+"$STRIP" --version >/dev/null 2>&1 || STRIP=$(command -v llvm-strip || command -v llvm-strip-19 || command -v llvm-strip-18 || command -v llvm-strip-20 || true)
 if [ -n "$STRIP" ]; then
     for abi in $ABIS; do "$STRIP" --strip-unneeded "$OUT/$abi/libloki_ffi.so"; done
 else

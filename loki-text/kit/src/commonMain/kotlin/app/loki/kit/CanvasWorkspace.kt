@@ -281,7 +281,7 @@ fun DocumentTab(title: String, dirty: Boolean, modifier: Modifier = Modifier) {
 fun StatusBar(segments: List<String>, message: String, isError: Boolean, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().height(28.dp).padding(horizontal = 8.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         for (s in segments) Text(s, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        if (message.isNotEmpty()) Text(message, style = MaterialTheme.typography.labelMedium, maxLines = 1, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        if (message.isNotEmpty()) Text(message, modifier = Modifier.announces(), style = MaterialTheme.typography.labelMedium, maxLines = 1, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

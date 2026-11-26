@@ -98,6 +98,8 @@ pub fn command_state(sess: &mut Session) -> Value {
         "layout": layout_state(sess),
         "table": table,
         "picture": picture_state(sess),
+        // The selected SmartArt graphic (its layout, colours and outline of items), for its Text Pane; null when none is.
+        "smartArt": wordcraft_engine::cmd::smart_art::selected_smart_art(sess).map_or(Value::Null, |a| serde_json::to_value(&*a).unwrap_or(Value::Null)),
         "arrange": arrange_state(sess),
         "styleAt": style_at(sess),
         "contextual": contextual(sess),
@@ -123,6 +125,8 @@ fn layout_state(sess: &Session) -> Value {
         "indentLeft": para.as_ref().map_or(Value::Null, |r| num(r.indent_left)),
         "indentRight": para.as_ref().map_or(Value::Null, |r| num(r.indent_right)),
         "firstLine": para.as_ref().map_or(Value::Null, |r| num(r.indent_first)),
+        // The paragraph's tab stops for the ruler, in points from the text column's left edge.
+        "tabs": para.as_ref().map_or(Value::Null, |r| serde_json::to_value(&r.tabs).unwrap_or(Value::Null)),
         "spaceBefore": para.as_ref().map_or(Value::Null, |r| num(r.space_before)),
         "spaceAfter": para.as_ref().map_or(Value::Null, |r| num(r.space_after)),
         "lineSpacing": multiple.map_or(Value::Null, num),

@@ -30,6 +30,9 @@ private val PAGE_NUMBERS = listOf(
     "Bottom, left" to ("bottom" to "left"), "Bottom, centre" to ("bottom" to "center"), "Bottom, right" to ("bottom" to "right"),
 )
 
+/** Drop Cap's menu: label, and the position it sets; the last entry opens Drop Cap Options. */
+private val DROP_CAPS = listOf("None" to "none", "Dropped" to "dropped", "In margin" to "margin")
+
 /** Symbols people reach for most. */
 private val SYMBOLS = listOf("©", "®", "™", "°", "±", "×", "÷", "≠", "≤", "≥", "€", "£", "¥", "§", "¶", "•", "→", "←", "✓", "…")
 
@@ -75,8 +78,8 @@ fun InsertGroup(name: String, env: RibbonEnv) {
                     env.pick("insert.pageNumber", PAGE_NUMBERS, i) { (_, pa) -> buildJsonObject { put("position", pa.first); put("align", pa.second) } }
                 }
             }
-            "Symbols" -> IconMenuButton("insert.symbol", env.label("insert.symbol", "Symbol"), SYMBOLS, null, env.reason("insert.symbol"), ButtonSize.Big) { i ->
-                env.pick("insert.symbol", SYMBOLS, i) { ch -> buildJsonObject { put("char", ch) } }
+            "Symbols" -> IconMenuButton("insert.symbol", env.label("insert.symbol", "Symbol"), SYMBOLS + tr("More Symbols…"), null, env.reason("insert.symbol"), ButtonSize.Big) { i ->
+                if (i == SYMBOLS.size) env.onRun("insert.symbol") else env.pick("insert.symbol", SYMBOLS, i) { ch -> buildJsonObject { put("char", ch) } }
             }
             "Links" -> {
                 Ask(InsertDialog.Link, "Link")
@@ -85,8 +88,10 @@ fun InsertGroup(name: String, env: RibbonEnv) {
             }
             "Text" -> {
                 Ask(InsertDialog.TextBox, "Text Box")
-                Ask(InsertDialog.DateTime, "Date & Time")
-                Plain("insert.dropCap", "Drop Cap")
+                Plain("insert.dateTime", "Date & Time")
+                IconMenuButton("insert.dropCap", env.label("insert.dropCap", "Drop Cap"), DROP_CAPS.map { tr(it.first) } + tr("Drop Cap Options…"), null, env.reason("insert.dropCap"), ButtonSize.Labeled) { i ->
+                    if (i == DROP_CAPS.size) env.onRun("insert.dropCap") else env.pick("insert.dropCap", DROP_CAPS, i) { (_, at) -> buildJsonObject { put("position", at) } }
+                }
             }
             "Illustrations" -> {
                 Ask(InsertDialog.Picture, "Pictures")

@@ -34,6 +34,9 @@ fn hostile_arguments_are_errors_not_crashes() {
     let s = loki_session_new();
     assert_eq!(call(s, "engine.execute", Some("not json"))["ok"], false);
     assert_eq!(call(s, "no.such.method", None)["ok"], false);
+    // Dialog reads take whatever they are given: a language that isn't a string is English.
+    assert_eq!(call(s, "loki.dateFormats", Some(r#"{"language":5}"#))["result"]["language"], "en-US");
+    assert_eq!(call(s, "loki.dateFormats", Some(r#"{"language":"p"}"#))["result"]["language"], "en-US");
     // SAFETY: null arguments are part of the contract.
     unsafe {
         let out = loki_call(ptr::null_mut(), ptr::null(), ptr::null());
@@ -661,5 +664,213 @@ fn paste_special_lists_formats_then_pastes_the_chosen_one() {
     let words = call(s, "engine.execute", Some(r#"{"command":"review.wordCount","params":{}}"#))["result"]["words"].clone();
     // "Bold wordsBold words": pasted straight after the copied text.
     assert_eq!(words, 3, "the copy was pasted once more");
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn pointer_hit_tests_report_positions_and_table_spots() {
+    let s = loki_session_new();
+    let run = |cmd: &str, params: &str| call(s, "engine.execute", Some(&format!(r#"{{"command":"{cmd}","params":{params}}}"#)));
+    run("text.insert", r#"{"text":"Some text"}"#);
+    // A point on the first line of text: a position and its line; no table, no text box.
+    let r = call(s, "loki.hit", Some(r#"{"page":0,"x":80,"y":90}"#));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(r["result"]["pos"].is_object() && r["result"]["line"].is_object() && r["result"]["textBox"].is_null(), "{r}");
+    assert!(call(s, "loki.tableSpot", Some(r#"{"page":0,"x":80,"y":90}"#))["result"]["kind"].is_null());
+    // Draw a table, then a press on its left border grabs it for resizing.
+    run("table.draw", r#"{"page":0,"x0":100,"y0":100,"x1":400,"y1":220}"#);
+    let spot = |x: f64, y: f64| call(s, "loki.tableSpot", Some(&format!(r#"{{"page":0,"x":{x},"y":{y},"reach":4}}"#)))["result"].clone();
+    assert_eq!(spot(100.0, 160.0)["kind"], "resize", "{}", spot(100.0, 160.0));
+    assert_eq!(spot(90.0, 87.0)["kind"], "handle", "{}", spot(90.0, 87.0));
+    assert_eq!(spot(300.0, 150.0)["kind"], serde_json::Value::Null);
+    assert!(spot(600.0, 700.0)["kind"].is_null());
+    // Hostile input is an empty answer, not a crash.
+    for bad in [r#"{}"#, r#"{"page":"a","x":1,"y":1}"#, r#"{"page":99999999999,"x":1e300,"y":-1e300}"#, r#"{"page":0,"x":null,"y":1}"#] {
+        for m in ["loki.hit", "loki.tableSpot"] {
+            assert_eq!(call(s, m, Some(bad))["ok"], true, "{m} {bad}");
+        }
+    }
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn recovery_needs_a_folder_and_then_reports_ready() {
+    let s = loki_session_new();
+    // Without a folder the engine has no recovery, and says so rather than pretending.
+    assert_eq!(call(s, "loki.enableRecovery", Some("{}"))["ok"], false);
+    let state = call(s, "engine.execute", Some(r#"{"command":"file.recover"}"#));
+    assert_ne!(state["result"]["enabled"], true, "{state}");
+
+    let dir = std::env::temp_dir().join(format!("loki-ffi-recovery-{}", std::process::id()));
+    let params = json!({"dir": dir.to_str().unwrap()}).to_string();
+    assert_eq!(call(s, "loki.enableRecovery", Some(&params))["ok"], true);
+    // The worker scans the folder in the background; ticks take its answer in.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let ready = loop {
+        assert_eq!(call(s, "loki.recoveryTick", None)["ok"], true);
+        let r = call(s, "engine.execute", Some(r#"{"command":"file.recover"}"#));
+        if r["result"]["enabled"] == true {
+            assert!(r["result"]["documents"].as_array().is_some_and(|d| d.is_empty()), "{r}");
+            break true;
+        }
+        if std::time::Instant::now() > deadline {
+            break false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert_eq!(call(s, "loki.recoveryDiscard", None)["ok"], true);
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(ready, "recovery never became ready");
+}
+
+/// Polls `done` until it holds; the engine's recovery worker answers in the background.
+fn until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// Runs `file.recover` with `params` and returns the result.
+fn recover(s: *mut LokiSession, params: Value) -> Value {
+    let p = json!({"command": "file.recover", "params": params}).to_string();
+    call(s, "engine.execute", Some(&p))
+}
+
+#[test]
+fn unsaved_work_survives_the_session_and_can_be_restored() {
+    let dir = std::env::temp_dir().join(format!("loki-ffi-recovery-e2e-{}", std::process::id()));
+    let dir_params = json!({"dir": dir.to_str().unwrap()}).to_string();
+    // A first run types and is ticked until a copy is on disk, then ends without saving.
+    let a = loki_session_new();
+    assert_eq!(call(a, "loki.enableRecovery", Some(&dir_params))["ok"], true);
+    assert_eq!(call(a, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Unsaved words worth keeping"}}"#))["ok"], true);
+    let has_copy = || {
+        std::fs::read_dir(dir.join("recovery")).into_iter().chain(std::fs::read_dir(&dir)).flatten().flatten().any(|e| e.path().is_dir() || e.path().is_file())
+    };
+    until("the first copy", || {
+        call(a, "loki.recoveryTick", None);
+        has_copy()
+    });
+    // SAFETY: freed once. A dirty document keeps its copy through a clean close.
+    unsafe { loki_session_free(a) };
+
+    // The next run lists it and restores it into its blank document.
+    let b = loki_session_new();
+    assert_eq!(call(b, "loki.enableRecovery", Some(&dir_params))["ok"], true);
+    let mut id = String::new();
+    until("the copy to be listed", || {
+        call(b, "loki.recoveryTick", None);
+        let r = recover(b, json!({}));
+        match r["result"]["documents"].as_array().and_then(|d| d.first()) {
+            Some(d) => {
+                id = d["id"].as_str().unwrap_or_default().to_string();
+                true
+            }
+            None => false,
+        }
+    });
+    assert_eq!(recover(b, json!({"restore": id}))["ok"], true);
+    until("the copy to open", || {
+        call(b, "loki.recoveryTick", None);
+        call(b, "document.inspect", None)["result"].to_string().contains("Unsaved words worth keeping")
+    });
+    // SAFETY: freed once.
+    unsafe { loki_session_free(b) };
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_preview_is_taken_back_and_never_undoes_earlier_work() {
+    let s = loki_session_new();
+    assert_eq!(call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Kept"}}"#))["ok"], true);
+    let text = |s| call(s, "document.inspect", None)["result"].to_string();
+    // A preview that changes the document is in it until the next one or the end.
+    let p = call(s, "loki.preview", Some(r#"{"command":"text.insert","params":{"text":" shown"}}"#));
+    assert_eq!(p["result"]["applied"], true, "{p}");
+    assert!(text(s).contains("Kept shown"));
+    // The next preview starts from where the drag began.
+    call(s, "loki.preview", Some(r#"{"command":"text.insert","params":{"text":" again"}}"#));
+    assert!(text(s).contains("Kept again") && !text(s).contains("shown"));
+    assert_eq!(call(s, "loki.endPreview", None)["ok"], true);
+    assert!(text(s).contains("Kept") && !text(s).contains("again"));
+    // A preview that changes nothing leaves nothing to take back, so ending it can't undo the typing before it.
+    let none = call(s, "loki.preview", Some(r#"{"command":"view.ruler","params":{}}"#));
+    assert_eq!(none["result"]["applied"], false, "{none}");
+    call(s, "loki.endPreview", None);
+    call(s, "loki.endPreview", None);
+    assert!(text(s).contains("Kept"), "earlier work survives");
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn the_caret_paragraphs_tab_stops_reach_the_ruler() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"para.tabs","params":{"set":[{"pos":72,"align":"center"}]}}"#));
+    let st = call(s, "loki.commandState", None);
+    let tabs = &st["result"]["layout"]["tabs"];
+    assert_eq!(tabs[0]["pos"].as_f64(), Some(72.0), "{st}");
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn a_front_end_voice_holds_each_sentence_until_moved_on() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"One here. Two here."}}"#));
+    assert_eq!(call(s, "loki.speechVoice", Some(r#"{"own":true}"#))["ok"], true);
+    let r = call(s, "engine.execute", Some(r#"{"command":"review.readAloud"}"#));
+    assert_eq!(r["result"]["state"], "playing", "{r}");
+    assert_eq!(r["result"]["index"], 0);
+    // Nothing speaks and nothing moves on until the front end says so.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let st = call(s, "engine.execute", Some(r#"{"command":"readAloud.status"}"#));
+    assert_eq!(st["result"]["index"], 0, "{st}");
+    assert_eq!(st["result"]["error"], Value::Null, "{st}");
+    let n = call(s, "engine.execute", Some(r#"{"command":"readAloud.next"}"#));
+    assert_eq!(n["result"]["index"], 1, "{n}");
+    call(s, "engine.execute", Some(r#"{"command":"readAloud.stop"}"#));
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn a_selected_smart_art_reports_its_outline() {
+    let s = loki_session_new();
+    let r = call(s, "engine.execute", Some(r#"{"command":"insert.smartArt","params":{"layout":"process","items":["Plan",{"text":"Detail","level":1}]}}"#));
+    assert_eq!(r["ok"], true, "{r}");
+    let st = call(s, "loki.commandState", None);
+    let items = &st["result"]["smartArt"]["items"];
+    assert_eq!(items[0]["text"], "Plan", "{st}");
+    assert_eq!(items[1]["level"], 1, "{st}");
+    // SAFETY: freed once.
+    unsafe { loki_session_free(s) };
+}
+
+#[test]
+fn dialog_reads_follow_the_document() {
+    let s = loki_session_new();
+    call(s, "engine.execute", Some(r#"{"command":"text.insert","params":{"text":"Once upon a time"}}"#));
+    let cap = |s| call(s, "loki.dropCap", None)["result"].clone();
+    assert_eq!(cap(s)["position"], "none");
+    let r = call(s, "engine.execute", Some(r#"{"command":"insert.dropCap","params":{"position":"margin","lines":2,"distance":6}}"#));
+    assert_eq!(r["ok"], true, "{r}");
+    let now = cap(s);
+    assert_eq!((now["position"].clone(), now["lines"].clone()), (serde_json::json!("margin"), serde_json::json!(2)), "{now}");
+    assert!(now["distance"].as_f64().is_some_and(|d| d > 0.0), "{now}");
+    // Any Portuguese tag reads the Brazilian list, with month names of its own.
+    let pt = call(s, "loki.dateFormats", Some(r#"{"language":"pt-PT"}"#))["result"].clone();
+    let en = call(s, "loki.dateFormats", None)["result"].clone();
+    assert_eq!(pt["language"], "pt-BR");
+    let samples = |v: &Value| {
+        v["formats"].as_array().map(|a| a.iter().map(|f| f["sample"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()).unwrap_or_default()
+    };
+    assert!(samples(&en).iter().all(|x| !x.is_empty()) && !samples(&en).is_empty());
+    assert_ne!(samples(&pt), samples(&en));
+    // SAFETY: from `loki_session_new`, freed once.
     unsafe { loki_session_free(s) };
 }

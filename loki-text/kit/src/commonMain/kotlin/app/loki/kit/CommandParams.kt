@@ -21,6 +21,8 @@ class ParamField(
     val options: List<ParamOption>,
     /** What the doc says about the field, in its own words. */
     val hint: String,
+    /** The doc's type for it, without its notes (`[TabStop]`, `{"field": string, …}`): a structured editor reads it. */
+    val type: String = "",
 )
 
 /**
@@ -28,7 +30,13 @@ class ParamField(
  * (`{…} | {…}`): the form shows the first, nothing is required, and the raw JSON box takes the rest.
  * [notes] is what the doc says after the parameters (what the command returns, its rules).
  */
-class ParamForm(val fields: List<ParamField>, val alternatives: Boolean, val notes: String)
+class ParamForm(
+    val fields: List<ParamField>,
+    val alternatives: Boolean,
+    val notes: String,
+    /** Types the doc names and defines after the parameters (`where TabStop = {…}`), by name. */
+    val defs: Map<String, String> = emptyMap(),
+)
 
 /** The most text a hint or a note keeps; a params doc can run to pages. */
 private const val MAX_HINT = 240
@@ -44,7 +52,7 @@ private val NUMBER_WORDS = setOf(
 private fun isPathName(name: String) = name == "path" || name == "dir" || name.endsWith("Path") || name.endsWith("Folder")
 
 /** The index after the bracket that closes the one at [open], or -1; strings are skipped. */
-private fun matchingClose(s: String, open: Int): Int {
+internal fun matchingClose(s: String, open: Int): Int {
     var depth = 0
     var inString = false
     var i = open
@@ -63,7 +71,7 @@ private fun matchingClose(s: String, open: Int): Int {
 }
 
 /** [s] cut at each [sep] that is outside brackets and strings. */
-private fun splitTopLevel(s: String, sep: Char): List<String> {
+internal fun splitTopLevel(s: String, sep: Char): List<String> {
     val out = ArrayList<String>()
     var depth = 0
     var inString = false
@@ -194,7 +202,7 @@ private fun classify(name: String, optionalKey: Boolean, typeText: String): Para
         if (example != null) "for example ${example.text}" else "",
         if (default.isNotEmpty()) "default $default" else "",
     ).filter { it.isNotEmpty() }.joinToString("; ").take(MAX_HINT)
-    return ParamField(name, optional, kind, if (kind == FieldKind.Bool || example != null) emptyList() else named, hint)
+    return ParamField(name, optional, kind, if (kind == FieldKind.Bool || example != null) emptyList() else named, hint, core)
 }
 
 /** A key as the docs write one: `"name"` or `name`, then `?` when optional, then `: type` when the doc gives one. */
@@ -260,7 +268,18 @@ fun parseParamForm(doc: String): ParamForm {
     }
     // "(exactly one)" after keys that are each optional: none is required alone. Prose after `{}` is not about keys.
     if (fields.isNotEmpty() && (rest.contains("exactly one") || rest.startsWith("(one of"))) alternatives = alternatives || fields.all { it.optional }
-    return ParamForm(fields, alternatives, rest.take(MAX_NOTES))
+    return ParamForm(fields, alternatives, rest.take(MAX_NOTES), typeDefs(rest))
+}
+
+/** `Name = {…}` definitions in the prose after a params doc (`where TabStop = {"pos": pt, …}`). */
+internal fun typeDefs(text: String): Map<String, String> {
+    val out = LinkedHashMap<String, String>()
+    for (m in Regex("\\b([A-Z][A-Za-z0-9]*)\\s*=\\s*\\{").findAll(text)) {
+        val open = m.range.last
+        val close = matchingClose(text, open)
+        if (close > open) out.putIfAbsent(m.groupValues[1], text.substring(open, close + 1))
+    }
+    return out
 }
 
 /** `spaceBefore` as a person reads it: "Space before". */

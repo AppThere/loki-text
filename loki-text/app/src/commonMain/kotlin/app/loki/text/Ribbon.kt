@@ -123,6 +123,8 @@ class CommandState(
     val styleParagraph: String? = null,
     /** The character style of the text at the caret, if it has one. */
     val styleCharacter: String? = null,
+    /** The selected SmartArt graphic's outline, or null when none is selected. */
+    val smartArt: List<SmartArtItem>? = null,
 ) {
     companion object {
         val EMPTY = CommandState(emptyMap(), emptySet())
@@ -146,6 +148,8 @@ class LayoutState(
     val columns: String?,
     /** The first line's indent from the left indent (negative: hanging), in points. */
     val firstLine: Float? = null,
+    /** The paragraph's tab stops, in points from the text column's left edge, as the ruler shows them. */
+    val tabs: List<TabMark> = emptyList(),
 ) {
     companion object {
         val EMPTY = LayoutState(null, null, null, null, null, null, null, null, null)
@@ -160,6 +164,7 @@ fun parseLayoutState(e: JsonElement?): LayoutState {
         f("indentLeft"), f("indentRight"), f("spaceBefore"), f("spaceAfter"), f("lineSpacing"),
         (o["landscape"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull, t("paper"), t("margins"), t("columns"),
         firstLine = f("firstLine")?.takeIf { it.isFinite() },
+        tabs = parseTabMarks(o["tabs"]),
     )
 }
 
@@ -174,6 +179,7 @@ fun parseCommandState(state: JsonElement): CommandState {
     return CommandState(disabled, on, parseLayoutState(o["layout"]), contextual, parseTableState(o["table"]), parsePictureState(o["picture"]), parseArrangeState(o["arrange"]),
         styleParagraph = ((o["styleAt"] as? JsonObject)?.get("paragraph") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
         styleCharacter = ((o["styleAt"] as? JsonObject)?.get("character") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull,
+        smartArt = parseSmartArt(o["smartArt"]),
     )
 }
 
@@ -286,7 +292,11 @@ internal val GROUP_LAUNCHERS = mapOf(
  * with the groups the app adds and Home's groups in the order people expect.
  */
 fun parseRibbon(commands: JsonElement): List<RibbonTab> =
-    parseRibbon(commands, LOKI_PROFILE, ::hasCustomGroup).map { t -> RibbonTab(t.name, orderGroups(t.name, withAppGroups(t.name, t.groups))) }
+    parseRibbon(commands, LOKI_PROFILE, ::hasCustomGroup).map { t ->
+        // Item labels in the interface language; tab and group names stay English (the app goes by them) and are translated where drawn.
+        val groups = t.groups.map { g -> RibbonGroup(g.name, g.items.map { RibbonItem(it.id, tr(it.label), it.shortcut, it.needsInput) }) }
+        RibbonTab(t.name, orderGroups(t.name, withAppGroups(t.name, groups)))
+    }
 
 /** What the Styles gallery needs to draw one style's preview (from `styles.manage`). */
 class StylePreview(
@@ -369,9 +379,13 @@ fun CommandIconButton(
     disabledReason: String? = null,
     /** A toggle that is on, drawn pressed. */
     checked: Boolean = false,
+    /** A keytip of its own (the Quick Access Toolbar's numbers); null to be given one with the open tab's controls. */
+    keytip: String? = null,
     onClick: () -> Unit,
 ) {
     val name = if (shortcut.isEmpty()) label else "$label  (${displayShortcut(shortcut)})"
+    val keytip = rememberKeytip(label, disabledReason == null, onClick, fixed = keytip)
+    Box {
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(if (disabledReason == null) name else "$name — $disabledReason") } },
@@ -383,6 +397,8 @@ fun CommandIconButton(
             colors = IconButtonDefaults.iconButtonColors(containerColor = if (checked) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent),
             modifier = Modifier.size(32.dp),
         ) { RibbonIcon(id) }
+    }
+    KeytipBadge(keytip)
     }
 }
 
@@ -441,7 +457,13 @@ private fun RibbonTabRow(tabs: List<RibbonTab>, selectedIndex: Int, height: Dp, 
                 unselectedContentColor = Color.White.copy(alpha = 0.78f),
             ) {
                 Box(Modifier.height(height).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                    Text(t.name, style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(tr(t.name), style = MaterialTheme.typography.labelLarge, fontWeight = if (i == selectedIndex) FontWeight.Bold else FontWeight.Medium)
+                        // The tab's letters while keytips show them, beside its name: the strip is too low to hang them under it.
+                        LocalKeytips.current?.takeIf { it.phase == KeytipPhase.Tabs }?.tabCodes?.get(t.name)?.let { code ->
+                            Box(Modifier.padding(start = 4.dp)) { KeytipBadge(code, Alignment.Center) }
+                        }
+                    }
                 }
             }
         }
@@ -554,6 +576,7 @@ fun Ribbon(
     val inHeaderFooter = "Header & Footer" in state.contextual
     LaunchedEffect(inHeaderFooter) { if (inHeaderFooter) selectedName = "Header & Footer" }
     val tab = shown.firstOrNull { it.name == selectedName } ?: shown.first()
+    LocalKeytips.current?.let { k -> k.tabs = shown.map { it.name }; k.openTab = { name -> selectedName = name } }
     val previews = rememberPreviewFonts()
     val env = remember(tabs, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation) {
         RibbonEnv(tabs.flatMap { t -> t.groups.flatMap { it.items } }.associateBy { it.id }, state, format, fonts, previews, onRun, onRunWith, tableTool, onTableTool, equation)
@@ -634,7 +657,7 @@ fun Ribbon(
                     Box(Modifier.height(GROUP_NAME_HEIGHT)) {
                         // The room either side keeps the name clear of the corner control, so the group is never narrower than both.
                         Text(
-                            g.name.ifEmpty { tab.name }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1,
+                            tr(g.name.ifEmpty { tab.name }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1,
                             modifier = Modifier.align(Alignment.Center).padding(horizontal = if (launcher != null || hasCustomGroup(tab.name, g.name)) GROUP_NAME_HEIGHT + 2.dp else 0.dp),
                         )
                         // A group the app draws shows its chosen controls; this lists every command of the group by name.
@@ -698,7 +721,7 @@ private fun GroupPanelButton(tab: String, group: RibbonGroup, env: RibbonEnv) {
     var open by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { open = true }, contentPadding = PaddingValues(start = 8.dp, end = 2.dp), modifier = Modifier.height(32.dp)) {
-            Text(group.name.ifEmpty { tab }, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(tr(group.name.ifEmpty { tab }), style = MaterialTheme.typography.labelLarge, maxLines = 1)
             Icon(Lucide.ChevronDown, contentDescription = null, modifier = Modifier.size(16.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

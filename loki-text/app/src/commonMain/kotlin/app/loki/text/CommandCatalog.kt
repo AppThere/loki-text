@@ -17,20 +17,21 @@ internal val PARAM_DOCS = mapOf(
 
 /**
  * Commands a pointer drives: their parameters are page positions that only a press or a drag on
- * the page can supply, so a form for them would be noise. The page's own gestures issue the ones
- * in [POINTER_GESTURES]; the rest are gestures this front end doesn't have yet ([POINTER_GAPS]),
- * each with ribbon controls that reach the same result.
+ * the page can supply, so a form for them would be noise. The page's own gestures issue them
+ * (`PageMouse.kt`, `ObjectFrameOverlay.kt`): a press on a table's border, handle, insert button or
+ * selection area, a double-click on a border, dragging by units, Alt+drag, Ctrl+drag of an object, and
+ * dragging a connector's end. `shape.link` is not here: it has a ribbon button, which waits for a tap on
+ * the text box to link to.
  */
 internal val POINTER_GESTURES = setOf(
     "caret.set", "select.range", "select.objectAt", "select.grabEnd", "hf.enterAt",
     "table.draw", "table.eraser", "draw.stroke", "draw.erase",
+    "select.dragUnit", "select.column", "table.resizeDrag", "table.selectAt", "table.insertAt",
+    "table.moveDrag", "table.fitColumn", "arrange.copyTo", "shape.connect",
 )
 
 /** Mouse gestures of the desktop front end with no counterpart here yet; see `docs/parity.md`. */
-internal val POINTER_GAPS = setOf(
-    "select.dragUnit", "select.column", "table.resizeDrag", "table.selectAt", "table.insertAt",
-    "table.moveDrag", "table.fitColumn", "arrange.copyTo", "shape.link", "shape.connect",
-)
+internal val POINTER_GAPS = emptySet<String>()
 
 /**
  * Commands that only make sense as part of typing or of a control that tracks its own state, so
@@ -58,7 +59,14 @@ internal val QUIET_RESULTS = setOf(
     "view.state", "format.state", "para.state", "nav.headings", "nav.search", "file.save", "edit.copy", "edit.cut", "equation.gallery", "styles.manage",
     "edit.clipboardItems", "edit.clearClipboard", "review.comments", "review.changes", "arrange.selectionPane",
     "review.readAloud", "tools.recordMacro", "draw.addPen", "review.suggestions", "review.thesaurus",
+    // Its answer is the whole layout, which the ribbon now shows; with nothing given it opens its form instead.
+    "tools.customizeRibbon",
+    // These answer with the flag they set, which the window then shows; Split and New Window answer with the selection.
+    "view.fullScreen", "view.fullScreenView", "view.focus", "view.split", "view.newWindow",
 )
+
+/** View › Window commands this app carries out itself: the engine has one document per session and leaves windows to the front end. */
+internal val WINDOW_COMMANDS = setOf("view.switchWindows", "view.arrangeAll", "view.sideBySide", "view.syncScroll")
 
 /**
  * What Loki Text tells the shared kit about WordCraft's commands: the ribbon's tabs, the places
@@ -80,7 +88,9 @@ internal val LOKI_PROFILE = CommandProfile(
 )
 
 /** Every command of `engine.commands`, read with [LOKI_PROFILE]. */
-fun parseCommands(commands: JsonElement?): List<CommandInfo> = app.loki.kit.parseCommands(commands, LOKI_PROFILE)
+fun parseCommands(commands: JsonElement?): List<CommandInfo> =
+    // Labels in the interface language; ids, places and parameters as the engine gives them.
+    app.loki.kit.parseCommands(commands, LOKI_PROFILE).map { c -> CommandInfo(c.id, tr(c.label), c.location, c.params, c.shortcut, c.mutates, c.needsInput) }
 
 /** Should [c] appear in menus and the all-commands list? */
 internal fun isListed(c: CommandInfo): Boolean = LOKI_PROFILE.isListed(c)
@@ -99,6 +109,7 @@ internal val APP_DIALOGS = setOf(
     "format.fontDialog", "para.dialog", "layout.pageSetup", "styles.manage", "styles.create", "styles.modify",
     "edit.find", "edit.advancedFind", "edit.findReplace", "edit.goto", "edit.findNext", "edit.findPrevious",
     "list.define", "para.defineBullet", "para.defineNumber", "para.setNumberingValue", "review.comments",
+    "insert.symbol", "insert.dateTime", "insert.dropCap", "layout.columns",
 )
 
 /** Commands that go through the system clipboard on the way. */

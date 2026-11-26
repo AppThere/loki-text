@@ -45,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.focusable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,7 +100,14 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.PointerIcon
 import app.loki.text.engine.SelectionGeometry
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import app.loki.text.engine.Engine
+import androidx.compose.ui.input.pointer.isAltPressed
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import app.loki.text.engine.PointerHit
+import app.loki.text.engine.TableSpot
 import app.loki.kit.*
 import app.loki.text.engine.EngineException
 import kotlinx.coroutines.Dispatchers
@@ -135,6 +143,9 @@ expect fun rgbaToImageBitmap(width: Int, height: Int, rgba: ByteArray): ImageBit
 private val DESK_COLOR = Color(0xFFCCD6E3)
 private val DESK_COLOR_DARK = Color(0xFF10151B)
 
+/** Focus puts the document on black, so nothing but the page draws the eye. */
+private val FOCUS_DESK = Color(0xFF000000)
+
 /** The colour of the paper as shown: black for dark pages, the paper tint when one is set, else white. */
 private fun pagePaper(darkPages: Boolean, paper: String?): Color = if (darkPages) Color.Black else paperTint(paper)?.let { formColor(it) } ?: Color.White
 
@@ -158,6 +169,8 @@ private class Snapshot(
     /** The first page's size in points, for the zoom that fits it to the window. */
     val pagePt: Size? = null,
     val ruler: RulerInfo? = null,
+    /** The section's page, for the guides an object snaps to while it moves. */
+    val section: RulerInfo? = null,
 )
 
 /** What `review.wordCount` reports: for the selection when text is selected, else the document. [characters] includes spaces. */
@@ -249,6 +262,11 @@ private fun DrawScope.drawPenStroke(st: PenStroke, pxPerPt: Float, ink: Color) {
     else drawRect(ink, topLeft = Offset(minOf(a.x, b.x), minOf(a.y, b.y)), size = Size(kotlin.math.abs(b.x - a.x), kotlin.math.abs(b.y - a.y)), style = dash)
 }
 
+/** The line from a press to the pointer while a table border or move handle is dragged. */
+private fun DrawScope.drawMouseGuide(g: MouseGuide, ink: Color) {
+    drawLine(ink, g.from, g.to, strokeWidth = 1.5f * density, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * density, 4f * density)))
+}
+
 /** The ink being drawn: the pen's own colour and width for a pen, a dashed loop for the lasso. */
 private fun DrawScope.drawInkPreview(tool: InkTool, points: List<Offset>, pxPerPt: Float, accent: Color) {
     if (points.size < 2 || !tool.draws && tool.name != "lasso") return
@@ -322,7 +340,10 @@ expect fun clipboardText(): String?
 /** Puts [text] on the system clipboard. */
 expect fun setClipboardText(text: String)
 
-/** Quick-access buttons above the ribbon: command ids with no parameters. */
+/** The commands that change the ribbon, the toolbar or the keys: after one runs, the app reads them again. */
+internal val CUSTOMIZE_COMMANDS = setOf("tools.customizeRibbon", "tools.customizeKeyboard")
+
+/** Quick-access buttons above the ribbon until the engine's toolbar list has been read: command ids with no parameters. */
 private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple("Redo", "edit.redo", "Ctrl+Y"))
 
 /**
@@ -334,6 +355,31 @@ private val QUICK_ACCESS = listOf(Triple("Undo", "edit.undo", "Ctrl+Z"), Triple(
 fun App(
     closeRequest: Int = 0,
     onClose: () -> Unit = {},
+    initialPath: String? = null,
+    onNewWindow: ((String?) -> Unit)? = null,
+    titleBar: TitleBarConfig? = null,
+    menuBridge: MenuBridge? = null,
+    startScreen: Boolean = false,
+    windowHost: WindowHost? = null,
+) {
+    // Interface size (File menu): the controls, bars and dialogs drawn larger or smaller; the pages keep the screen's own
+    // density, since they have a zoom of their own.
+    val device = LocalDensity.current
+    val scale = UiSize.scale
+    // The interface language: the saved choice, or the system's; the kit's words follow it too.
+    LaunchedEffect(Unit) {
+        KitText.translate = ::tr
+        if (I18n.version == 0) I18n.load(AppSettings.value.language)
+    }
+    CompositionLocalProvider(LocalDensity provides Density(device.density * scale, device.fontScale)) {
+        AppContent(closeRequest, onClose, initialPath, onNewWindow, titleBar, menuBridge, startScreen, windowHost, device)
+    }
+}
+
+@Composable
+private fun AppContent(
+    closeRequest: Int = 0,
+    onClose: () -> Unit = {},
     /** A document to open at start (a new window opened for a file). */
     initialPath: String? = null,
     /** Opens a document (a path, or null for a new one) in a new window; null where the platform has only one. */
@@ -342,9 +388,26 @@ fun App(
     titleBar: TitleBarConfig? = null,
     /** Set where the platform has a menu bar (macOS): it shows this window's commands, so the in-window menu button goes. */
     menuBridge: MenuBridge? = null,
-) = AppTheme { themeChoice, setTheme, darkTheme ->
+    /** Show the start screen (recent documents, New, Open) first; false for a window opened for a document or a new one. */
+    startScreen: Boolean = false,
+    /** What the platform does with windows (full screen, switching, arranging); null where it does none of it. */
+    windowHost: WindowHost? = null,
+    /** The screen's own density, which the pages are drawn at whatever the interface size. */
+    pageDensity: Density,
+) = AppTheme(AppSettings.value.theme) { themeChoice, setThemeChoice, darkTheme ->
+    // The choice is kept for the next launch.
+    val setTheme: (String) -> Unit = { c -> setThemeChoice(c); AppSettings.update { it.copy(theme = c) } }
+    var start by remember { mutableStateOf(startScreen && initialPath == null) }
     val engine = remember { Engine() }
-    DisposableEffect(Unit) { onDispose { engine.close() } }
+    // The engine is freed after any call already under way: off the UI thread, behind the lock every engine call takes, so
+    // a render or recovery tick still running when the window closes never touches a freed session.
+    val engineLock = remember { Mutex() }
+    DisposableEffect(Unit) {
+        onDispose {
+            @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.Default) { engineLock.withLock { engine.close() } }
+        }
+    }
 
     var revision by remember { mutableStateOf(0) }
     var pages by remember { mutableStateOf<List<ImageBitmap>>(emptyList()) }
@@ -352,6 +415,15 @@ fun App(
     // Which commands can't run now and which toggles are on; refreshed with every render.
     var commandState by remember { mutableStateOf(CommandState.EMPTY) }
     var ribbon by remember { mutableStateOf<List<RibbonTab>>(emptyList()) }
+    // The person's ribbon layout and key changes, and a count that moves when they change them (see readCustomization).
+    var ribbonLayout by remember { mutableStateOf<RibbonLayout?>(null) }
+    var keyCustom by remember { mutableStateOf(KeyCustom(emptyList())) }
+    var customRevision by remember { mutableStateOf(0) }
+    // Read Aloud: the engine keeps the place and the state; the platform's voice speaks the sentence, and when it has
+    // finished the next one is asked for (or reading stops after the last).
+    val speech = remember { platformSpeech() }
+    var readAloud by remember { mutableStateOf<ReadAloudState?>(null) }
+    var readAloudRevision by remember { mutableStateOf(0) }
     // The selection's font, size and colours, for the Home tab's boxes; and the families to pick from.
     var formatState by remember { mutableStateOf(FormatState.EMPTY) }
     var fontFamilies by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -371,6 +443,13 @@ fun App(
     var fontDialog by remember { mutableStateOf<FontForm?>(null) }
     var paraDialog by remember { mutableStateOf<ParaForm?>(null) }
     var pageDialog by remember { mutableStateOf<PageForm?>(null) }
+    // Insert and Layout dialogs: Symbol (with the symbols used lately), Date and Time (with the last choice), Columns, Drop Cap.
+    var symbolDialog by remember { mutableStateOf(false) }
+    var recentSymbols by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dateDialog by remember { mutableStateOf(false) }
+    var dateChoice by remember { mutableStateOf(DateChoice(dateLanguageFor(I18n.current))) }
+    var columnsDialog by remember { mutableStateOf<ColumnsForm?>(null) }
+    var dropCapDialog by remember { mutableStateOf<DropCapForm?>(null) }
     // Manage Styles: open or not, its sort order, the list it shows, and the Modify / New dialogs over it.
     var manageStyles by remember { mutableStateOf(false) }
     // List dialogs: the multilevel definition (levels as read), and the three small ones.
@@ -401,16 +480,22 @@ fun App(
     var pagePt by remember { mutableStateOf<Size?>(null) }
     var viewportPx by remember { mutableStateOf(IntSize.Zero) }
     var rulerInfo by remember { mutableStateOf<RulerInfo?>(null) }
+    var sectionInfo by remember { mutableStateOf<RulerInfo?>(null) }
+    // Picture Format › Crop: the selected picture shows crop handles instead of its frame's.
+    var cropMode by remember { mutableStateOf(false) }
     // Every engine command, for the all-commands list and the command form; and what is open of each.
     var catalog by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
     val catalogById = remember(catalog) { catalog.associateBy { it.id } }
     var showCommands by remember { mutableStateOf<String?>(null) }
     var commandForm by remember { mutableStateOf<CommandInfo?>(null) }
+    // The command a set of starting values was read for, and the values: a form waits for its own.
+    var formInitial by remember { mutableStateOf<Pair<String, Map<String, String>>?>(null) }
     var commandResult by remember { mutableStateOf<Pair<CommandInfo, JsonElement?>?>(null) }
     // Panes the engine keeps no open flag for (Reviewing, Selection).
     var localPanes by remember { mutableStateOf<Set<PaneKind>>(emptySet()) }
     // The colour laid over the page (View › Screen Paper Color, and Read Mode's page colour), by the engine's name.
-    var paperColor by remember { mutableStateOf<String?>(null) }
+    var paperColor by remember { mutableStateOf(AppSettings.value.paperColor) }
+    LaunchedEffect(paperColor) { AppSettings.update { it.copy(paperColor = paperColor) } }
     // The stroke a Draw tab tool is making on a page, in pixels of that page.
     var inkPage by remember { mutableStateOf(-1) }
     val inkPoints = remember { mutableStateListOf<Offset>() }
@@ -420,9 +505,15 @@ fun App(
     // pages re-rendered sharply) when they lift.
     var pinch by remember { mutableStateOf(1f) }
     // The last tap on a page, to tell a double tap from two single ones.
-    var lastTapMark by remember { mutableStateOf<TimeSource.Monotonic.ValueTimeMark?>(null) }
-    var lastTapAt by remember { mutableStateOf(Offset.Zero) }
     val tapSlopPx = with(LocalDensity.current) { 40.dp.toPx() }
+    val tapCounter = remember { ClickCounter() }
+    val mouseCounter = remember { ClickCounter() }
+    // Set while the engine is asked about a mouse press: the press is a gesture of its own (a table's border, the selection
+    // bar), and the tap that follows must leave the caret alone. Plain, not state: read once the engine has answered.
+    val mousePressOwned = remember { booleanArrayOf(false) }
+    var mouseGuide by remember { mutableStateOf<MouseGuide?>(null) }
+    // Create Link was asked for: the next tap on a text box is the one the selected box's text continues in.
+    var linkMode by remember { mutableStateOf(false) }
     // The context menu (right-click, or long-press on a selection or a misspelled word), over a page.
     var ctxMenu by remember { mutableStateOf<ContextMenuData?>(null) }
     // The floating toolbar hides while a handle or the mouse is moving the selection.
@@ -431,14 +522,13 @@ fun App(
     // Where each page and the page area sit on screen, to place the floating toolbar over the selection.
     val pageOrigin = remember { mutableStateMapOf<Int, Offset>() }
     var viewportOrigin by remember { mutableStateOf(Offset.Zero) }
-    val screenDensity = LocalDensity.current.density
+    val screenDensity = pageDensity.density
     val scale = pagePxPerPt(zoom, screenDensity)
     // From the engine's word count; of the selection when there is one.
     var counts by remember { mutableStateOf<Counts?>(null) }
 
     // Engine calls block, so they run off the UI thread. The native session is not thread-safe,
     // so every call (edits, geometry, rendering) goes through this lock, in the order issued.
-    val engineLock = remember { Mutex() }
     suspend fun perform(requests: Boolean = true, block: Engine.() -> Unit) {
         status = try {
             val asked = engineLock.withLock {
@@ -468,6 +558,38 @@ fun App(
         }
         if (picked) revision++
         return picked
+    }
+
+    // What the mouse gestures of PageMouse.kt ask of the app: the engine, in order, and the state they show.
+    val mouseHost = object : MouseHost {
+        override suspend fun probe(p: MousePress): Probe = engineLock.withLock {
+            val got = withContext(Dispatchers.Default) {
+                runCatching { Probe(engine.tableSpot(p.page, p.x, p.y, p.reachPt), engine.hit(p.page, p.x, p.y)) }
+                    .getOrDefault(Probe(TableSpot(null, false), PointerHit(null, null, null, null)))
+            }
+            mousePressOwned[0] = ownsPress(got, p)
+            got
+        }
+        override suspend fun hit(page: Int, x: Float, y: Float): PointerHit =
+            engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.hit(page, x, y) }.getOrDefault(PointerHit(null, null, null, null)) } }
+        override suspend fun exec(id: String, params: JsonObject): JsonElement? {
+            var out: JsonElement? = null
+            perform { out = execute(id, params) }
+            return out
+        }
+        override suspend fun setCaret(page: Int, at: Offset, pxPerPt: Float, extend: Boolean) = perform { setCaret(page, at, pxPerPt, extend) }
+        override fun guide(page: Int, from: Offset?, to: Offset?) { mouseGuide = if (from != null && to != null) MouseGuide(page, from, to) else null }
+        override fun selecting(on: Boolean) { mouseSelecting = on }
+        override suspend fun preview(id: String, params: JsonObject) {
+            engineLock.withLock {
+                withContext(Dispatchers.Default) { runCatching { engine.call("loki.preview", buildJsonObject { put("command", id); put("params", params) }) } }
+            }
+            revision++
+        }
+        override suspend fun endPreview() {
+            engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.endPreview") } } }
+            revision++
+        }
     }
 
     // Enters the header or footer under a double tap (Print Layout only), and leaves it again from the body.
@@ -501,6 +623,8 @@ fun App(
     // and Paste passes its text in (the engine pastes its own richer copy when the text matches).
     var lastCopied by remember { mutableStateOf<String?>(null) }
     suspend fun runCommand(command: String, params: JsonObject = JsonObject(emptyMap())) {
+        if (command in CUSTOMIZE_COMMANDS) customRevision++
+        if (isReadAloud(command)) readAloudRevision++
         if (command == "format.fontDialog") {
             // The engine only asks a UI to open it; this UI shows its own dialog from the selection's formatting.
             val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("format.state") as? JsonObject }.getOrNull() } }
@@ -547,6 +671,19 @@ fun App(
         if (command == "layout.pageSetup" && params["section"] == null) {
             val section = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("layout.section") as? JsonObject }.getOrNull() } }
             pageDialog = pageFormFrom(section ?: JsonObject(emptyMap()))
+            return
+        }
+        // Insert › Symbol, Date & Time and Drop Cap, and Layout › Columns, with nothing chosen yet: this app's dialogs.
+        if (bare && command == "insert.symbol") { symbolDialog = true; return }
+        if (bare && command == "insert.dateTime") { dateDialog = true; return }
+        if (bare && command == "layout.columns") {
+            val section = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.execute("layout.section") as? JsonObject }.getOrNull() } }
+            columnsDialog = columnsFormFrom(section ?: JsonObject(emptyMap()), selected = selection.rects.isNotEmpty())
+            return
+        }
+        if (bare && command == "insert.dropCap") {
+            val state = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.dropCap") as? JsonObject }.getOrNull() } }
+            dropCapDialog = dropCapFormFrom(state ?: JsonObject(emptyMap()))
             return
         }
         if (command == "para.dialog") {
@@ -599,6 +736,8 @@ fun App(
     // worth reading is shown; a file the command wrote is handed to the place the person picked.
     suspend fun executeFromUi(c: CommandInfo, params: JsonObject, showResult: Boolean = true): String? {
         var result: JsonElement? = null
+        if (c.id in CUSTOMIZE_COMMANDS) customRevision++
+        if (isReadAloud(c.id)) readAloudRevision++
         perform {
             result = execute(c.id, params)
             if (c.id == "view.paperColor") paperColor = (result as? JsonObject)?.get("paperColor")?.jsonPrimitive?.contentOrNull
@@ -611,12 +750,89 @@ fun App(
         return null
     }
 
+    // Local recovery: the engine keeps a copy of unsaved work in the app's folder and is ticked now and then to do it.
+    var recovery by remember { mutableStateOf(RecoveryState.NONE) }
+    var recoverDialog by remember { mutableStateOf(false) }
+    var languageDialog by remember { mutableStateOf(false) }
+    // View › Split: the page area twice, one above the other (the engine asks for it with a `toggle` request).
+    var split by remember { mutableStateOf(false) }
+    // View Side by Side: the window this one is beside, and whether they scroll together; Switch Windows' list.
+    var sideBySideWith by remember { mutableStateOf<Int?>(null) }
+    var syncScroll by remember { mutableStateOf(false) }
+    var switchWindows by remember { mutableStateOf<List<OpenWindow>?>(null) }
+    var pickSideBySide by remember { mutableStateOf<List<OpenWindow>?>(null) }
+    var keyboard by remember { mutableStateOf<KeyCustom?>(null) }
+    // Full Screen, Focus and Full Screen view fill the screen; the platform does that to the window.
+    val fullScreenWanted = wantsFullScreen(viewState)
+    LaunchedEffect(fullScreenWanted) { windowHost?.setFullScreen(fullScreenWanted) }
+    LaunchedEffect(selection.obj?.kind, selection.obj?.page) { if (selection.obj?.kind != "image") cropMode = false }
+    LaunchedEffect(docPath, unsaved) { windowHost?.setTitle(windowTitle(docPath, unsaved)) }
+    var recipients by remember { mutableStateOf<RecipientTable?>(null) }
+    var recipientsError by remember { mutableStateOf<String?>(null) }
+    // The current values a command's form starts with: read with the command's reader (see FORM_DEFAULTS), never by running the command.
+    LaunchedEffect(commandForm) {
+        val c = commandForm ?: return@LaunchedEffect
+        val source = FORM_DEFAULTS[c.id]
+        formInitial = c.id to if (source == null) emptyMap() else engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val reported = runCatching { engine.execute(source.reader) }.getOrNull()
+                runCatching { engine.uiRequests() }
+                formDefaults(source, reported)
+            }
+        }
+    }
+    var printDialog by remember { mutableStateOf(false) }
+    var infoDialog by remember { mutableStateOf(false) }
+    // File › Options: the page asked for, once open, and the settings read when it opens.
+    var optionsPane by remember { mutableStateOf<OptionsPane?>(null) }
+    var optionsForm by remember { mutableStateOf<OptionsForm?>(null) }
+    var optionsError by remember { mutableStateOf<String?>(null) }
+    var docInfo by remember { mutableStateOf<DocInfo?>(null) }
+    var infoError by remember { mutableStateOf<String?>(null) }
+    // The copy being restored: it loads in the background and opens on a tick, after which it is no longer listed.
+    var restoring by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val dir = profileDir()?.let { "$it/recovery" } ?: return@LaunchedEffect
+        engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.enableRecovery", buildJsonObject { put("dir", dir) }) } } }
+        var refreshed = false
+        while (true) {
+            val state = engineLock.withLock {
+                withContext(Dispatchers.Default) {
+                    runCatching { engine.call("loki.recoveryTick") }
+                    if (!refreshed) refreshed = runCatching { engine.execute("file.recover", buildJsonObject { put("refresh", true) }) }.isSuccess
+                    val r = runCatching { engine.execute("file.recover") }.getOrNull()
+                    runCatching { engine.uiRequests() }
+                    parseRecoveryState(r)
+                }
+            }
+            recovery = state
+            val id = restoring
+            if (id != null && !state.busy && state.copies.none { it.id == id }) {
+                restoring = null
+                start = false
+                revision++
+                stylesRevision++
+            }
+            kotlinx.coroutines.delay(2000)
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (installDocumentFonts(engine, engineLock)) revision++
-        if (initialPath != null) {
+        val fromTemplate = templateOfRequest(initialPath)
+        if (fromTemplate != null) {
+            val (id, params) = fromTemplate.command()
+            perform { execute(id, params) }
+            stylesRevision++
+        } else if (initialPath != null) {
             perform { execute("file.open", buildJsonObject { put("path", initialPath) }) }
             stylesRevision++
         }
+    }
+    // The font families to pick from: the bundled ones, the document's, and those installed on the system (which the font
+    // database scans as it needs them); read again when asked to load the system's.
+    var fontsRevision by remember { mutableStateOf(0) }
+    LaunchedEffect(fontsRevision) {
         fontFamilies = engineLock.withLock {
             withContext(Dispatchers.Default) {
                 runCatching { parseFontFamilies(engine.execute("font.list", buildJsonObject { put("all", true) })) }.getOrDefault(emptyList())
@@ -626,12 +842,63 @@ fun App(
 
     // Every engine command's keyboard shortcuts, by chord.
     var shortcuts by remember { mutableStateOf<Map<Chord, String>>(emptyMap()) }
-    LaunchedEffect(Unit) {
+    // Read again when the interface language changes, for the labels.
+    LaunchedEffect(I18n.version) {
         val commands = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.commands() }.getOrNull() } }
         ribbon = commands?.let { runCatching { parseRibbon(it) }.getOrNull() }.orEmpty()
         catalog = runCatching { parseCommands(commands) }.getOrDefault(emptyList())
         shortcuts = commands?.let { runCatching { parseShortcuts(it) }.getOrNull() }.orEmpty()
     }
+
+    // The person's ribbon layout and key changes (Customize Ribbon, Customize Keyboard, the Quick Access Toolbar), as the
+    // engine holds them. They are read after start-up and after each change, kept in the settings file, and put back
+    // into a fresh engine at start-up, since the engine itself forgets them.
+    // The layout a fresh engine starts with, so an unchanged one isn't saved (and doesn't pin today's tabs).
+    var defaultLayout by remember { mutableStateOf<RibbonLayout?>(null) }
+    suspend fun readCustomization(save: Boolean) {
+        val (layout, keys) = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val l = runCatching { parseRibbonLayout(engine.execute("tools.customizeRibbon")) }.getOrNull()
+                val k = runCatching { parseKeyCustom(engine.execute("tools.customizeKeyboard")) }.getOrDefault(KeyCustom(emptyList()))
+                // Both also ask a front end to open their dialog; reading them is not asking for that.
+                runCatching { engine.uiRequests() }
+                l to k
+            }
+        }
+        ribbonLayout = layout
+        keyCustom = keys
+        if (save) AppSettings.update { s ->
+            s.copy(
+                ribbon = layout?.takeIf { it != defaultLayout }?.toJson(),
+                keys = keys.takeIf { it.commands.isNotEmpty() }?.toJson(),
+            )
+        }
+    }
+    LaunchedEffect(catalog.isNotEmpty()) {
+        if (catalog.isEmpty()) return@LaunchedEffect
+        defaultLayout = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                runCatching { parseRibbonLayout(engine.execute("tools.customizeRibbon")) }.getOrNull().also { runCatching { engine.uiRequests() } }
+            }
+        }
+        val saved = AppSettings.value
+        engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                saved.ribbon?.let { layout -> runCatching { engine.execute("tools.customizeRibbon", buildJsonObject { put("layout", layout) }) } }
+                saved.keys?.let { keys ->
+                    for (op in keyReplay(parseKeyCustom(JsonObject(mapOf("custom" to keys))), builtInKeys(catalog))) {
+                        runCatching { engine.execute("tools.customizeKeyboard", op) }
+                    }
+                }
+                runCatching { engine.uiRequests() }
+            }
+        }
+        // Not saved here: what was just put back is what the file says.
+        readCustomization(save = false)
+    }
+    LaunchedEffect(customRevision) { if (customRevision > 0) readCustomization(save = true) }
+    val shownRibbon = remember(ribbon, ribbonLayout, catalogById) { ribbonLayout?.let { applyRibbonLayout(ribbon, it, catalogById) } ?: ribbon }
+    val keyMap = remember(shortcuts, keyCustom) { applyKeyOverrides(shortcuts, keyCustom) }
 
     // The Equation tab's structures and symbols don't change while the app runs.
     var equationGallery by remember { mutableStateOf(EquationGallery.EMPTY) }
@@ -682,7 +949,8 @@ fun App(
                 val info = runCatching { engine.execute("file.info") as? JsonObject }.getOrNull()
                 val dirty = info?.get("dirty")?.jsonPrimitive?.booleanOrNull == true
                 val path = info?.get("path")?.jsonPrimitive?.contentOrNull
-                val ruler = if (view.ruler && !view.flat) runCatching { parseRulerInfo(engine.execute("layout.section")) }.getOrNull() else null
+                val section = if (!view.flat) runCatching { parseRulerInfo(engine.execute("layout.section")) }.getOrNull() else null
+                val ruler = section.takeIf { view.ruler }
                 val first = engine.renderPage(0, renderScale) ?: return@withContext Snapshot(sel, emptyList(), view, z, counts, cmdState, dirty, fmt)
                 // Cap the page count so a huge document can't exhaust memory with bitmaps.
                 // Bitmap size grows with the square of the zoom, so the page cap shrinks accordingly.
@@ -690,7 +958,7 @@ fun App(
                 val rest = (1 until minOf(first.pages, cap)).mapNotNull { engine.renderPage(it, renderScale) }
                 Snapshot(
                     sel, (listOf(first) + rest).map { rgbaToImageBitmap(it.width, it.height, it.rgba) }, view, z, counts, cmdState, dirty, fmt, path,
-                    pagePt = Size(first.width / renderScale, first.height / renderScale), ruler = ruler,
+                    pagePt = Size(first.width / renderScale, first.height / renderScale), ruler = ruler, section = section,
                 )
             }
         }
@@ -700,16 +968,41 @@ fun App(
         if (pinchPending) { pinch = 1f; pinchPending = false }
         snap.pagePt?.let { pagePt = it }
         rulerInfo = snap.ruler
+        sectionInfo = snap.section
         counts = snap.counts
         commandState = snap.commands
         formatState = snap.format
         unsaved = snap.dirty
         docPath = snap.path
+        snap.path?.let { p -> if (AppSettings.value.recents.firstOrNull()?.path != p) AppSettings.update { it.withRecent(p, nowMillis(), documentSource(p)) } }
         pages = snap.pages
     }
 
     var showAbout by remember { mutableStateOf(false) }
+    // Bumped when the recent list changes so the start screen redraws.
+    var recentsRevision by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+    // With a voice of its own the app reads the sentences, and the engine's player only keeps the place.
+    LaunchedEffect(Unit) {
+        if (speech != null) engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.speechVoice", buildJsonObject { put("own", true) }) } } }
+    }
+    LaunchedEffect(readAloudRevision) {
+        if (readAloudRevision == 0) return@LaunchedEffect
+        readAloud = engineLock.withLock {
+            withContext(Dispatchers.Default) { runCatching { parseReadAloud(engine.execute("readAloud.status")) }.getOrNull() }
+        }
+    }
+    val reading = readAloud
+    LaunchedEffect(reading?.playing, reading?.index, reading?.text, reading?.rate) {
+        val r = reading
+        // Without a voice of its own the engine reads (on the desktop); the bar still shows where it is.
+        if (speech == null) return@LaunchedEffect
+        if (r == null || !r.playing || r.text == null) { speech.stop(); return@LaunchedEffect }
+        // The sentence being read is selected, so it shows and the page follows it.
+        if (r.start != null && r.end != null) perform(requests = false) { execute("select.range", buildJsonObject { put("anchor", r.start); put("focus", r.end) }) }
+        speech.speak(r.text, r.rate) { scope.launch { runCommand(if (r.last) "readAloud.stop" else "readAloud.next") } }
+    }
+    DisposableEffect(Unit) { onDispose { speech?.stop() } }
 
     // Save, or Save As for a document that has no file yet. True when the document was written
     // (and published, on platforms that need it); false when the user cancelled or it failed.
@@ -736,9 +1029,158 @@ fun App(
     // A document is blank when nothing was typed and it has no file; opening another then reuses this window.
     fun isBlank() = docPath == null && !unsaved && (counts?.characters ?: 0) == 0
 
+    // The gallery over the document (File › New from Template), and the personal templates it and the start screen list.
+    var templateDialog by remember { mutableStateOf(false) }
+    var personalTemplates by remember { mutableStateOf<List<TemplateChoice.File>>(emptyList()) }
+    LaunchedEffect(start, templateDialog) {
+        if (!start && !templateDialog) return@LaunchedEffect
+        personalTemplates = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val listed = runCatching { engine.execute("file.listTemplates") }.getOrNull()
+                runCatching { engine.uiRequests() }
+                parsePersonalTemplates(listed)
+            }
+        }
+    }
+
+    // A new document from [t]: here when this window is blank, else in a window of its own where there are windows.
+    fun newFromTemplate(t: TemplateChoice) {
+        templateDialog = false
+        start = false
+        if (onNewWindow != null && !isBlank()) { onNewWindow(t.asRequest()); return }
+        guarded {
+            scope.launch {
+                val (id, params) = t.command()
+                perform { execute(id, params) }
+                stylesRevision++
+            }
+        }
+    }
+
+    // Asks for a template file, then makes a document from it.
+    fun browseTemplate() {
+        scope.launch {
+            val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
+            newFromTemplate(TemplateChoice.File(path, path.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.')))
+        }
+    }
+
     suspend fun openHere(path: String) {
         perform { execute("file.open", buildJsonObject { put("path", path) }) }
         stylesRevision++
+    }
+
+    fun restoreCopy(c: RecoveryCopy) {
+        scope.launch {
+            perform(requests = false) { execute("file.recover", buildJsonObject { put("restore", c.id) }) }
+            if (status.isEmpty()) restoring = c.id
+        }
+    }
+    fun discardCopy(c: RecoveryCopy) {
+        scope.launch {
+            perform(requests = false) { execute("file.recover", buildJsonObject { put("discard", c.id) }) }
+            recovery = recovery.copy(copies = recovery.copies.filter { it.id != c.id })
+        }
+    }
+
+    // The engine lays the pages out and writes the PDF with the options chosen; the platform prints it.
+    suspend fun printWith(options: PrintOptions) {
+        val path = withContext(Dispatchers.Default) { printJobPath() }
+        perform(requests = false) { execute("file.printPdf", options.toParams(path)) }
+        if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
+    }
+
+    // File › Info (and Properties): the document's facts and properties, read when the dialog opens.
+    LaunchedEffect(infoDialog, revision) {
+        if (!infoDialog) return@LaunchedEffect
+        infoError = null
+        docInfo = engineLock.withLock { withContext(Dispatchers.Default) { parseDocInfo(runCatching { engine.execute("file.info") }.getOrNull()) } }
+    }
+    LaunchedEffect(optionsPane) {
+        if (optionsPane == null) return@LaunchedEffect
+        optionsError = null
+        optionsForm = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val r = runCatching { engine.execute("file.options") }.getOrNull()
+                runCatching { engine.uiRequests() }
+                parseOptions(r)
+            }
+        }
+        if (optionsForm == null) optionsError = "The settings could not be read"
+    }
+    fun applyOptions(changes: JsonObject) {
+        scope.launch {
+            perform(requests = false) { execute("file.options", changes) }
+            if (status.isNotEmpty()) { optionsError = status; status = ""; return@launch }
+            optionsPane = null; optionsForm = null
+        }
+    }
+    fun saveProperties(changes: JsonObject) {
+        scope.launch {
+            perform(requests = false) { execute("file.properties", changes) }
+            if (status.isNotEmpty()) { infoError = status; status = ""; return@launch }
+            infoDialog = false
+        }
+    }
+
+    // Mailings › Edit Recipient List: read the list (the command reports it when given nothing), edit it as a table, write it back.
+    suspend fun openRecipients() {
+        val table = engineLock.withLock {
+            withContext(Dispatchers.Default) {
+                val r = runCatching { engine.execute("mailings.editRecipients") }
+                runCatching { engine.uiRequests() }
+                r.map { parseRecipients(it) }
+            }
+        }
+        table.onFailure { status = it.message ?: "The recipient list could not be read"; return }
+        recipients = table.getOrNull() ?: RecipientTable(emptyList(), emptyList())
+        recipientsError = null
+    }
+    fun saveRecipients(t: RecipientTable) {
+        scope.launch {
+            perform(requests = false) { execute("mailings.editRecipients", t.toParams()) }
+            if (status.isNotEmpty()) { recipientsError = status; status = ""; return@launch }
+            recipients = null
+        }
+    }
+
+    // Customize Keyboard: what the person changed, read (the command reports it, and its request to open a dialog is
+    // dropped, since this is that dialog), then changed a step at a time.
+    suspend fun keyboardCall(params: JsonObject): Result<KeyCustom> {
+        var r: JsonElement? = null
+        perform(requests = false) { r = execute("tools.customizeKeyboard", params) }
+        if (status.isNotEmpty()) return Result.failure(IllegalStateException(status.also { status = "" }))
+        if (params.isNotEmpty()) customRevision++
+        return Result.success(parseKeyCustom(r))
+    }
+    suspend fun openKeyboard() {
+        keyboardCall(JsonObject(emptyMap())).onSuccess { keyboard = it }.onFailure { status = it.message.orEmpty() }
+    }
+
+    // View › Window: the engine has one document per session and leaves windows to the front end.
+    fun startSideBySide(other: Int) {
+        val why = windowHost?.sideBySide(other, true)
+        if (why != null) status = why else { sideBySideWith = other; status = "" }
+    }
+    fun runWindowCommand(id: String) {
+        val host = windowHost
+        val others = host?.others().orEmpty()
+        when (id) {
+            "view.switchWindows" -> if (others.isEmpty()) status = "This is the only open window" else switchWindows = others
+            "view.arrangeAll" -> status = when {
+                host == null -> "This device shows one window at a time"
+                others.isEmpty() -> "This is the only open window"
+                else -> host.arrangeAll() ?: ""
+            }
+            "view.sideBySide" -> when {
+                sideBySideWith != null -> { host?.sideBySide(sideBySideWith!!, false); sideBySideWith = null; syncScroll = false; host?.setSyncScroll(false) }
+                host == null -> status = "This device shows one window at a time"
+                others.isEmpty() -> status = "Open another document to compare it with this one"
+                others.size == 1 -> startSideBySide(others.single().id)
+                else -> pickSideBySide = others
+            }
+            "view.syncScroll" -> if (sideBySideWith == null) status = "Turn on View Side by Side first" else { syncScroll = !syncScroll; host?.setSyncScroll(syncScroll) }
+        }
     }
 
     // Runs a command picked from the ribbon, a menu or the all-commands list. One the app has its own
@@ -747,8 +1189,17 @@ fun App(
     suspend fun runFromUi(id: String) {
         val c = catalogById[id]
         when {
+            // Create Link: the text box to continue in is the next one tapped.
+            id == CROP_MODE -> cropMode = !cropMode && selection.obj?.kind == "image"
+            id == "file.recover" -> recoverDialog = true
+            id in WINDOW_COMMANDS -> runWindowCommand(id)
+            id == "mailings.editRecipients" -> openRecipients()
+            id == "tools.customizeKeyboard" -> openKeyboard()
+            id == "file.info" || id == "file.properties" -> infoDialog = true
+            id == "file.options" -> optionsPane = OptionsPane.General
+            id == "shape.link" -> { linkMode = true; status = "Tap the empty text box the text should continue in" }
             c == null || id in APP_DIALOGS || id in LOCAL_PANES || id in CLIPBOARD_COMMANDS || id == "tools.search" -> runCommand(id)
-            c.needsInput -> commandForm = c
+            c.needsInput || (FORM_DEFAULTS[id]?.opensForm == true && c.hasParams) -> commandForm = c
             !c.mutates -> executeFromUi(c, JsonObject(emptyMap()))?.let { status = it }
             else -> runCommand(id)
         }
@@ -778,15 +1229,14 @@ fun App(
                 perform { execute("file.saveAs", buildJsonObject { put("path", path) }) }
                 if (status.isEmpty()) withContext(Dispatchers.Default) { runCatching { publishFile(path) } }
             }
-            "file.print" -> {
-                // The engine lays the pages out and writes the PDF; the platform prints it.
-                val path = withContext(Dispatchers.Default) { printJobPath() }
-                perform { execute("file.printPdf", buildJsonObject { put("path", path) }) }
-                if (status.isEmpty()) status = withContext(Dispatchers.Default) { printPdf(path, "$APP_NAME document") } ?: ""
-            }
+            // The Print dialog collects the pages and options; printing itself is [printWith].
+            "file.print" -> printDialog = true
             "app.about" -> showAbout = true
+            "app.templates" -> templateDialog = true
             "app.commands" -> showCommands = ""
             "app.theme.system", "app.theme.light", "app.theme.dark" -> setTheme(id.substringAfterLast('.'))
+            "app.uiSize.small", "app.uiSize.normal", "app.uiSize.large", "app.uiSize.larger" -> UiSize.set(id.substringAfterLast('.'))
+            "app.language" -> languageDialog = true
             in EXPORTS -> exportTo(id)
             else -> runFromUi(id)
         }
@@ -798,15 +1248,20 @@ fun App(
         fun text(k: String) = (r[k] as? JsonPrimitive)?.contentOrNull
         if ((r["close"] as? JsonPrimitive)?.booleanOrNull == true) { guarded(onClose); return }
         text("interfaceTheme")?.let { setTheme(it); return }
+        if (text("toggle") == "split") { split = !split; return }
         if (text("toggle") == "interfaceTheme") { setTheme(if (darkTheme) "light" else "dark"); return }
         when (val open = text("open") ?: return) {
             "saveAs" -> runFileMenu("file.saveAs")
             "print" -> runFileMenu("file.print")
             "openFile" -> runFileMenu("file.open")
+            // Installed fonts are part of the font list already; reading it again picks up any added since.
+            "loadSystemFonts" -> { fontsRevision++; status = "The fonts installed on this device are in the font list" }
+            "customizeKeyboard" -> openKeyboard()
             "exportPdf" -> exportTo("file.exportPdf")
             "exportPng" -> exportTo("file.exportPng")
             "newWindow" -> if (onNewWindow != null) onNewWindow(null) else status = "This device shows one document at a time"
             "commands" -> showCommands = ""
+            "options" -> optionsPane = OptionsPane.forId(text("pane"))
             "find" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.Find)
             "replace" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.Replace)
             "goto" -> findBar = (findBar ?: FindState()).copy(mode = FindMode.GoTo)
@@ -833,8 +1288,13 @@ fun App(
     }
     val fileMenu: @Composable () -> Unit = if (menuBridge != null) ({}) else ({ FileMenuButton("app.theme.$themeChoice") { id -> scope.launch { runFileMenu(id) } } })
     val quickCommands: @Composable () -> Unit = {
-        for ((label, command, shortcut) in QUICK_ACCESS) {
-            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on) { scope.launch { runCommand(command) } }
+        // The Quick Access Toolbar's commands as the person arranged them (the engine's list); Undo and Redo until it is read.
+        val qat = ribbonLayout?.qat?.mapNotNull { id -> catalogById[id]?.let { Triple(it.label, id, displayShortcut(it.shortcut)) } } ?: QUICK_ACCESS
+        qat.forEachIndexed { i, (label, command, shortcut) ->
+            // Numbered from 1, as the toolbar's keytips are, beside the tab letters.
+            CommandIconButton(command, label, shortcut, commandState.disabled[command], command in commandState.on, keytip = if (i < 9) "${i + 1}" else null) {
+                scope.launch { if (command in FILE_MENU_COMMANDS) runFileMenu(command) else runFromUi(command) }
+            }
         }
         // Every command by name, at every window size: the way to what the ribbon has no room for.
         IconButton(onClick = { showCommands = "" }, modifier = Modifier.size(32.dp)) { Icon(Lucide.Search, contentDescription = "Search all commands", modifier = Modifier.size(18.dp)) }
@@ -843,6 +1303,27 @@ fun App(
     // Android 15 draws edge to edge; keep content clear of the system bars, display cutout and keyboard.
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
     if (showAbout) AboutDialog { showAbout = false }
+    if (printDialog) PrintDialog(
+        pages = pages, totalPages = counts?.pages ?: pages.size, currentPage = (selection.caret?.page ?: 0) + 1, hasSelection = selection.rects.isNotEmpty(),
+        onPrint = { o -> printDialog = false; scope.launch { printWith(o) } },
+        onDismiss = { printDialog = false },
+    )
+    if (infoDialog) InfoDialog(docInfo, infoError, ::saveProperties) { infoDialog = false; docInfo = null }
+    recipients?.let { RecipientsDialog(it, recipientsError, ::saveRecipients) { recipients = null } }
+    keyboard?.let { k -> KeyboardDialog(k, catalogById, ::keyboardCall, launch = { b -> scope.launch { b() } }) { keyboard = null } }
+    switchWindows?.let { list ->
+        WindowListDialog("Switch windows", windowChoices(windowTitle(docPath, unsaved), list), onPick = { id -> switchWindows = null; if (id != null) windowHost?.focus(id) }) { switchWindows = null }
+    }
+    pickSideBySide?.let { list ->
+        WindowListDialog("Compare side by side with", list.map { it.id to it.title }, onPick = { id -> pickSideBySide = null; if (id != null) startSideBySide(id) }) { pickSideBySide = null }
+    }
+    if (languageDialog) LanguageDialog(onPick = { code ->
+        languageDialog = false
+        AppSettings.update { it.copy(language = code) }
+        scope.launch { I18n.load(code) }
+    }) { languageDialog = false }
+    if (recoverDialog) RecoveryDialog(recovery, ::restoreCopy, ::discardCopy) { recoverDialog = false }
+    if (templateDialog) TemplateGalleryDialog(personalTemplates, ::newFromTemplate, ::browseTemplate) { templateDialog = false }
     showCommands?.let { section ->
         AllCommandsDialog(
             catalog, LOKI_PROFILE, section.ifEmpty { null }, commandState.disabled, commandState.on,
@@ -854,7 +1335,11 @@ fun App(
             onDismiss = { showCommands = null },
         )
     }
-    commandForm?.let { c -> CommandFormDialog(c, pickFile = { save -> pickFile(save) }, writesFile = ::writesFile, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }) }
+    // The form opens once the current values it starts with have been read (a moment, or none for most commands).
+    val formStart = formInitial
+    commandForm?.let { c ->
+        if (formStart != null && formStart.first == c.id) CommandFormDialog(c, pickFile = { save -> pickFile(save) }, writesFile = ::writesFile, run = { params -> executeFromUi(c, params) }, onDismiss = { commandForm = null }, initial = formStart.second)
+    }
     commandResult?.let { (c, result) ->
         ResultDialog(c, result, onChange = if (c.hasParams) ({ commandResult = null; commandForm = c }) else null, onDismiss = { commandResult = null })
     }
@@ -901,6 +1386,28 @@ fun App(
             if (changes.isNotEmpty()) scope.launch { runCommand("layout.pageLayout", changes) }
         }, onDismiss = { pageDialog = null })
     }
+    if (symbolDialog) SymbolDialog(recentSymbols, fontFamilies, onInsert = { p, symbol ->
+        recentSymbols = withRecentSymbol(recentSymbols, symbol)
+        scope.launch { runCommand("insert.symbol", p) }
+    }, onDismiss = { symbolDialog = false })
+    if (dateDialog) DateTimeDialog(dateChoice, formatsFor = { language ->
+        engineLock.withLock { withContext(Dispatchers.Default) { parseDateFormats(runCatching { engine.call("loki.dateFormats", buildJsonObject { put("language", language) }) }.getOrNull()) } }
+    }, onInsert = { choice, p ->
+        dateDialog = false; dateChoice = choice
+        scope.launch { runCommand("insert.dateTime", p) }
+    }, onDismiss = { dateDialog = false })
+    columnsDialog?.let { start ->
+        ColumnsDialog(start, selected = start.apply == "selection", onApply = { p ->
+            columnsDialog = null
+            scope.launch { runCommand("layout.columns", p) }
+        }, onDismiss = { columnsDialog = null })
+    }
+    dropCapDialog?.let { start ->
+        DropCapDialog(start, fontFamilies, onApply = { p ->
+            dropCapDialog = null
+            scope.launch { runCommand("insert.dropCap", p) }
+        }, onDismiss = { dropCapDialog = null })
+    }
     paraDialog?.let { start ->
         ParagraphDialog(start, onApply = { changes ->
             paraDialog = null
@@ -926,7 +1433,14 @@ fun App(
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { pendingAction = null; action() }) { Text("Don't save") }
+                    TextButton(onClick = {
+                        pendingAction = null
+                        // The changes are given up, so their recovery copy goes too.
+                        scope.launch {
+                            engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.call("loki.recoveryDiscard") } } }
+                            action()
+                        }
+                    }) { Text("Don't save") }
                     TextButton(onClick = { pendingAction = null }) { Text("Cancel") }
                 }
             },
@@ -937,10 +1451,39 @@ fun App(
         maxWidth < 900.dp -> SizeClass.Medium
         else -> SizeClass.Expanded
     }
+    optionsPane?.let { OptionsDialog(optionsForm, optionsError, it, sizeClass, ::applyOptions) { optionsPane = null; optionsForm = null } }
     // Shortcuts work wherever focus is (the ribbon, the title bar): keys a focused text box doesn't
     // use come up to here. The page handles its own keys first (see its onPreviewKeyEvent).
-    Column(Modifier.fillMaxSize().onKeyEvent { e -> shortcutCommand(e, shortcuts)?.let { runKey(it); true } ?: false }) {
-        if (titleBar != null) {
+    val screen = viewState.screen
+    // Focus offers the ribbon for a moment from its bar; it goes again with the next command.
+    var peekRibbon by remember { mutableStateOf(false) }
+    LaunchedEffect(screen) { peekRibbon = false }
+    val chrome = !screen.immersive
+    val pageFocusRef = remember { arrayOfNulls<FocusRequester>(1) }
+    val keytips = remember { KeytipState() }
+    // A click on the page ends keytips, as any key they don't use does.
+    LaunchedEffect(selection) { keytips.off() }
+    // While keytips show, the keyboard comes to the window itself rather than the page: a page taking text hands printable
+    // keys to the system's text input first (Android), so the letters would be typed instead of choosing. Focus goes
+    // back to the page when they end.
+    val keytipFocus = remember { FocusRequester() }
+    val keytipsOn = keytips.phase != KeytipPhase.Off
+    LaunchedEffect(keytipsOn) {
+        runCatching { if (keytipsOn) keytipFocus.requestFocus() else if (!start) pageFocusRef[0]?.requestFocus() }
+    }
+    CompositionLocalProvider(LocalKeytips provides keytips) {
+    Column(Modifier.fillMaxSize().focusRequester(keytipFocus).focusable().onPreviewKeyEvent { e -> keytips.onKey(e) }.onKeyEvent { e ->
+        // Esc leaves Focus and Full Screen view, as their bar's button does.
+        if (screen.immersive && e.key == Key.Escape && e.type == KeyEventType.KeyDown) { screen.exitCommand?.let { scope.launch { runCommand(it) } }; return@onKeyEvent true }
+        shortcutCommand(e, keyMap)?.let { runKey(it); true } ?: false
+    }) {
+        if (screen.immersive) ImmersiveBar(
+            screen, peekRibbon,
+            onExit = { screen.exitCommand?.let { scope.launch { runCommand(it) } } },
+            onPeek = { peekRibbon = !peekRibbon },
+            onSearch = { findBar = (findBar ?: FindState()).copy(mode = FindMode.Find) },
+        )
+        if (chrome && titleBar != null) {
             // The title bar is the top row at every width: Undo/Redo, the document's name, the menu, window buttons.
             val hits = remember { TitleBarHits() }
             Row(
@@ -957,9 +1500,9 @@ fun App(
                 Row(Modifier.titleBarControl(hits)) { fileMenu() }
                 titleBar.windowButtons?.let { buttons -> Row(Modifier.titleBarControl(hits)) { buttons() } }
             }
-        } else if (sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
-        Ribbon(
-            tabs = ribbon,
+        } else if (chrome && sizeClass == SizeClass.Expanded) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { quickAccess() }
+        if (chrome || peekRibbon) Ribbon(
+            tabs = shownRibbon,
             styles = styles,
             state = commandState,
             sizeClass = sizeClass,
@@ -988,6 +1531,7 @@ fun App(
             )
         }
         val pageFocus = remember { FocusRequester() }
+        pageFocusRef[0] = pageFocus
         // With a keyboard (desktop), the page takes focus at once so typing and shortcuts work
         // before the first click. On a touch screen that would pop up the on-screen keyboard.
         val inputMode = LocalInputModeManager.current
@@ -998,7 +1542,7 @@ fun App(
         val navRun: suspend (String, JsonObject) -> Result<kotlinx.serialization.json.JsonElement?> = { cmd, p ->
             runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd != "nav.headings" && cmd != "nav.search" && cmd != "review.comments") revision++ }
         }
-        if (navOpen && sizeClass == SizeClass.Compact) {
+        if (chrome && navOpen && sizeClass == SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.fillMaxWidth().height(240.dp))
         }
         // The other task panes share one place: beside the page, or above it in a narrow window.
@@ -1008,19 +1552,24 @@ fun App(
             runCatching { engineLock.withLock { withContext(Dispatchers.Default) { engine.execute(cmd, p) } } }.onSuccess { if (cmd !in PANE_READS) revision++ }
         }
         val paneUi: (String) -> Unit = { id -> scope.launch { runAny(id) } }
-        if (openPanes.isNotEmpty() && sizeClass == SizeClass.Compact) {
-            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.fillMaxWidth().height(260.dp))
+        if (chrome && openPanes.isNotEmpty() && sizeClass == SizeClass.Compact) {
+            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.fillMaxWidth().height(260.dp), obj = selection.obj)
         }
+        readAloud?.takeIf { it.open }?.let { r -> ReadAloudBar(r) { id -> scope.launch { runCommand(id) } } }
         Row(Modifier.weight(1f).fillMaxWidth()) {
-        if (navOpen && sizeClass != SizeClass.Compact) {
+        if (chrome && navOpen && sizeClass != SizeClass.Compact) {
             NavPane(revision, counts?.pages ?: 0, selection.caret?.page?.plus(1), navRun, { scope.launch { runCommand("view.navigationPane") } }, Modifier.width(300.dp).fillMaxHeight())
         }
         val maxZoom = maxZoomFor(LocalDensity.current.density)
         val previewFonts = rememberPreviewFonts()
         val currentZoom by rememberUpdatedState(zoom)
+        // The page area; Split (View › Window) shows it twice, one above the other, each scrolled on its own. The lower
+        // one is the main one: it follows the caret and is where the page positions for the floating toolbar come from.
+        val pageArea: @Composable (Modifier, Boolean) -> Unit = { areaModifier, primary -> CompositionLocalProvider(LocalDensity provides pageDensity) {
+        val areaFocus = if (primary) pageFocus else remember { FocusRequester() }
         BoxWithConstraints(
-            Modifier.weight(1f).fillMaxHeight().background(if (flat) pagePaper(viewState.darkPages, paperColor) else if (darkTheme) DESK_COLOR_DARK else DESK_COLOR)
-                .onGloballyPositioned { viewportOrigin = it.positionInRoot() }
+            areaModifier.background(if (flat) pagePaper(viewState.darkPages, paperColor) else if (screen == Screen.Focus) FOCUS_DESK else if (darkTheme) DESK_COLOR_DARK else DESK_COLOR)
+                .onGloballyPositioned { if (primary) viewportOrigin = it.positionInRoot() }
                 // Two fingers zoom; one finger is left alone so it scrolls and taps. Seen before the
                 // pages are (Initial pass) and consumed only while pinching.
                 .pointerInput(maxZoom) {
@@ -1047,8 +1596,8 @@ fun App(
         val viewport = maxWidth
         val density = LocalDensity.current
         val areaPx = IntSize(constraints.maxWidth, constraints.maxHeight)
-        LaunchedEffect(areaPx) { viewportPx = areaPx }
-        val rulerShown = rulerInfo != null && viewState.ruler && !flat
+        LaunchedEffect(areaPx) { if (primary) viewportPx = areaPx }
+        val rulerShown = chrome && rulerInfo != null && viewState.ruler && !flat
         val inkTool = viewState.ink
         val gutterPx = with(density) { 32.dp.toPx() }
         val widthPt = ((constraints.maxWidth - gutterPx) / scale).coerceAtMost(MAX_WEB_WIDTH_PT)
@@ -1056,6 +1605,7 @@ fun App(
         // Reflowing views wrap to the window. Debounced so dragging a window edge doesn't re-lay-out
         // and re-render every frame.
         LaunchedEffect(widthPt, heightPt) {
+            if (!primary) return@LaunchedEffect
             delay(150)
             engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.setViewport(widthPt, heightPt) } } }
             revision++
@@ -1064,6 +1614,7 @@ fun App(
         var autoWeb by remember { mutableStateOf(false) }
         val narrow = viewport < NARROW_WINDOW
         LaunchedEffect(narrow) {
+            if (!primary) return@LaunchedEffect
             if (narrow) { autoWeb = true; runCommand("view.webLayout") }
             else if (autoWeb) { autoWeb = false; runCommand("view.printLayout") }
         }
@@ -1072,9 +1623,21 @@ fun App(
         // The ruler covers the top of the page area: the caret is kept below it.
         val rulerPx = if (rulerShown) with(density) { RULER_HEIGHT.toPx() } else 0f
         val vScroll = rememberScrollState()
+        // Synchronous Scrolling: the main pane tells the window beside it where it is, and follows it.
+        if (primary) {
+            LaunchedEffect(vScroll.value, vScroll.maxValue, syncScroll) { if (syncScroll) windowHost?.scrolled(scrollFraction(vScroll.value, vScroll.maxValue)) }
+            val follow = windowHost?.followScroll
+            LaunchedEffect(follow) {
+                if (!syncScroll || follow == null) return@LaunchedEffect
+                val target = (follow * vScroll.maxValue).roundToInt()
+                // A pixel or two is the echo of this window's own scroll coming back.
+                if (kotlin.math.abs(target - vScroll.value) > 2) vScroll.scrollTo(target)
+            }
+        }
         // Keep the caret in view as it moves, and when the keyboard shrinks the viewport.
         val viewportPx = constraints.maxHeight
         LaunchedEffect(selection, viewportPx) {
+            if (!primary) return@LaunchedEffect
             val c = selection.caret ?: return@LaunchedEffect
             val (top, pxPerPt) = pageGeo[c.page] ?: return@LaunchedEffect
             val margin = with(density) { 24.dp.toPx() }
@@ -1103,7 +1666,7 @@ fun App(
                         return@onPreviewKeyEvent true
                     }
                     // The engine's shortcuts first (Ctrl+O, F7, …), then typing and moving the caret.
-                    val k = shortcutCommand(e, shortcuts) ?: keyCommand(e) ?: return@onPreviewKeyEvent false
+                    val k = shortcutCommand(e, keyMap) ?: keyCommand(e) ?: return@onPreviewKeyEvent false
                     runKey(k)
                     true
                 }
@@ -1111,7 +1674,7 @@ fun App(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The page is a bitmap, so this hidden input is what the on-screen keyboard and IME talk to.
-            ImeInput(Modifier.focusRequester(pageFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
+            ImeInput(Modifier.focusRequester(areaFocus)) { k -> scope.launch { runCommand(k.command, k.params) } }
             val penInk = MaterialTheme.colorScheme.primary
             val pageFilter = if (viewState.darkPages) DARK_PAGE_FILTER else paperTint(paperColor)?.let { hex -> formColor(hex) }?.let { ColorFilter.tint(it, BlendMode.Multiply) }
             val caretColor = if (viewState.darkPages) Color.White else Color.Black
@@ -1122,7 +1685,7 @@ fun App(
                 // Kept per page index, not per bitmap, so a new image doesn't reset it for a frame.
                 var shown by remember(i) { mutableStateOf(IntSize.Zero) }
                 val pxPerPt = if (shown.width > 0) shown.width * scale / bitmap.width else scale
-                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt; pageOrigin[i] = it.positionInRoot() }) {
+                Box(Modifier.padding(bottom = 16.dp).onGloballyPositioned { pageGeo[i] = it.positionInParent().y to pxPerPt; if (primary) pageOrigin[i] = it.positionInRoot() }) {
                 Image(
                     bitmap,
                     contentDescription = "Page ${i + 1}",
@@ -1136,6 +1699,7 @@ fun App(
                             drawContent()
                             if (viewState.gridlines && !flat) drawGridlines(pxPerPt, gridInk)
                             drawSelection(selection, i, pxPerPt, caretColor)
+                            mouseGuide?.takeIf { it.page == i }?.let { drawMouseGuide(it, caretColor) }
                             penStroke?.takeIf { it.page == i }?.let { drawPenStroke(it, pxPerPt, penInk) }
                             if (inkTool != null && inkPage == i) drawInkPreview(inkTool, inkPoints, pxPerPt, penInk)
                         }
@@ -1190,7 +1754,7 @@ fun App(
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                 if (down.type == PointerType.Mouse && currentEvent.buttons.isSecondaryPressed) {
                                     down.consume()
-                                    pageFocus.requestFocus()
+                                    areaFocus.requestFocus()
                                     scope.launch {
                                         if (!pointInSelection(selection.rects, i, down.position.x / pxPerPt, down.position.y / pxPerPt)) perform { setCaret(i, down.position, pxPerPt, false) }
                                         openContextMenu(i, down.position)
@@ -1201,7 +1765,7 @@ fun App(
                             detectTapGestures(
                                 // Long press selects the word under the finger; the handles then adjust it.
                                 onLongPress = { o ->
-                                    pageFocus.requestFocus()
+                                    areaFocus.requestFocus()
                                     scope.launch {
                                         // On the selection already: its menu. Elsewhere: select the word, and if it is a
                                         // misspelling offer its fixes at once (the handles and toolbar cover the rest).
@@ -1216,37 +1780,54 @@ fun App(
                                     }
                                 },
                             ) { o ->
-                                pageFocus.requestFocus()
-                                // A second tap close to the first: in a header or footer area it edits that one; in the body, while one
-                                // is being edited, it goes back to the body.
-                                val twice = lastTapMark?.let { isDoubleTap(it.elapsedNow().inWholeMilliseconds, lastTapAt, o, tapSlopPx) } == true
-                                lastTapMark = if (twice) null else TimeSource.Monotonic.markNow()
-                                lastTapAt = o
-                                // A picture, shape or text box under the finger is selected (its frame appears); anything else puts the caret there.
+                                areaFocus.requestFocus()
+                                // Taps close together count up: the second selects a word (or enters a header or footer), the third a paragraph.
+                                val taps = tapCounter.press(o, tapSlopPx)
+                                val twice = taps == 2
                                 scope.launch {
+                                    // A mouse press the engine is asked about first belongs to its own gesture (a table's border, the
+                                    // selection bar): wait for the answer, which queues ahead of this, and leave the caret alone.
+                                    engineLock.withLock { }
+                                    if (mousePressOwned[0]) return@launch
+                                    if (linkMode) {
+                                        linkMode = false
+                                        val box = engineLock.withLock { withContext(Dispatchers.Default) { runCatching { engine.hit(i, o.x / pxPerPt, o.y / pxPerPt).textBox }.getOrNull() } }
+                                        if (box == null) status = "Not linked: tap a text box"
+                                        else perform { execute("shape.link", buildJsonObject { put("target", box) }) }
+                                        return@launch
+                                    }
                                     if (twice && enterHeaderFooterAt(i, o, pxPerPt)) return@launch
                                     if (twice && selection.hf != null) { perform { execute("insert.closeHeader"); setCaret(i, o, pxPerPt, false) }; return@launch }
-                                    if (selectObjectAt(i, o, pxPerPt)) keyboard?.hide()
-                                    else { keyboard?.show(); perform { setCaret(i, o, pxPerPt, false) } }
+                                    // A picture, shape or text box under the finger is selected (its frame appears); anything else puts the caret there.
+                                    if (taps == 1 && selectObjectAt(i, o, pxPerPt)) keyboard?.hide()
+                                    else {
+                                        keyboard?.show()
+                                        perform { setCaret(i, o, pxPerPt, false); if (taps == 2) execute("select.word") else if (taps == 3) execute("select.paragraph") }
+                                    }
                                 }
                             }
                         }
                         .pointerInput(i, pxPerPt) {
-                            // Dragging selects with a mouse or pen. A finger's drag is left alone so it scrolls.
+                            // A mouse or pen press: on a table's border, handle or selection area, in the selection bar, a double or
+                            // triple click, Alt held. The gesture runs in PageMouse.kt, fed the pointer's place as it moves. A finger's
+                            // drag is left alone so it scrolls, and a move inside the touch slop is still a click.
+                            val reachPt = 5f * density.density / pxPerPt
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
-                                if (down.type == PointerType.Touch) return@awaitEachGesture
-                                var started = false
-                                drag(down.id) { change ->
-                                    if (!started) {
-                                        started = true
-                                        mouseSelecting = true
-                                        scope.launch { perform { setCaret(i, down.position, pxPerPt, false) } }
-                                    }
-                                    change.consume()
-                                    scope.launch { perform { setCaret(i, change.position, pxPerPt, true) } }
+                                mousePressOwned[0] = false
+                                if (down.type == PointerType.Touch || currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
+                                val mods = currentEvent.keyboardModifiers
+                                val press = MousePress(i, pxPerPt, down.position, mouseCounter.press(down.position, tapSlopPx), mods.isShiftPressed, mods.isCtrlPressed || mods.isMetaPressed, mods.isAltPressed, reachPt)
+                                val moves = Channel<Offset>(Channel.CONFLATED)
+                                scope.launch { with(mouseHost) { mouseGesture(press, moves) } }
+                                var dragging = false
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) dragging = true
+                                    if (dragging) { change.consume(); moves.trySend(change.position) }
+                                    if (!change.pressed) break
                                 }
-                                mouseSelecting = false
+                                moves.close()
                             }
                         }),
                 )
@@ -1264,7 +1845,16 @@ fun App(
                 }
                 // The selected object's frame: move, resize and rotate it.
                 selection.obj?.takeIf { it.page == i }?.let { o ->
-                    ObjectFrameOverlay(o, pxPerPt) { id, p -> scope.launch { runCommand(id, p) } }
+                    ObjectFrameOverlay(
+                        o, pxPerPt,
+                        crop = if (cropMode && o.kind == "image") commandState.picture?.crop else null,
+                        guides = sectionInfo?.let(::pageGuides),
+                        onDropAt = { x, y, copy -> scope.launch {
+                            // An object in the text moves (or is copied) to the text position under the drop.
+                            val to = mouseHost.hit(o.page, x, y).pos
+                            if (to != null) mouseHost.exec(if (copy) "arrange.copyTo" else "arrange.bounds", buildJsonObject { put("to", to) })
+                        } },
+                    ) { id, p -> scope.launch { runCommand(id, p) } }
                 }
                 ctxMenu?.takeIf { it.page == i }?.let { m ->
                     Box(Modifier.offset { IntOffset(m.x.roundToInt(), m.y.roundToInt()) }) {
@@ -1276,16 +1866,16 @@ fun App(
         }
         if (rulerShown) rulerInfo?.let { info ->
             val left = (pageOrigin[0]?.x ?: 0f) - viewportOrigin.x
-            HorizontalRuler(info, commandState.layout, left, scale * pinch, { p -> scope.launch { runCommand("para.indents", p) } }, Modifier.align(Alignment.TopStart))
+            HorizontalRuler(info, commandState.layout, left, scale * pinch, { id, p -> scope.launch { runCommand(id, p) } }, Modifier.align(Alignment.TopStart))
         }
         selection.hf?.let { kind ->
             HeaderFooterBar(kind, { scope.launch { runCommand("insert.closeHeader") } }, Modifier.align(Alignment.TopCenter).padding(top = if (rulerShown) 8.dp + RULER_HEIGHT else 8.dp))
         }
         // The floating toolbar over a selection: above its first visible line, flipping below when
         // there is no room. Hidden while something else is moving the selection or has the screen.
-        val miniShown = selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
+        val miniShown = primary && readAloud?.playing != true && selection.rects.isNotEmpty() && selection.obj == null && ctxMenu == null && pinch == 1f && !handleDragging && !mouseSelecting &&
             commandState.disabled["format.bold"] == null && fontDialog == null && paraDialog == null &&
-            pageDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
+            pageDialog == null && !symbolDialog && !dateDialog && columnsDialog == null && dropCapDialog == null && !manageStyles && listLevels == null && listDialog == null && commandForm == null && commandResult == null && showCommands == null && inkTool == null
         if (miniShown) {
             val miniEnv = remember(commandState, formatState, fontFamilies) {
                 RibbonEnv(emptyMap(), commandState, formatState, fontFamilies, previewFonts, { id -> scope.launch { runCommand(id) } }, { id, p -> scope.launch { runCommand(id, p) } })
@@ -1310,11 +1900,19 @@ fun App(
             }
         }
         }
-        if (openPanes.isNotEmpty() && sizeClass != SizeClass.Compact) {
-            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.width(320.dp).fillMaxHeight())
+        } }
+        if (split) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                pageArea(Modifier.weight(1f).fillMaxWidth(), false)
+                SplitBar(onClose = { split = false })
+                pageArea(Modifier.weight(1f).fillMaxWidth(), true)
+            }
+        } else pageArea(Modifier.weight(1f).fillMaxHeight(), true)
+        if (chrome && openPanes.isNotEmpty() && sizeClass != SizeClass.Compact) {
+            PaneHost(openPanes, revision, commandState, paneRun, paneUi, closePane, Modifier.width(320.dp).fillMaxHeight(), obj = selection.obj)
         }
         }
-        StatusBar(
+        if (chrome) StatusBar(
             status = status,
             page = selection.caret?.page?.plus(1),
             counts = counts,
@@ -1326,6 +1924,34 @@ fun App(
             onView = { cmd -> scope.launch { runCommand(cmd) } },
         )
     }
+    }
+    if (start) StartScreen(
+        recents = remember(recentsRevision, start) { AppSettings.value.recents }, exists = ::recentAvailable, now = nowMillis(),
+        recoveryCopies = recovery.copies, onRestore = ::restoreCopy, onDiscard = ::discardCopy,
+        personalTemplates = personalTemplates,
+        onNew = { start = false },
+        onTemplate = ::newFromTemplate,
+        onBrowseTemplate = ::browseTemplate,
+        onMoreTemplates = { templateDialog = true },
+        onOpen = {
+            scope.launch {
+                // Cancelling the picker leaves the start screen where it is.
+                val path = withContext(Dispatchers.Default) { pickFile(save = false) } ?: return@launch
+                start = false
+                openHere(path)
+            }
+        },
+        onOpenRecent = { r ->
+            scope.launch {
+                val path = withContext(Dispatchers.Default) { materializeRecent(r) }
+                if (path == null) { AppSettings.update { it.withoutRecent(r) }; recentsRevision++; return@launch }
+                start = false
+                openHere(path)
+            }
+        },
+        onForget = { r -> AppSettings.update { it.withoutRecent(r) }; recentsRevision++ },
+        modifier = Modifier.padding(top = titleBar?.height ?: 0.dp),
+    )
     }
 }
 
@@ -1349,12 +1975,12 @@ private fun StatusBar(
     Row(Modifier.fillMaxWidth().background(BarBlue).padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         val small = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
         if (status.isNotEmpty()) {
-            Text(status, style = small, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(status, style = small, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).announces())
         } else {
             val compact = sizeClass == SizeClass.Compact
             val text = buildList {
                 // Web Layout has no pages to count.
-                if (!flat && page != null && counts != null) add(if (compact) "$page/${counts.pages}" else "Page $page of ${counts.pages}")
+                if (!flat && page != null && counts != null) add(if (compact) "$page/${counts.pages}" else trf("Page {page} of {pages}", "page" to page, "pages" to counts.pages))
                 if (counts != null) {
                     val w = if (counts.words == 1) "1 word" else "${counts.words} words"
                     add(if (selected) "$w selected" else w)

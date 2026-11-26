@@ -19,11 +19,23 @@ use std::ptr;
 use serde_json::{Value, json};
 use wordcraft_mcp::{Backend, Headless};
 
+mod dialogs;
+mod pointer;
 mod state;
 
 /// Opaque to C. One per open window/document tab.
 pub struct LokiSession {
     inner: Headless,
+    /// Where the undo history stood when a drag's preview began (`loki.preview`): the next preview and
+    /// `loki.endPreview` take back every step since, and nothing before it.
+    preview: Option<u64>,
+}
+
+/// Takes back the preview in the document, if there is one: the steps recorded since it began, and no others.
+fn end_preview(session: &mut LokiSession) {
+    if let Some(mark) = session.preview.take() {
+        session.inner.session.revert_since(mark);
+    }
 }
 
 /// Largest page bitmap `loki_render_page` returns (width × height, pixels): 8192² ≈ 256 MiB of RGBA.
@@ -53,7 +65,7 @@ unsafe fn str_arg<'a>(p: *const c_char) -> Option<&'a str> {
 /// Create a session holding a blank document. Free with [`loki_session_free`]. Null on failure.
 #[unsafe(no_mangle)]
 pub extern "C" fn loki_session_new() -> *mut LokiSession {
-    catch_unwind(|| Box::into_raw(Box::new(LokiSession { inner: Headless::default() }))).unwrap_or(ptr::null_mut())
+    catch_unwind(|| Box::into_raw(Box::new(LokiSession { inner: Headless::default(), preview: None }))).unwrap_or(ptr::null_mut())
 }
 
 /// Free a session. Null is ignored. The pointer must not be used afterwards.
@@ -66,8 +78,12 @@ pub unsafe extern "C" fn loki_session_free(s: *mut LokiSession) {
         return;
     }
     // SAFETY: from `Box::into_raw` in `loki_session_new`, freed once (caller's contract).
-    let b = unsafe { Box::from_raw(s) };
-    drop(catch_unwind(AssertUnwindSafe(move || drop(b))));
+    let mut b = unsafe { Box::from_raw(s) };
+    // A clean close removes the recovery copies of documents that were saved or closed; a dirty document keeps its own.
+    drop(catch_unwind(AssertUnwindSafe(move || {
+        b.inner.session.finish_recovery();
+        drop(b);
+    })));
 }
 
 /// Call a control-protocol method (`engine.execute`, `engine.commands`, `document.inspect`,
@@ -98,10 +114,95 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(_) => err("internal error (panic caught) reading the selection"),
         };
     }
+    if method == "loki.hit" || method == "loki.tableSpot" {
+        // What is under a pointer press (see `pointer`): read-only, so no undo step and no dirty flag.
+        let sess = &mut session.inner.session;
+        return match catch_unwind(AssertUnwindSafe(|| {
+            if method == "loki.hit" { pointer::hit(sess, &params) } else { pointer::table_spot(sess, &params) }
+        })) {
+            Ok(v) => reply(json!({"ok": true, "result": v})),
+            Err(_) => err("internal error (panic caught) hit-testing the page"),
+        };
+    }
+    if method == "loki.dropCap" || method == "loki.dateFormats" {
+        // What the app's Drop Cap and Date and Time dialogs open with (see `dialogs`).
+        let sess = &session.inner.session;
+        return match catch_unwind(AssertUnwindSafe(
+            || {
+                if method == "loki.dropCap" { dialogs::drop_cap(sess) } else { dialogs::date_formats(&params) }
+            },
+        )) {
+            Ok(v) => reply(json!({"ok": true, "result": v})),
+            Err(_) => err("internal error (panic caught) reading a dialog's values"),
+        };
+    }
     if method == "loki.commandState" {
         return match catch_unwind(AssertUnwindSafe(|| state::command_state(&mut session.inner.session))) {
             Ok(v) => reply(json!({"ok": true, "result": v})),
             Err(_) => err("internal error (panic caught) reading command state"),
+        };
+    }
+    if method == "loki.speechVoice" {
+        // A front end with a voice of its own (Android's text-to-speech) reads the sentences itself: the player then holds
+        // each one, playing, until the front end moves it on (`readAloud.next`) or stops it, instead of reaching for a
+        // speech program the platform doesn't have.
+        let own = params.get("own").and_then(Value::as_bool).unwrap_or(true);
+        session.inner.session.read_aloud.backend =
+            if own { wordcraft_engine::speech::Backend::Hold } else { wordcraft_engine::speech::Backend::System };
+        return reply(json!({"ok": true, "result": null}));
+    }
+    if method == "loki.preview" || method == "loki.endPreview" {
+        // A drag shown as it goes (a table's column border, its move handle): each `loki.preview` takes back the last one
+        // and runs the command afresh from where the drag began, so the pages show the real result; `loki.endPreview`
+        // takes back the last one before the drag's own command runs. Only a step the preview made is ever undone: a
+        // command that changed nothing leaves nothing to take back.
+        let done = catch_unwind(AssertUnwindSafe(|| -> Result<Value, String> {
+            end_preview(session);
+            if method == "loki.endPreview" {
+                return Ok(Value::Null);
+            }
+            // The preview is a step of its own: it must not join the typing before it, or taking it back takes that too.
+            session.inner.session.close_typing();
+            let mark = session.inner.session.undo_mark();
+            let result = session.inner.call("engine.execute", params.clone());
+            let applied = session.inner.session.undo_mark() != mark;
+            if applied {
+                session.preview = Some(mark);
+            }
+            Ok(json!({"applied": applied, "result": result?}))
+        }));
+        return match done {
+            Ok(Ok(v)) => reply(json!({"ok": true, "result": v})),
+            Ok(Err(e)) => err(e),
+            Err(_) => err("internal error (panic caught) in a preview"),
+        };
+    }
+    if method.starts_with("loki.recovery") || method == "loki.enableRecovery" {
+        // Local recovery (see docs/recovery.md): the engine keeps a copy of unsaved work in a folder this front end
+        // names, from `tick`s it is given; the front end lists and restores copies with `file.recover`.
+        let sess = &mut session.inner.session;
+        let done = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
+            match method {
+                "loki.enableRecovery" => {
+                    let dir = params.get("dir").and_then(Value::as_str).filter(|d| !d.is_empty()).ok_or("dir is required")?;
+                    sess.enable_recovery(std::path::PathBuf::from(dir), std::sync::Arc::new(|| {}))
+                }
+                "loki.recoveryTick" => {
+                    sess.recovery_tick();
+                    Ok(())
+                }
+                // The user gave up the document's unsaved changes: its copy goes with them.
+                "loki.recoveryDiscard" => {
+                    sess.discard_recovery_copy();
+                    Ok(())
+                }
+                other => Err(format!("unknown method {other}")),
+            }
+        }));
+        return match done {
+            Ok(Ok(())) => reply(json!({"ok": true, "result": null})),
+            Ok(Err(e)) => err(e),
+            Err(_) => err("internal error (panic caught) in recovery"),
         };
     }
     if method == "loki.uiRequests" {
@@ -176,7 +277,15 @@ fn selection_geometry(sess: &mut wordcraft_engine::Session) -> Value {
             };
             let r = hit.rect;
             let finite = [r.x, r.y, r.w, r.h, hit.spin.deg].iter().all(|n| n.is_finite());
-            finite.then(|| json!({"page": hit.page, "x": r.x, "y": r.y, "w": r.w, "h": r.h, "rotation": hit.spin.deg, "floating": hit.floating(), "kind": kind}))
+            // A connector is dragged by its two ends, not framed: where they are (page points).
+            let ends = match &o {
+                wordcraft_doc::para::InlineObject::Shape { kind, float, .. } if kind.is_connector() => {
+                    let (s, e) = wordcraft_doc::connector::ends(r.x, r.y, r.w, r.h, float.flip_h, float.flip_v);
+                    json!([{"x": s.0, "y": s.1}, {"x": e.0, "y": e.1}])
+                }
+                _ => Value::Null,
+            };
+            finite.then(|| json!({"page": hit.page, "x": r.x, "y": r.y, "w": r.w, "h": r.h, "rotation": hit.spin.deg, "floating": hit.floating(), "kind": kind, "ends": ends}))
         })
     } else {
         None
