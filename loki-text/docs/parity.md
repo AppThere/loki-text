@@ -144,7 +144,7 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
   * Customize Keyboard edits the engine's key changes; the app's own key map does not read them yet
     (see Customize Ribbon below). The engine answers `{custom: [{command, keys}]}`, not the
     `{assigned, removed}` its params doc describes; the dialog reads both.
-* **Backstage pages**: File › Options is the generic form with the current values, not the desktop's panes. Done: the start screen (`StartScreen.kt`: New, Open, templates, recent documents, unsaved
+* **Backstage pages**: File › Options has pages of its own (`OptionsDialog.kt`: General, Display, Proofing, Save, Language, Advanced; a list then a page on phones, side by side on wider windows). The engine's Accessibility and Agents panes have no settings in this app yet and open General. Done: the start screen (`StartScreen.kt`: New, Open, templates, recent documents, unsaved
   documents), File › New from Template (`TemplateGallery.kt`: five built-in templates with first-page
   pictures, personal templates from `file.listTemplates`, Browse), File › Print (`PrintDialog.kt`: page
   preview, range, odd/even, pages to a sheet, paper, copies, what it comes to; the options go to
@@ -214,10 +214,10 @@ come with each. What is still missing is gathered in [What is left](#what-is-lef
 
 Roughly largest first. Do not assume any of these are solved without checking.
 
-1. **Bespoke dialogs.** The desktop has about sixty; this app has sixteen of its own and the
+1. **Bespoke dialogs.** The desktop has about sixty; this app has seventeen of its own and the
    generated form for the rest. Forms start with the document's values for the 39 commands in
    `FORM_DEFAULTS`; the rest start blank, mostly because nothing reports their current value. A few parameter types stay JSON on purpose (listed above).
-2. **Backstage and customization.** File › Options is the generic form, not the desktop's panes.
+2. **Backstage and customization.** File › Options pages are not tried on a device yet; the folders are text boxes, not pickers.
    Customize Ribbon is the generic form, not a drag-and-drop dialog. Menus and tooltips show the
    built-in shortcut after a key change, and a customization made in one desktop window reaches the
    others only at the next launch. Personal templates have no first-page pictures; the print preview
