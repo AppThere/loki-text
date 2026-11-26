@@ -277,7 +277,7 @@ internal fun typeDefs(text: String): Map<String, String> {
     for (m in Regex("\\b([A-Z][A-Za-z0-9]*)\\s*=\\s*\\{").findAll(text)) {
         val open = m.range.last
         val close = matchingClose(text, open)
-        if (close > open) out.putIfAbsent(m.groupValues[1], text.substring(open, close + 1))
+        if (close > open) out.getOrPut(m.groupValues[1]) { text.substring(open, close + 1) }
     }
     return out
 }

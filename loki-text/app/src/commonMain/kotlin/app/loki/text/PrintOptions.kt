@@ -69,7 +69,7 @@ internal data class PrintOptions(
 internal fun parsePageList(text: String, total: Int): List<Int>? {
     val parts = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }
     if (parts.isEmpty()) return null
-    val out = sortedSetOf<Int>()
+    val out = mutableSetOf<Int>()
     for (p in parts) {
         val ends = p.split('-').map { it.trim() }
         if (ends.size > 2 || ends.any { it.isEmpty() || !it.all(Char::isDigit) }) return null
@@ -78,5 +78,5 @@ internal fun parsePageList(text: String, total: Int): List<Int>? {
         if (a < 1 || b < a || b > total) return null
         for (n in a..b) out.add(n)
     }
-    return out.toList()
+    return out.sorted()
 }

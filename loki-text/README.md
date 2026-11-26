@@ -29,9 +29,10 @@ cinterop, `app/src/nativeInterop`). New engine features reach the UI with no bin
 ## Run
 
 Desktop: `scripts/build-desktop.sh run` (add a Gradle wrapper with
-`gradle wrapper`). Android: `scripts/build-android.sh`, then run `:app:installDebug`. iOS:
-`scripts/build-ios.sh`, then a thin Xcode host app calls `MainViewControllerKt.MainViewController()`
-(the Xcode project is not generated yet).
+`gradle wrapper`). Android: `scripts/build-android.sh`, then run `:app:installDebug`. iOS
+(needs Xcode and XcodeGen): `scripts/build-ios.sh run` builds the engine and the app and starts it on
+a simulator. The thin host app in `iosApp/` calls `MainViewControllerKt.MainViewController()`; its
+Xcode project is generated from `iosApp/project.yml` and rebuilds both libraries in its build phase.
 
 ## Credits
 
@@ -50,4 +51,4 @@ assets or iconography; add a row to `ATTRIBUTION.md` for every asset file.
 Every engine command is reachable at every window size: see [`docs/parity.md`](docs/parity.md) for
 how that is measured, what the app draws itself (zoom, dark pages, ruler, panes, ink) and the gaps
 that remain. Built and tested on JVM desktop; Android builds with `scripts/build-android.sh` on a
-machine with the SDK; iOS is scaffolded and has never been built.
+machine with the SDK; iOS builds and starts on the simulator, and is otherwise untried.

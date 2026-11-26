@@ -53,7 +53,7 @@ class TimelineMark(val at: Double, val label: String)
 fun rulerLabel(seconds: Double, fine: Boolean): String {
     val s = seconds.coerceAtLeast(0.0)
     val m = (s / 60).toInt(); val rest = s - m * 60
-    return if (fine) "$m:" + (if (rest < 10) "0" else "") + "%.1f".format(rest) else "$m:" + "%02d".format(rest.toInt())
+    return if (fine) "$m:" + (if (rest < 10) "0" else "") + fixed(rest, 1) else "$m:" + rest.toInt().toString().padStart(2, '0')
 }
 
 /** What a drag on a clip does: move the whole clip, or move its end (making it longer or shorter). */
