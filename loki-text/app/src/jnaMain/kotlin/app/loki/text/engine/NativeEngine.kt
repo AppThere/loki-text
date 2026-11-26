@@ -22,33 +22,45 @@ private val lib: Loki by lazy {
 
 actual class NativeEngine actual constructor() : AutoCloseable {
     private var handle: Pointer? = lib.loki_session_new()
+    // Calls share the session; closing it waits for them, so a call running on another thread never uses a freed one.
+    private val lock = java.util.concurrent.locks.ReentrantReadWriteLock()
 
-    actual fun callRaw(method: String, paramsJson: String?): String {
-        val h = handle ?: return """{"ok":false,"error":"engine closed"}"""
-        val out = lib.loki_call(h, method, paramsJson) ?: return """{"ok":false,"error":"engine returned null"}"""
+    actual fun callRaw(method: String, paramsJson: String?): String = lock.readLock().withLockDo {
+        val h = handle ?: return@withLockDo """{"ok":false,"error":"engine closed"}"""
+        val out = lib.loki_call(h, method, paramsJson) ?: return@withLockDo """{"ok":false,"error":"engine returned null"}"""
         try {
-            return out.getString(0, "UTF-8")
+            out.getString(0, "UTF-8")
         } finally {
             lib.loki_string_free(out)
         }
     }
 
-    actual fun renderPage(page: Int, scale: Float): PageBitmap? {
-        val h = handle ?: return null
+    actual fun renderPage(page: Int, scale: Float): PageBitmap? = lock.readLock().withLockDo {
+        val h = handle ?: return@withLockDo null
         val w = IntByReference()
         val ht = IntByReference()
         val n = IntByReference()
-        val p = lib.loki_render_page(h, page, scale, w, ht, n) ?: return null
+        val p = lib.loki_render_page(h, page, scale, w, ht, n) ?: return@withLockDo null
         val len = w.value.toLong() * ht.value * 4
         try {
-            return PageBitmap(w.value, ht.value, n.value, p.getByteArray(0, len.toInt()))
+            PageBitmap(w.value, ht.value, n.value, p.getByteArray(0, len.toInt()))
         } finally {
             lib.loki_buffer_free(p, len)
         }
     }
 
-    actual override fun close() {
-        lib.loki_session_free(handle)
+    actual override fun close() = lock.writeLock().withLockDo {
+        val h = handle ?: return@withLockDo
         handle = null
+        lib.loki_session_free(h)
+    }
+}
+
+private inline fun <T> java.util.concurrent.locks.Lock.withLockDo(block: () -> T): T {
+    lock()
+    try {
+        return block()
+    } finally {
+        unlock()
     }
 }

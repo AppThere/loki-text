@@ -7,3 +7,5 @@ app/src/androidMain/jniLibs/
 *.iml
 .idea/
 __pycache__/
+# Interface translations copied in from craft-i18n at build time (see app/build.gradle.kts).
+app/src/commonMain/composeResources/files/i18n/

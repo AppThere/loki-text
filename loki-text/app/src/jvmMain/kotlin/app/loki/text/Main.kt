@@ -2,6 +2,13 @@ package app.loki.text
 
 import androidx.compose.foundation.layout.Row
 import app.loki.kit.windowDrag
+import app.loki.kit.IS_MAC
+import app.loki.kit.MENU_MINIMIZE
+import app.loki.kit.MENU_ZOOM
+import app.loki.kit.LokiMenuBar
+import app.loki.kit.MenuBridge
+import app.loki.kit.installMacAppMenu
+import app.loki.kit.nameMacApplication
 import app.loki.kit.useOwnFrame
 import app.loki.kit.toggleMaximized
 import app.loki.kit.WindowButtons
@@ -37,6 +44,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import app.loki.text.res.Res
+import app.loki.text.res.loki_text_icon
+import org.jetbrains.compose.resources.painterResource
 import java.awt.FileDialog
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
@@ -94,20 +104,15 @@ private class DocWindow(val id: Int, val path: String?)
 /** Height of the title bar the app draws, in dp. */
 private const val TITLE_BAR_DP = 40f
 
-private val IS_MAC = System.getProperty("os.name").orEmpty().startsWith("Mac")
-
 fun main() {
-    // The Mac names the application menu and the Dock entry from these, read when AWT starts;
-    // without them a `gradle run` shows the main class (MainKt). A packaged app has its bundle name.
-    if (IS_MAC) {
-        System.setProperty("apple.awt.application.name", "Loki Text")
-        System.setProperty("apple.laf.useScreenMenuBar", "true")
-    }
+    nameMacApplication("Loki Text")
     lokiApplication()
 }
 
 private fun lokiApplication() = application {
     val windows = remember { mutableStateListOf(DocWindow(0, null)) }
+    // Every window's state and AWT window, for Switch Windows, Arrange All, Side by Side and full screen.
+    val registry = remember { DesktopWindows() }
     var nextId by remember { mutableStateOf(1) }
     // Closing asks about unsaved changes first; App calls onClose once that is settled. Kept here so Quit can ask every window.
     val closeRequests = remember { mutableStateMapOf<Int, Int>() }
@@ -130,7 +135,10 @@ private fun lokiApplication() = application {
         DisposableEffect(bridge) { bridges[w.id] = bridge; onDispose { bridges.remove(w.id); closeRequests.remove(w.id) } }
         val windowState = rememberWindowState()
         val ownFrame = remember { useOwnFrame() }
-        Window(onCloseRequest = { requestClose() }, title = "Loki Text", state = windowState, undecorated = ownFrame) {
+        val host = remember(w.id) { registry.hostFor(w.id) }
+        DisposableEffect(w.id) { registry.states[w.id] = windowState; onDispose { registry.remove(w.id) } }
+        Window(onCloseRequest = { requestClose() }, title = "Loki Text", icon = painterResource(Res.drawable.loki_text_icon), state = windowState, undecorated = ownFrame) {
+            DisposableEffect(window) { registry.awt[w.id] = window; onDispose { } }
             DisposableEffect(window) {
                 val l = object : java.awt.event.WindowAdapter() {
                     override fun windowActivated(e: java.awt.event.WindowEvent?) { front = w.id }
@@ -138,7 +146,7 @@ private fun lokiApplication() = application {
                 window.addWindowListener(l)
                 onDispose { window.removeWindowListener(l) }
             }
-            if (IS_MAC) LokiMenuBar(bridge, mac = true) { id ->
+            if (IS_MAC) LokiMenuBar(bridge, mac = true, menus = { b, mac -> appMenus(b.catalog, mac) }) { id ->
                 when (id) {
                     MENU_MINIMIZE -> windowState.isMinimized = true
                     MENU_ZOOM -> windowState.toggleMaximized()
@@ -182,6 +190,8 @@ private fun lokiApplication() = application {
                     },
                 )
             }
+            // The first window shows the splash while the engine starts; windows opened later start at once.
+            WithSplash(enabled = w.id == 0) {
             Box(Modifier.fillMaxSize().then(if (ownFrame && windowState.placement != WindowPlacement.Maximized) Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant) else Modifier)) {
             App(
                 closeRequest,
@@ -190,8 +200,11 @@ private fun lokiApplication() = application {
                 onNewWindow = { path -> windows.add(DocWindow(nextId++, path)) },
                 titleBar = titleBar,
                 menuBridge = if (IS_MAC) bridge else null,
+                startScreen = w.id == 0,
+                windowHost = host,
             )
             if (ownFrame && windowState.placement != WindowPlacement.Maximized) ResizeEdges(window)
+            }
             }
         }
     }

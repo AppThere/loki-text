@@ -93,6 +93,32 @@ compose.resources {
     packageOfResClass = "app.loki.text.res"
 }
 
+// Interface translations live in storytold/craft-i18n (the commit in ../../craft-i18n.rev), as the desktop front end's
+// do: its locales/<code>/common.tsv and wordcraft.tsv are copied in at build time from CRAFT_I18N_DIR, with an index of
+// the languages. Without CRAFT_I18N_DIR the app is English only. The copies are build output, not part of this repository.
+val i18nOut = layout.projectDirectory.dir("src/commonMain/composeResources/files/i18n")
+val copyI18n by tasks.registering {
+    val src = providers.environmentVariable("CRAFT_I18N_DIR").orNull?.let { file("$it/locales") }
+    inputs.property("source", src?.path ?: "")
+    outputs.dir(i18nOut)
+    doLast {
+        val out = i18nOut.asFile
+        out.mkdirs()
+        val codes = mutableListOf<String>()
+        src?.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name }?.forEach { dir ->
+            val files = listOf("common.tsv", "wordcraft.tsv").map { File(dir, it) }.filter { it.isFile }
+            if (files.isEmpty()) return@forEach
+            val to = File(out, dir.name).apply { mkdirs() }
+            files.forEach { it.copyTo(File(to, it.name), overwrite = true) }
+            codes += dir.name
+        }
+        File(out, "locales.txt").writeText(codes.joinToString("\n"))
+    }
+}
+// Every task that reads the shared resources (Compose's copies and its resource accessors) waits for the catalogs.
+tasks.matching { it.name != "copyI18n" && (it.name.contains("ComposeResources") || it.name.contains("ValueResources") || it.name.contains("ResourceAccessors")) }
+    .configureEach { dependsOn(copyI18n) }
+
 compose.desktop {
     application {
         mainClass = "app.loki.text.MainKt"
@@ -100,6 +126,10 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Loki Text"
             packageVersion = "1.0.0"
+            // The installer and launcher icon (the Loki Text icon, from icons/).
+            linux { iconFile.set(project.file("icons/loki-text.png")) }
+            windows { iconFile.set(project.file("icons/loki-text.ico")) }
+            macOS { iconFile.set(project.file("icons/loki-text.icns")) }
         }
         // The desktop run finds libloki_ffi next to the working dir or via -Dloki.lib.
         jvmArgs += "-Dloki.lib=${rootDir}/target/release"

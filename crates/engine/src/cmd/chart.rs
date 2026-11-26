@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use wordcraft_doc::chart::{ChartSeries, ChartSpec, ChartType, LegendPos, MAX_POINTS, MAX_SERIES};
+use wordcraft_doc::chart::{ChartAxis, ChartSeries, ChartSpec, ChartType, LegendPos, MAX_POINTS, MAX_SERIES, value_axis};
 use wordcraft_doc::graphic::{Graphic, GraphicKind};
 use wordcraft_doc::para::{Float, InlineObject};
 use wordcraft_doc::props::Rgb;
@@ -33,6 +33,23 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("chart.type", "Change Chart Type", "Chart Design › Type", |s, v| {
             let kind = chart_type(v)?.ok_or_else(|| CmdError::Params(format!("`type` is required: {TYPES}")))?;
             edit(s, |c| {
+                // A scatter series is drawn as markers without a line; the other types draw it.
+                if (c.kind == ChartType::Scatter) != (kind == ChartType::Scatter) {
+                    for series in &mut c.series {
+                        series.no_line = kind == ChartType::Scatter;
+                        if series.no_line && series.markers == Some(false) {
+                            series.markers = None;
+                        }
+                    }
+                }
+                // Pie and doughnut charts have a plain value axis and the other types a new
+                // chart's value axis; an axis left as the old type had it takes the new type's.
+                if c.kind.is_round() != kind.is_round() {
+                    let (from, to) = if kind.is_round() { (value_axis(), ChartAxis::default()) } else { (ChartAxis::default(), value_axis()) };
+                    if c.val_axis == from {
+                        c.val_axis = to;
+                    }
+                }
                 c.kind = kind;
                 Ok(())
             })
@@ -52,12 +69,27 @@ pub fn specs() -> Vec<CommandSpec> {
                     c.categories = cats.clone();
                 }
                 if let Some(series) = &series {
-                    c.series = series.clone();
+                    // Each series keeps the formatting of the one it replaces.
+                    c.series = series
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (name, values))| match c.series.get(i) {
+                            Some(old) => ChartSeries { name: name.clone(), values: values.clone(), ..old.clone() },
+                            None => ChartSeries::new(c.kind, name.clone(), values.clone()),
+                        })
+                        .collect();
                 }
                 Ok(())
             })
         })
         .params(r#"{"data": {"categories"?: [string], "series"?: [{"name": string, "values": [number|null]}]}}"#)
+        .when(has_chart),
+        CommandSpec::new("chart.data", "Chart Data", "Chart Design › Data", |s, _| {
+            let c = selected_chart(s).ok_or_else(|| CmdError::Disabled("select a chart first".into()))?;
+            Ok(chart_data(&c))
+        })
+        .params(r#"{} → {"type", "data": {"categories": [string], "series": [{"name": string, "values": [number|null]}]}, "title": string|null, "legend": "right|left|top|bottom"|null, "dataLabels": bool} (the selected chart, as chart.editData and insert.chart take it)"#)
+        .pure()
         .when(has_chart),
         CommandSpec::new("chart.title", "Chart Title", "Chart Design › Chart Layouts › Add Chart Element", |s, v| {
             let text = match v.get("text") {
@@ -99,6 +131,10 @@ pub fn specs() -> Vec<CommandSpec> {
             let on = p::bool(v, "on").or_else(|| p::bool(v, "value"));
             edit(s, move |c| {
                 c.data_labels = on.unwrap_or(!c.data_labels);
+                // The chart's setting replaces each series' own.
+                for series in &mut c.series {
+                    series.labels = None;
+                }
                 Ok(())
             })
         })
@@ -123,6 +159,18 @@ fn has_chart(s: &Session) -> Option<&'static str> {
         }
         _ => Some("select a chart first"),
     }
+}
+
+/// The chart's model as the chart commands take it: its type, data, title, legend and data labels.
+fn chart_data(c: &ChartSpec) -> Value {
+    let series: Vec<Value> = c.series.iter().map(|x| json!({"name": x.name, "values": x.values})).collect();
+    json!({
+        "type": c.kind.id(),
+        "data": {"categories": c.categories, "series": series},
+        "title": c.title,
+        "legend": c.legend.map(|l| l.id()),
+        "dataLabels": c.data_labels,
+    })
 }
 
 /// The graphic for `spec` drawn `w` × `h` points in the theme's colours.
@@ -152,7 +200,14 @@ fn insert(s: &mut Session, v: &Value) -> CmdResult {
     let mut spec = ChartSpec::sample(kind);
     if let Some(d) = v.get("data") {
         spec.categories = d.get("categories").map(categories).transpose()?.unwrap_or_default();
-        spec.series = d.get("series").map(series_list).transpose()?.unwrap_or_default();
+        spec.series = d
+            .get("series")
+            .map(series_list)
+            .transpose()?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, values)| ChartSeries::new(kind, name, values))
+            .collect();
         if spec.series.is_empty() {
             return Err(CmdError::Params(format!("`data.series` needs at least one series: {DATA}")));
         }
@@ -220,8 +275,8 @@ fn cell_text(v: &Value) -> String {
     }
 }
 
-/// Series from JSON: `[{"name", "values": [number|null|numeric string]}]`.
-fn series_list(v: &Value) -> Result<Vec<ChartSeries>, CmdError> {
+/// Series names and values from JSON: `[{"name", "values": [number|null|numeric string]}]`.
+fn series_list(v: &Value) -> Result<Vec<(String, Vec<Option<f64>>)>, CmdError> {
     let a = v.as_array().ok_or_else(|| CmdError::Params(format!("`series`: {DATA}")))?;
     a.iter()
         .take(MAX_SERIES)
@@ -232,7 +287,7 @@ fn series_list(v: &Value) -> Result<Vec<ChartSeries>, CmdError> {
                 None | Some(Value::Null) => Vec::new(),
                 Some(_) => return Err(CmdError::Params("`values`: an array of numbers (null for none)".into())),
             };
-            Ok(ChartSeries { name, values })
+            Ok((name, values))
         })
         .collect()
 }
