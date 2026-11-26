@@ -10,3 +10,8 @@ plan/
 /craft-fonts/
 # Added by code-review-graph
 .code-review-graph/
+# Machine-specific code-review-graph config (absolute paths)
+/.mcp.json
+/opencode.jsonc
+/.qoder/mcp.json
+/.gemini/
