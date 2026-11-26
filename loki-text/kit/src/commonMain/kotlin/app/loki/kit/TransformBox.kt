@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -178,7 +179,7 @@ class TransformBox(val corners: List<Offset>, val hit: Float = if (isTouchPlatfo
         fun rotated(c: List<Offset>, start: Offset, now: Offset, snap: Boolean): List<Offset> {
             val cx = c.map { it.x }.average().toFloat(); val cy = c.map { it.y }.average().toFloat()
             var a = atan2(now.y - cy, now.x - cx) - atan2(start.y - cy, start.x - cx)
-            if (snap) { val step = (15.0 * Math.PI / 180.0).toFloat(); a = round(a / step) * step }
+            if (snap) { val step = (15.0 * PI / 180.0).toFloat(); a = round(a / step) * step }
             val co = cos(a); val si = sin(a)
             return c.map { Offset(cx + (it.x - cx) * co - (it.y - cy) * si, cy + (it.x - cx) * si + (it.y - cy) * co) }
         }

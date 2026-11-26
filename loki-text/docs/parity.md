@@ -1,11 +1,11 @@
 # Loki Text: parity with the WordCraft desktop front end
 
-Status: 26 November 2026 (after the Tabs, Borders and Shading, and Zoom dialogs). Measured against the engine's own command list (678
+Status: 26 November 2026 (after the first iOS build). Measured against the engine's own command list (678
 commands) and the egui front end (`crates/ui-egui`). Checked by `:app:jvmTest` (`EngineCoverageTest`)
 and looked at with the off-screen screenshot harness at phone (390 dp), tablet (760–800 dp) and
 desktop (1280 dp) widths, light and dark. Android release builds are built and tried on devices (a
-Chromebook and a Fire HD 8). **iOS is scaffolded and has never been compiled**, and the desktop app has
-not been tried as a whole; see [What is left](#what-is-left).
+Chromebook and a Fire HD 8). iOS builds and starts on the simulator (`scripts/build-ios.sh run`) but has not been used
+beyond its start screen, and the desktop app has not been tried as a whole; see [What is left](#what-is-left).
 
 ## How parity is measured
 
@@ -248,7 +248,10 @@ Roughly largest first. Do not assume any of these are solved without checking.
 4. **Smaller gaps.** Zoom, view mode and the other view state are not saved. Alignment guides snap
    to the page, not to other objects. Untitled windows are all listed as "Untitled".
 5. **Platforms and testing.**
-   * iOS: scaffolded, never compiled.
+   * iOS: builds for devices and the simulator and opens on the simulator's start screen. Not tried yet:
+     opening and saving through the document picker (Save asks for the place first, then writes back
+     to it, as Android does), printing, Read Aloud (AVSpeechSynthesizer), the clipboard, and anything
+     on a device. There is no app icon, and no signing set up for a device.
    * Desktop (JVM): the app has not been tried as a whole; tiling, side by side and synchronous
      scrolling are covered only by `DesktopWindowsTest`.
    * Not tried on a device: the Format Shape pane, interface size, most mouse and pen gestures, and

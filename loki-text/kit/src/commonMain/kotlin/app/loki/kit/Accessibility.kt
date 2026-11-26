@@ -57,7 +57,7 @@ fun contrastFailures(scheme: ColorScheme, name: String): List<String> {
     )
     fun fails(pairs: List<Pair<String, Pair<Color, Color>>>, bar: Float) = pairs.mapNotNull { (what, c) ->
         val r = contrastRatio(c.first, c.second)
-        if (r < bar) "$name: $what is ${"%.2f".format(r)}:1, needs $bar:1" else null
+        if (r < bar) "$name: $what is ${fixed(r.toDouble(), 2)}:1, needs $bar:1" else null
     }
     return fails(text, TEXT_CONTRAST) + fails(controls, CONTROL_CONTRAST)
 }

@@ -9,6 +9,9 @@ plugins {
 }
 
 kotlin {
+    // Declared before the targets and the jnaMain edges below, which would otherwise switch the default hierarchy off
+    // and leave iosMain out of the iOS compilations.
+    applyDefaultHierarchyTemplate()
     jvm()
     androidTarget()
 

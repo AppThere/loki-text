@@ -1,0 +1,50 @@
+# The thin iOS host app around the Compose UI. Generate the Xcode project with `xcodegen` in this folder (or let
+# `../scripts/build-ios.sh` do it); the generated LokiText.xcodeproj is build output and not committed.
+name: LokiText
+options:
+  bundleIdPrefix: app.loki
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  LokiText:
+    type: application
+    platform: iOS
+    sources:
+      - LokiText
+    info:
+      path: LokiText/Info.plist
+      properties:
+        CFBundleDisplayName: Loki Text
+        # Compose draws at the display's full refresh rate; it refuses to start without this.
+        CADisableMinimumFrameDurationOnPhone: true
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.loki.text
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # The Kotlin framework, which the build phase below places here for this configuration and SDK.
+        FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../app/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
+        # The framework is static, so the Rust engine it calls (libloki_ffi.a) is linked into the app here.
+        LOKI_RUST_TRIPLE: aarch64-apple-ios
+        LOKI_RUST_TRIPLE[sdk=iphonesimulator*]: aarch64-apple-ios-sim
+        OTHER_LDFLAGS: -framework LokiApp -L$(SRCROOT)/../target/$(LOKI_RUST_TRIPLE)/release -lloki_ffi
+        ARCHS: arm64
+    preBuildScripts:
+      - name: Build the Rust engine and the Kotlin framework
+        script: '"$SRCROOT/../scripts/xcode-build-phase.sh"'
+        basedOnDependencyAnalysis: false
