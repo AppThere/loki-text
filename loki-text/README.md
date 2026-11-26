@@ -28,8 +28,8 @@ cinterop, `app/src/nativeInterop`). New engine features reach the UI with no bin
 
 ## Run
 
-Desktop: `scripts/build-desktop.sh run` (add a Gradle wrapper with
-`gradle wrapper`). Android: `scripts/build-android.sh`, then run `:app:installDebug`. iOS:
+Gradle comes through the wrapper (`./gradlew`). Desktop: `scripts/build-desktop.sh run`. Android:
+`scripts/build-android.sh`, then run `./gradlew :app:installDebug`. iOS:
 `scripts/build-ios.sh`, then a thin Xcode host app calls `MainViewControllerKt.MainViewController()`
 (the Xcode project is not generated yet).
 
