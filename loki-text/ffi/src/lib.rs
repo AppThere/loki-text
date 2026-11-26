@@ -124,16 +124,24 @@ pub unsafe extern "C" fn loki_call(s: *mut LokiSession, method: *const c_char, p
             Err(_) => err("internal error (panic caught) hit-testing the page"),
         };
     }
-    if method == "loki.dropCap" || method == "loki.dateFormats" {
-        // What the app's Drop Cap and Date and Time dialogs open with (see `dialogs`).
+    if matches!(method, "loki.dropCap" | "loki.paraLines" | "loki.dateFormats") {
+        // What the app's Drop Cap, Tabs, Borders and Shading, and Date and Time dialogs open with (see `dialogs`).
         let sess = &session.inner.session;
-        return match catch_unwind(AssertUnwindSafe(
-            || {
-                if method == "loki.dropCap" { dialogs::drop_cap(sess) } else { dialogs::date_formats(&params) }
-            },
-        )) {
+        return match catch_unwind(AssertUnwindSafe(|| match method {
+            "loki.dropCap" => dialogs::drop_cap(sess),
+            "loki.paraLines" => dialogs::para_lines(sess),
+            _ => dialogs::date_formats(&params),
+        })) {
             Ok(v) => reply(json!({"ok": true, "result": v})),
             Err(_) => err("internal error (panic caught) reading a dialog's values"),
+        };
+    }
+    if method == "loki.runSteps" {
+        // A dialog that changes more than one thing is one Undo (see `dialogs`).
+        return match catch_unwind(AssertUnwindSafe(|| dialogs::run_steps(&mut session.inner, &params))) {
+            Ok(Ok(v)) => reply(json!({"ok": true, "result": v})),
+            Ok(Err(e)) => err(e),
+            Err(_) => err("internal error (panic caught) running a dialog's commands"),
         };
     }
     if method == "loki.commandState" {
@@ -315,7 +323,9 @@ fn render_options(sess: &wordcraft_engine::Session) -> wordcraft_render::RenderO
         opts.read_paper = Some(if sepia { wordcraft_render::SEPIA_PAPER } else { wordcraft_doc::props::Rgb::WHITE });
     }
     let in_header_footer = match sess.sel.focus.story {
-        wordcraft_doc::StoryRef::Part(id) => sess.doc.parts.get(&id).is_some_and(|p| matches!(p.kind, wordcraft_doc::PartKind::Header | wordcraft_doc::PartKind::Footer)),
+        wordcraft_doc::StoryRef::Part(id) => {
+            sess.doc.parts.get(&id).is_some_and(|p| matches!(p.kind, wordcraft_doc::PartKind::Header | wordcraft_doc::PartKind::Footer))
+        }
         wordcraft_doc::StoryRef::Body => false,
     };
     opts.display.dim_body = in_header_footer;

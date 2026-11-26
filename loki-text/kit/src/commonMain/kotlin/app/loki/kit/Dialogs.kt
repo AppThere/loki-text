@@ -302,6 +302,8 @@ private fun ShapeEditor(shape: ParamShape, value: String, set: (String, String?)
         is ParamShape.Obj -> if (isChartData(shape.form)) ChartDataGrid(value, set) else ObjectEditor(shape.form, value, set, browse)
         is ParamShape.ListOf -> ListEditor(shape.item, value, set, browse)
         is ParamShape.Tuple -> TupleEditor(shape, value, set)
+        is ParamShape.NamedValues -> NamedValuesEditor(shape, value, set)
+        is ParamShape.Grid -> GridEditor(shape, value, set)
     }
 }
 

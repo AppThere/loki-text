@@ -19,7 +19,8 @@ class StructuredFieldsTest {
         for ((id, field) in listOf(
             "para.tabs" to "tabs", "para.tabs" to "clear", "mailings.filterRecipients" to "rules", "mailings.filterRecipients" to "sort",
             "chart.editData" to "data", "insert.chart" to "data", "smartArt.items" to "items", "tools.customizeKeyboard" to "assign",
-            "tools.customizeKeyboard" to "remove", "design.pageBorders" to "sides", "file.options" to "marks",
+            "tools.customizeKeyboard" to "remove", "design.pageBorders" to "sides", "file.options" to "marks", "references.toc" to "styleLevels",
+            "insert.spreadsheet" to "values", "table.newStyle" to "parts", "table.modifyStyle" to "parts",
         )) assertTrue(shape(id, field) != null, "$id $field is still a JSON box")
     }
 
@@ -28,15 +29,11 @@ class StructuredFieldsTest {
      * (the engine's own, set by pressing on the page), types a doc names without spelling out, and these.
      */
     private val leftAsJson = mapOf(
-        "references.toc styleLevels" to "a map from style names the person picks",
         "mailings.recipients rows" to "the recipient list has its own table editor",
         "mailings.editRecipients rows" to "the recipient list has its own table editor",
         "draw.lasso points" to "drawn on the page",
         "draw.stroke points" to "drawn on the page",
         "select.addObject objects" to "positions",
-        "insert.spreadsheet values" to "rows of any length",
-        "table.newStyle parts" to "a Part with a name added",
-        "table.modifyStyle parts" to "a Part with a name added",
     )
 
     @Test fun everyWrittenOutObjectOrListIsFields() {
