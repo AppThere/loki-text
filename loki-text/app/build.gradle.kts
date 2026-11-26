@@ -142,5 +142,13 @@ compose.desktop {
     }
 }
 
-// Tests that drive the real engine find the library `scripts/build-desktop.sh` builds.
-tasks.withType<Test>().configureEach { systemProperty("loki.lib", "${rootDir}/target/release") }
+// Tests that drive the real engine load target/release/libloki_ffi, so it is rebuilt first: a library older than the
+// engine fails tests with "unknown command" for commands added since. Cargo does nothing when it is up to date.
+val buildEngine by tasks.registering(Exec::class) {
+    workingDir = rootDir
+    commandLine("cargo", "build", "--release", "-p", "loki-ffi")
+}
+tasks.withType<Test>().configureEach {
+    dependsOn(buildEngine)
+    systemProperty("loki.lib", "${rootDir}/target/release")
+}

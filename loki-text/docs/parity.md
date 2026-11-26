@@ -262,9 +262,9 @@ Roughly largest first. Do not assume any of these are solved without checking.
 ```sh
 cd loki-text
 cargo test -p loki-ffi                 # FFI round trip, loki.uiRequests, the command fixture
-gradle :kit:jvmTest :app:jvmTest       # the shared kit; then panes, view state, engine coverage
+./gradlew :kit:jvmTest :app:jvmTest    # the shared kit; then panes, view state, engine coverage
 cargo build -p loki-ffi                # then look at it:
 LOKI_LIB=$PWD/target/debug LOKI_SHOTS=/tmp/shots \
 LOKI_SHOT_SCRIPT='size=390x780@2; wait=3000; shot=phone.png; click=116,66; wait; shot=commands.png' \
-gradle :app:jvmTest --tests '*ScreenshotHarness*' --rerun
+./gradlew :app:jvmTest --tests '*ScreenshotHarness*' --rerun
 ```
