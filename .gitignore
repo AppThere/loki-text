@@ -8,3 +8,5 @@ plan/
 /.claude/
 /target-*/
 /craft-fonts/
+# Added by code-review-graph
+.code-review-graph/
