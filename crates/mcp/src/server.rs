@@ -79,10 +79,7 @@ struct WordcraftTools {
 
 impl Tools for WordcraftTools {
     fn instructions(&self) -> String {
-        format!(
-            "{INSTRUCTIONS} Backend: {}. Community: https://discord.gg/artcraft · https://getartcraft.com/apps/wordcraft · https://github.com/storytold/wordcraft",
-            self.backend.describe()
-        )
+        format!("{INSTRUCTIONS} Backend: {}. Source: https://github.com/AppThere/loki-text", self.backend.describe())
     }
 
     fn list(&mut self) -> Vec<Value> {
@@ -126,7 +123,7 @@ impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
         let info = Info { name: "wordcraft", title: "WordCraft", version: env!("CARGO_PKG_VERSION"), max_line: MAX_REQUEST_LINE };
         let options = Options {
-            website_url: Some("https://getartcraft.com/apps/wordcraft".into()),
+            website_url: Some("https://github.com/AppThere/loki-text".into()),
             // Clients read every tool failure from the result, as before the shared core.
             tool_errors_as_results: true,
             strict_request_ids: true,

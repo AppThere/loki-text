@@ -741,14 +741,12 @@ fn about_stays_at_the_bottom_of_a_side_menu_that_fits() {
     assert!(about.max.y <= 900.0, "About is inside the window: {about:?}");
     // The menu is as tall as the window, so its footer is at the window's foot, not under Options.
     assert!(about.max.y > 820.0, "About is at the foot of the window: {about:?}");
-    let discord = h.get_by_label("Discord community").rect();
-    assert!(discord.max.y <= about.min.y + 1.0, "the community link is above About: {discord:?} {about:?}");
     assert!((about.min.x - options.min.x).abs() < 1.0 && about.width() > 80.0, "About spans the menu: {about:?}");
     assert!((about.min.x - options.min.x).abs() < 1.0, "in the same column: {about:?} {options:?}");
 }
 
 /// The side menu is production's rail: 200 pt wide (five rail columns, `LeastWidth::SideMenu`), its page rows about
-/// 38 pt tall one after another. The footer's links are rows of the same place, so they read in the rail's white ink;
+/// 38 pt tall one after another. The footer's link is a row of the same place, so they read in the rail's white ink;
 /// production's were a little shorter (32 pt), which the side menu place has no row for.
 #[test]
 fn the_side_menu_rows_are_production_s_rail_rows() {

@@ -8,11 +8,6 @@ use craft::print::ui::Feedback;
 
 /// The title bar's search field.
 const SEARCH_NAME: &str = "Search commands and help";
-/// The title bar's community button.
-const DISCORD_TITLE_NAME: &str = "Discord";
-/// The community link of the File page's menu.
-const DISCORD_LINK_NAME: &str = "Discord community";
-
 /// What a job of the test spooler does when it runs.
 #[derive(Clone)]
 enum Reply {
@@ -261,25 +256,6 @@ fn focus_esc_collapses_the_selection_first_then_leaves() {
     assert!(!h.state().session.view.focus_mode, "the second Escape leaves Focus");
 }
 
-/// The Options toggle hides the community pill in the title bar; the backstage menu's
-/// Discord link hides with it — one setting, everywhere the link shows.
-///
-/// The File page fills the window in place of the title bar (`AppShell::page`, ch.C5), so the title bar's button is
-/// read in the editor window and the link on the File page.
-#[test]
-fn the_community_button_off_hides_the_backstage_discord_link_too() {
-    for show in [true, false] {
-        let mut a = app();
-        a.ui.show_discord = show;
-        let mut h = harness(a);
-        h.run_steps(2);
-        assert_eq!(h.query_by_label(DISCORD_TITLE_NAME).is_some(), show, "show {show}: the title bar's community button follows the setting");
-        h.state_mut().run("ui.backstage", json!({"value": true})).unwrap();
-        h.run_steps(2);
-        assert_eq!(h.query_by_label(DISCORD_LINK_NAME).is_some(), show, "show {show}: the File page's link honors the same setting");
-    }
-}
-
 /// #766: started with nothing to open, the app shows File › Home (the Start screen) as Word
 /// does. #1129: no document is open behind it, so Esc (or Back) shows an empty window, with
 /// no page, the ribbon greyed out but for Help, and nothing to save on close. With the setting
@@ -310,7 +286,7 @@ fn start_screen_shows_file_home_and_esc_leaves_no_document() {
     for id in ["format.bold", "text.insert", "file.save", "file.saveAs", "file.print", "edit.paste", "insert.table", "ui.print"] {
         assert!(!enabled(&ctx, id), "{id} is off with no document");
     }
-    for id in ["file.new", "file.open", "ui.backstage", "ui.tab", "ui.discord", "file.options", "ui.theme", "ui.statusCount"] {
+    for id in ["file.new", "file.open", "ui.backstage", "ui.tab", "file.options", "ui.theme", "ui.statusCount"] {
         assert!(enabled(&ctx, id), "{id} works with no document");
     }
     assert!(!crate::chrome::qat_enabled(&ctx, a, "file.save"));

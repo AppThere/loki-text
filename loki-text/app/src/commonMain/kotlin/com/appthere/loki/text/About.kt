@@ -36,7 +36,7 @@ const val APP_VERSION = "0.1.0"
 /** The engine's credit line, as in the WordCraft NOTICE. */
 internal const val ENGINE_CREDIT = "Copyright (c) 2026 ArtCraft Team and the WordCraft contributors."
 
-internal const val ENGINE_URL = "https://getartcraft.com/apps/wordcraft"
+internal const val ENGINE_URL = "https://github.com/storytold/wordcraft"
 
 /** Material this app depends on, with the license each is used under. The engine's own bundled material is in its NOTICE. */
 internal val THIRD_PARTY = listOf(
@@ -68,7 +68,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 SelectionContainer {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Heading("Editing engine")
-                        Text("$APP_NAME is built on WordCraft, the open-source word processing engine from the ArtCraft team.", style = MaterialTheme.typography.bodyMedium)
+                        Text("$APP_NAME is built on WordCraft, an open-source word processing engine.", style = MaterialTheme.typography.bodyMedium)
                         Text(ENGINE_CREDIT, style = MaterialTheme.typography.bodySmall)
                         Text(ENGINE_URL, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
 
