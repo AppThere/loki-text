@@ -160,7 +160,7 @@ class Icons(unittest.TestCase):
     def test_only_the_engines_own_commands_are_mapped(self):
         cmd = lambda i: {"id": i, "label": i, "menu": ["Edit"], "params": "{}", "mutates": True, "shortcut": None}
         model = {"commands": [cmd("edit.undo"), cmd("ui.bold"), cmd("edit.flashFill")], "tools": []}
-        kt = e.gen_icons("app.loki.x", model)
+        kt = e.gen_icons("com.appthere.loki.x", model)
         self.assertIn('"edit.undo" -> Lucide.Undo2', kt)
         self.assertNotIn("ui.bold", kt)
         self.assertIn('UNDO_COMMAND = "edit.undo"', kt)
@@ -175,14 +175,14 @@ class Chrome(unittest.TestCase):
 
     def test_the_app_parts_file_is_written_once(self):
         with tempfile.TemporaryDirectory() as out:
-            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "1", "--chrome", "workspace", "--package", "app.loki.x"]), 0)
-            parts = os.path.join(out, "app/src/commonMain/kotlin/app/loki/x/AppParts.kt")
+            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "1", "--chrome", "workspace", "--package", "com.appthere.loki.x"]), 0)
+            parts = os.path.join(out, "app/src/commonMain/kotlin/com/appthere/loki/x/AppParts.kt")
             with open(parts, "a", encoding="utf-8") as f:
                 f.write("// mine\n")
-            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "1", "--chrome", "workspace", "--package", "app.loki.x"]), 0)
+            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "1", "--chrome", "workspace", "--package", "com.appthere.loki.x"]), 0)
             with open(parts, encoding="utf-8") as f:
                 self.assertTrue(f.read().endswith("// mine\n"))
-            with open(os.path.join(out, "app/src/commonMain/kotlin/app/loki/x/App.kt"), encoding="utf-8") as f:
+            with open(os.path.join(out, "app/src/commonMain/kotlin/com/appthere/loki/x/App.kt"), encoding="utf-8") as f:
                 app = f.read()
             self.assertIn("CanvasWorkspace(", app)
             self.assertIn('START_THEME = "dark"', app)
@@ -206,7 +206,7 @@ class DialogTargets(unittest.TestCase):
 
     def test_the_registry_says_which(self):
         ds = [self.dialog("save", "file.save"), self.dialog("adjust"), self.dialog("row")]
-        text = e.gen_dialog_index("app.loki.x", ds, self.BY_ID, {"Adjust": "image.adjust"})
+        text = e.gen_dialog_index("com.appthere.loki.x", ds, self.BY_ID, {"Adjust": "image.adjust"})
         self.assertIn("class TranslatedDialog(val title: String, val source: String, val command: String? = null, val hidden: Boolean = false", text)
         rows = [l for l in text.split("\n") if l.lstrip().startswith("TranslatedDialog(\"")]
         self.assertEqual(len(rows), 3)
@@ -232,10 +232,10 @@ class DialogTargets(unittest.TestCase):
 
     def test_a_generated_project_carries_the_wiring_test(self):
         with tempfile.TemporaryDirectory() as out:
-            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "3", "--package", "app.loki.x"]), 0)
-            with open(os.path.join(out, "app/src/jvmTest/kotlin/app/loki/x/DialogsWiredTest.kt"), encoding="utf-8") as f:
+            self.assertEqual(e.main(["--repo", REPO, "--commands", FIXTURE, "--out", out, "--max-dialogs", "3", "--package", "com.appthere.loki.x"]), 0)
+            with open(os.path.join(out, "app/src/jvmTest/kotlin/com/appthere/loki/x/DialogsWiredTest.kt"), encoding="utf-8") as f:
                 self.assertIn("noDialogInTheMenuRunsNothing", f.read())
-            with open(os.path.join(out, "app/src/commonMain/kotlin/app/loki/x/dialogs/TranslatedDialogs.kt"), encoding="utf-8") as f:
+            with open(os.path.join(out, "app/src/commonMain/kotlin/com/appthere/loki/x/dialogs/TranslatedDialogs.kt"), encoding="utf-8") as f:
                 self.assertIn("hidden", f.read())
 
 

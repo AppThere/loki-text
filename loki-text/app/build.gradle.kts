@@ -68,10 +68,10 @@ kotlin {
 }
 
 android {
-    namespace = "app.loki.text"
+    namespace = "com.appthere.loki.text"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.loki.text"
+        applicationId = "com.appthere.loki.text"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -93,7 +93,7 @@ android {
 }
 
 compose.resources {
-    packageOfResClass = "app.loki.text.res"
+    packageOfResClass = "com.appthere.loki.text.res"
 }
 
 // Interface translations live in storytold/craft-i18n (the commit in ../../craft-i18n.rev), as the desktop front end's
@@ -104,8 +104,12 @@ val copyI18n by tasks.registering {
     val src = providers.environmentVariable("CRAFT_I18N_DIR").orNull?.let { file("$it/locales") }
     inputs.property("source", src?.path ?: "")
     outputs.dir(i18nOut)
+    // With no catalogs to read, run every time so that every build shows the warning below.
+    outputs.upToDateWhen { src?.isDirectory == true }
     doLast {
         val out = i18nOut.asFile
+        // Start empty: catalogs left from an earlier build would still be packaged.
+        out.deleteRecursively()
         out.mkdirs()
         val codes = mutableListOf<String>()
         src?.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name }?.forEach { dir ->
@@ -116,15 +120,25 @@ val copyI18n by tasks.registering {
             codes += dir.name
         }
         File(out, "locales.txt").writeText(codes.joinToString("\n"))
+        if (codes.isEmpty()) {
+            val reason = if (src == null) "CRAFT_I18N_DIR is not set" else "no catalogs found in $src"
+            logger.warn("WARNING: this build is English only: $reason.")
+        }
     }
 }
 // Every task that reads the shared resources (Compose's copies and its resource accessors) waits for the catalogs.
 tasks.matching { it.name != "copyI18n" && (it.name.contains("ComposeResources") || it.name.contains("ValueResources") || it.name.contains("ResourceAccessors")) }
     .configureEach { dependsOn(copyI18n) }
+// Compose's copy into the Android assets keeps files its source no longer has, such as removed catalogs: start it empty.
+tasks.matching { it.name.startsWith("copy") && it.name.endsWith("ComposeResourcesToAndroidAssets") }
+    .configureEach {
+        val copied = outputs.files
+        doFirst { copied.forEach { it.deleteRecursively() } }
+    }
 
 compose.desktop {
     application {
-        mainClass = "app.loki.text.MainKt"
+        mainClass = "com.appthere.loki.text.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Loki Text"

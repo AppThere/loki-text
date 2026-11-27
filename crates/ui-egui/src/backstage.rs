@@ -160,7 +160,6 @@ fn activated<K, E>(events: Vec<CollectionEvent<K, E>>) -> Vec<K> {
 struct MenuChoice {
     page: RefCell<Option<&'static str>>,
     about: Cell<bool>,
-    discord: Cell<bool>,
 }
 
 /// The File page, shown in the shell's page slot: the side menu and the active page. Without a
@@ -190,10 +189,9 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut BodyCx<'_>, app: &mut WordApp) {
     let page_band = (band - craft::ui::contract::pad_of(&craft::ui::runtime::env::Env::of(ui).tokens, Pad::Page)).max(0.0);
     let choice = MenuChoice::default();
     let current = app.ui.backstage_page.clone();
-    let show_discord = app.ui.show_discord;
     // The row starts at the reading start, so the side menu is at the right in a mirrored interface.
     let _ = Row::new().fill().show(ui, |ui, _| {
-        side_menu(ui, band, &current, has_document, show_discord, &choice);
+        side_menu(ui, band, &current, has_document, &choice);
         let print = current == "print";
         // Stacked rows' spacing between a page's controls, as production's (Browse… over Browse in WordCraft…).
         // The page stands on the window's background (production's `t.ribbon`, #f9f9f9 light), not the white panel,
@@ -213,9 +211,6 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut BodyCx<'_>, app: &mut WordApp) {
     }
     if choice.about.get() {
         let _ = crate::dialogs::open(app, "about", &json!({}));
-    }
-    if choice.discord.get() {
-        let _ = app.run("ui.discord", json!({}));
     }
 }
 
@@ -240,9 +235,8 @@ fn page_body(ui: &mut Ui, app: &mut WordApp, page: &str) {
 }
 
 /// The side menu: Back, one button per page (the page buttons are one inspected region, from which
-/// the keytips take their rects), then About and the community link unless the user turned the
-/// community button off, as the title bar's pill does.
-fn side_menu(ui: &mut Ui, band: f32, current: &str, has_document: bool, show_discord: bool, choice: &MenuChoice) {
+/// the keytips take their rects), then About.
+fn side_menu(ui: &mut Ui, band: f32, current: &str, has_document: bool, choice: &MenuChoice) {
     // At least the side menu's width and as tall as the window, About at its foot (production's 200 pt full-height
     // rail); its rows are the side menu place's (production's 38 pt rows of 14 pt names).
     let _ = Stack::new()
@@ -256,7 +250,7 @@ fn side_menu(ui: &mut Ui, band: f32, current: &str, has_document: bool, show_dis
             ui.add_space(band);
             let _ = IconButton::command(IconSpec::svg(IconId::new("chevronLeft")), BackstagePageCommand::Back).show(ui);
         })
-        // The community link above About, both at the reading start, as production's bottom links: rows of the side
+        // About at the reading start, as production's bottom links: a row of the side
         // menu place too, so they read in the rail's white ink over the brand colour, not a panel button's dark ink.
         .footer(move |ui, _| {
             with_env(
@@ -264,7 +258,7 @@ fn side_menu(ui: &mut Ui, band: f32, current: &str, has_document: bool, show_dis
                 |overrides| {
                     overrides.values.set(ControlPlace::SideMenu);
                 },
-                |ui| footer_links(ui, show_discord, choice),
+                |ui| footer_links(ui, choice),
             );
         })
         .show(ui, |ui, _| {
@@ -281,20 +275,8 @@ fn side_menu(ui: &mut Ui, band: f32, current: &str, has_document: bool, show_dis
         });
 }
 
-/// The side menu's foot: the community link (unless the user turned it off) above About.
-fn footer_links(ui: &mut Ui, show_discord: bool, choice: &MenuChoice) {
-    if show_discord
-        && clicked(
-            &Button::new(label("Discord community"))
-                .id_salt("backstage-discord")
-                .variant(Variant::GHOST)
-                .sizing(Sizing::FillWidth)
-                .align(HAlign::Start)
-                .show(ui),
-        )
-    {
-        choice.discord.set(true);
-    }
+/// The side menu's foot: About.
+fn footer_links(ui: &mut Ui, choice: &MenuChoice) {
     if clicked(
         &Button::new(label("About")).id_salt("backstage-about").variant(Variant::GHOST).sizing(Sizing::FillWidth).align(HAlign::Start).show(ui),
     ) {

@@ -23,4 +23,4 @@ xcodebuild -project iosApp/LokiText.xcodeproj -scheme LokiText -configuration De
 app="$derived/Build/Products/Debug-iphonesimulator/LokiText.app"
 xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl install "$device" "$app"
-xcrun simctl launch "$device" app.loki.text
+xcrun simctl launch "$device" com.appthere.loki.text

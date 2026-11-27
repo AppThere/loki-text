@@ -1,0 +1,4 @@
+# The wrapper scripts need their own line endings on every checkout.
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary

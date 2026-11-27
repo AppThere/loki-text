@@ -93,7 +93,6 @@ pub struct Prefs {
     /// Headings whose sub-headings the Navigation pane hides (#1997); per session, not saved.
     #[serde(skip)]
     pub nav_collapsed: std::collections::HashSet<wordcraft_doc::Path>,
-    pub show_discord: bool,
     /// User name (File › Options) for comments and tracked changes. `None` (no saved name) keeps
     /// the default; a saved empty name stays empty (#4368).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -199,7 +198,6 @@ impl Default for Prefs {
             pane_places: Default::default(),
             pane_order: Vec::new(),
             nav_collapsed: Default::default(),
-            show_discord: true,
             author: None,
             language: i18n::AUTO.into(),
             editing: wordcraft_engine::Prefs::default(),
