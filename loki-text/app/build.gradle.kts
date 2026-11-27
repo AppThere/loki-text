@@ -68,10 +68,10 @@ kotlin {
 }
 
 android {
-    namespace = "app.loki.text"
+    namespace = "com.appthere.loki.text"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.loki.text"
+        applicationId = "com.appthere.loki.text"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -93,7 +93,7 @@ android {
 }
 
 compose.resources {
-    packageOfResClass = "app.loki.text.res"
+    packageOfResClass = "com.appthere.loki.text.res"
 }
 
 // Interface translations live in storytold/craft-i18n (the commit in ../../craft-i18n.rev), as the desktop front end's
@@ -138,7 +138,7 @@ tasks.matching { it.name.startsWith("copy") && it.name.endsWith("ComposeResource
 
 compose.desktop {
     application {
-        mainClass = "app.loki.text.MainKt"
+        mainClass = "com.appthere.loki.text.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Loki Text"

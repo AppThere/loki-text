@@ -8,8 +8,8 @@ plugins {
     alias(libs.plugins.androidLibrary)
 }
 
-// The coordinates another Craft app depends on (`app.loki:kit`), by composite build or once published.
-group = "app.loki"
+// The coordinates another Craft app depends on (`com.appthere.loki:kit`), by composite build or once published.
+group = "com.appthere.loki"
 version = "0.1.0"
 
 kotlin {
@@ -44,13 +44,13 @@ kotlin {
 }
 
 android {
-    namespace = "app.loki.kit"
+    namespace = "com.appthere.loki.kit"
     compileSdk = 35
     defaultConfig { minSdk = 26 }
 }
 
 // The interface font (composeResources/font) every Craft front end shares.
 compose.resources {
-    packageOfResClass = "app.loki.kit.res"
+    packageOfResClass = "com.appthere.loki.kit.res"
     generateResClass = always
 }

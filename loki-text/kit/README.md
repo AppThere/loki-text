@@ -1,7 +1,7 @@
 # Loki Kit
 
 What every Craft front end of this kind shares, as one Kotlin Multiplatform module
-(`app.loki:kit`, package `app.loki.kit`). It knows nothing about any one engine. An app gives it
+(`com.appthere.loki:kit`, package `com.appthere.loki.kit`). It knows nothing about any one engine. An app gives it
 two things:
 
 * an `EngineTransport`: the one JSON call of the engine's C ABI (`loki_call`), from the app's own
@@ -60,7 +60,7 @@ the kit has a home of its own, include this build and depend on the coordinates:
 includeBuild("../loki-text/loki-text")          // wherever this folder is checked out
 
 // build.gradle.kts, commonMain
-implementation("app.loki:kit")
+implementation("com.appthere.loki:kit")
 ```
 
 Then, in the app:

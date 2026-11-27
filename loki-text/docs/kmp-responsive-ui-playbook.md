@@ -440,7 +440,7 @@ common code can be developed and tested on any machine with a JDK and Rust.
 
 ## 8. What to depend on, copy, adapt and rewrite
 
-The engine-agnostic parts are a module, **Loki Kit** ([`../kit`](../kit/README.md), `app.loki:kit`):
+The engine-agnostic parts are a module, **Loki Kit** ([`../kit`](../kit/README.md), `com.appthere.loki:kit`):
 depend on it, do not copy it. Loki Text is about 9,200 lines of common Kotlin on top of 1,300 in
 the kit and 500 of Rust.
 
@@ -483,7 +483,7 @@ Not done; recommendations for whoever starts the second app.
 
 * **The kit exists** ([`../kit`](../kit/README.md)); it lives inside Loki Text for now. Its own
   repository, and whether it is published or included as a build, is the owner's decision. Until
-  then another app includes this build (`includeBuild`) and depends on `app.loki:kit`.
+  then another app includes this build (`includeBuild`) and depends on `com.appthere.loki:kit`.
 * **Finish the kit** with the second app: the ribbon's composables and the app shell (§8, second
   column) are the largest pieces still copied.
 * **Share the FFI shape too.** The six functions, `catch_unwind`, the reply format and the hostile

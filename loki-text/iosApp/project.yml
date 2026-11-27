@@ -2,7 +2,7 @@
 # `../scripts/build-ios.sh` do it); the generated LokiText.xcodeproj is build output and not committed.
 name: LokiText
 options:
-  bundleIdPrefix: app.loki
+  bundleIdPrefix: com.appthere.loki
   deploymentTarget:
     iOS: "16.0"
 settings:
@@ -34,7 +34,7 @@ targets:
           - UIInterfaceOrientationLandscapeRight
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.loki.text
+        PRODUCT_BUNDLE_IDENTIFIER: com.appthere.loki.text
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         # The Kotlin framework, which the build phase below places here for this configuration and SDK.

@@ -42,7 +42,7 @@ class Doc(unittest.TestCase):
         self.assertEqual(list(keys('{a?: "x}y", b?: bool}')), ["a", "b"])
 
 
-DIALOG = '''package app.loki.x.dialogs
+DIALOG = '''package com.appthere.loki.x.dialogs
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -86,7 +86,7 @@ fun FindFindDialog(onRun: (command: String, params: JsonObject) -> Unit, onDismi
 }
 '''
 
-SORT = '''package app.loki.x.dialogs
+SORT = '''package com.appthere.loki.x.dialogs
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
