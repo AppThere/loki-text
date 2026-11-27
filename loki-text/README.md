@@ -29,7 +29,8 @@ cinterop, `app/src/nativeInterop`). New engine features reach the UI with no bin
 ## Run
 
 Gradle comes through the wrapper (`./gradlew`). Desktop: `scripts/build-desktop.sh run`. Android:
-`scripts/build-android.sh`, then run `./gradlew :app:installDebug`. iOS (needs Xcode and XcodeGen):
+`scripts/build-android.sh`, then run `./gradlew :app:installDebug` (set `ANDROID_HOME` first when you call
+Gradle directly for Android). iOS (needs Xcode and XcodeGen):
 `scripts/build-ios.sh run` builds the engine and the app and starts it on a simulator. The thin host
 app in `iosApp/` calls `MainViewControllerKt.MainViewController()`; its Xcode project is generated
 from `iosApp/project.yml` and rebuilds both libraries in its build phase.
