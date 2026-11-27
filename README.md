@@ -35,7 +35,7 @@ These are goals. The next section says how far along each platform is.
 |---|---|
 | Android and ChromeOS | Release builds have been tried on a Chromebook and a Fire HD 8 tablet. Several features are still untried on a device ([#49](https://github.com/AppThere/loki-text/issues/49)). |
 | Desktop (JVM) | Builds and runs; not yet tried as a whole ([#48](https://github.com/AppThere/loki-text/issues/48)). |
-| iOS | Scaffolded; never compiled ([#47](https://github.com/AppThere/loki-text/issues/47)). |
+| iOS | Builds, and opens on the simulator; otherwise untried, including on a real device ([#47](https://github.com/AppThere/loki-text/issues/47)). |
 
 All of the engine's commands can be reached from the app. Many open a form generated from their
 parameters instead of a dedicated dialog
@@ -46,7 +46,8 @@ left, is in [loki-text/docs/parity.md](loki-text/docs/parity.md). Open work is i
 ## Build Loki Text
 
 You need Rust 1.95 or later (through [rustup](https://rustup.rs)) and JDK 21. Android builds also
-need the Android SDK and NDK. Gradle comes with the repository's wrapper.
+need the Android SDK and NDK; iOS builds need macOS, Xcode and XcodeGen. Gradle comes with the
+repository's wrapper.
 
 ```sh
 git clone https://github.com/AppThere/loki-text
@@ -55,6 +56,7 @@ cd loki-text/loki-text
 scripts/build-desktop.sh run                  # desktop: build and run
 scripts/build-android.sh                      # Android: debug APK
 VARIANT=Release scripts/build-android.sh      # Android: release APK, signed with the debug key
+scripts/build-ios.sh run                      # iOS: build and start on a simulator (macOS only)
 ```
 
 The Android script prints where it wrote the APK and the `adb install` command for it. It builds for
